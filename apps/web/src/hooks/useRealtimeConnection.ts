@@ -8,6 +8,7 @@ interface RealtimeHandlers {
   onSessionInvalid: () => void;
   onPresenceSnapshot: (onlineUserIds: string[]) => void;
   onPresenceChanged: (userId: string, online: boolean) => void;
+  onUsersChanged: (userId: string) => void;
   onMessageCreated: (message: Message) => void;
   onUnreadChanged: (conversationId: string, unreadCount: number) => void;
   onConversationChanged: (conversationId: string) => void;
@@ -17,6 +18,7 @@ interface RealtimeHandlers {
 type RealtimeEvent =
   | { type: "presence.snapshot"; payload: { onlineUserIds: string[] } }
   | { type: "presence.changed"; payload: { userId: string; online: boolean } }
+  | { type: "users.changed"; payload: { userId: string } }
   | { type: "message.created"; payload: { message: Message } }
   | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } }
   | { type: "conversation.changed"; payload: { conversationId: string } }
@@ -79,6 +81,10 @@ function parseRealtimeEvent(raw: string): RealtimeEvent | null {
               type: event.type,
               payload: { userId: payload.userId, online: payload.online },
             }
+          : null;
+      case "users.changed":
+        return typeof payload.userId === "string"
+          ? { type: event.type, payload: { userId: payload.userId } }
           : null;
       case "message.created":
         return isMessage(payload.message)
@@ -144,6 +150,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "presence.changed":
             current.onPresenceChanged(event.payload.userId, event.payload.online);
+            break;
+          case "users.changed":
+            current.onUsersChanged(event.payload.userId);
             break;
           case "message.created":
             current.onMessageCreated(event.payload.message);

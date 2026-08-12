@@ -40,7 +40,7 @@ export function createApp(realtime: RealtimeHub) {
   // 保留第一阶段健康地址，兼容已有 Docker Compose 和运维脚本。
   app.get("/api/health", readiness);
 
-  app.use("/api", createAuthRouter());
+  app.use("/api", createAuthRouter(realtime));
   app.use("/api", createChatRouter(realtime));
   app.use("/api", createFileRouter());
   app.use("/api", createAdminRouter(realtime));

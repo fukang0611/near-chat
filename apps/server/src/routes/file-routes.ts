@@ -5,9 +5,11 @@ import multer from "multer";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { config } from "../config.js";
-import { query } from "../database.js";
+import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { minio } from "../minio.js";
+import { removeAttachmentObject } from "../attachment-cleanup.js";
+import { retryOperation } from "../retry.js";
 
 interface AttachmentRow {
   id: string;
@@ -18,6 +20,7 @@ interface AttachmentRow {
   original_name: string;
   content_type: string;
   size_bytes: string;
+  state: "PENDING" | "READY" | "CLEANING" | "CLEANUP_FAILED";
 }
 
 function safeFileName(name: string): string {
@@ -38,7 +41,7 @@ function safeFileName(name: string): string {
 async function findAttachment(fileId: string): Promise<AttachmentRow | null> {
   const result = await query<AttachmentRow>(
     `SELECT id, uploader_id, message_id, bucket_name, object_key,
-            original_name, content_type, size_bytes
+            original_name, content_type, size_bytes, state
        FROM attachments
       WHERE id = $1`,
     [fileId],
@@ -57,6 +60,7 @@ export function createFileRouter() {
   router.post("/files", authenticate, upload.single("file"), async (request, response) => {
     const user = currentUser(request);
     if (!request.file) throw new ApiError(400, "请选择文件");
+    const uploadedFile = request.file;
 
     const attachmentId = randomUUID();
     const now = new Date();
@@ -66,19 +70,31 @@ export function createFileRouter() {
       String(now.getUTCMonth() + 1).padStart(2, "0"),
       attachmentId,
     ].join("/");
-    const originalName = safeFileName(request.file.originalname);
-    const contentType = request.file.mimetype || "application/octet-stream";
+    const originalName = safeFileName(uploadedFile.originalname);
+    const contentType = uploadedFile.mimetype || "application/octet-stream";
 
-    await minio.putObject(config.minio.bucket, objectKey, request.file.buffer, request.file.size, {
-      "Content-Type": contentType,
-    });
-
-    try {
-      await query(
+    // 用户级事务锁让并发上传的配额检查和预留保持原子性。
+    await transaction(async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [user.id]);
+      const usage = await client.query<{ used_bytes: string }>(
+        `SELECT COALESCE(SUM(size_bytes), 0)::text AS used_bytes
+           FROM attachments
+          WHERE uploader_id = $1`,
+        [user.id],
+      );
+      const usedBytes = Number(usage.rows[0]?.used_bytes ?? 0);
+      if (usedBytes + uploadedFile.size > config.fileUserQuotaBytes) {
+        const remainingMb = Math.max(
+          0,
+          Math.floor((config.fileUserQuotaBytes - usedBytes) / 1024 / 1024),
+        );
+        throw new ApiError(413, `个人文件空间不足，当前剩余约 ${remainingMb} MB`);
+      }
+      await client.query(
         `INSERT INTO attachments
              (id, uploader_id, bucket_name, object_key, original_name,
-              content_type, size_bytes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+              content_type, size_bytes, state)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING')`,
         [
           attachmentId,
           user.id,
@@ -86,12 +102,38 @@ export function createFileRouter() {
           objectKey,
           originalName,
           contentType,
-          request.file.size,
+          uploadedFile.size,
         ],
       );
+    });
+
+    try {
+      await retryOperation(
+        () =>
+          minio.putObject(config.minio.bucket, objectKey, uploadedFile.buffer, uploadedFile.size, {
+            "Content-Type": contentType,
+          }),
+        { attempts: config.storageRetryAttempts, delayMs: 500 },
+      );
+      await query(
+        `UPDATE attachments
+            SET state = 'READY', state_updated_at = NOW()
+          WHERE id = $1`,
+        [attachmentId],
+      );
     } catch (error) {
-      // 元数据写入失败时回收刚上传的对象，避免产生不可见的孤儿文件。
-      await minio.removeObject(config.minio.bucket, objectKey).catch(() => undefined);
+      // 失败记录交给清理器继续重试，避免对象已写入但元数据丢失。
+      await query(
+        `UPDATE attachments
+            SET state = 'CLEANUP_FAILED', state_updated_at = NOW()
+          WHERE id = $1`,
+        [attachmentId],
+      ).catch(() => undefined);
+      await removeAttachmentObject({
+        id: attachmentId,
+        bucket_name: config.minio.bucket,
+        object_key: objectKey,
+      }).catch(() => undefined);
       throw error;
     }
 
@@ -100,8 +142,24 @@ export function createFileRouter() {
         id: attachmentId,
         originalName,
         contentType,
-        sizeBytes: request.file.size,
+        sizeBytes: uploadedFile.size,
       },
+    });
+  });
+
+  router.get("/files/quota", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const result = await query<{ used_bytes: string }>(
+      `SELECT COALESCE(SUM(size_bytes), 0)::text AS used_bytes
+         FROM attachments
+        WHERE uploader_id = $1`,
+      [user.id],
+    );
+    const usedBytes = Number(result.rows[0]?.used_bytes ?? 0);
+    response.json({
+      usedBytes,
+      quotaBytes: config.fileUserQuotaBytes,
+      remainingBytes: Math.max(0, config.fileUserQuotaBytes - usedBytes),
     });
   });
 
@@ -109,7 +167,7 @@ export function createFileRouter() {
     const user = currentUser(request);
     const fileId = z.string().uuid().parse(request.params.fileId);
     const file = await findAttachment(fileId);
-    if (!file) throw new ApiError(404, "文件不存在");
+    if (!file || file.state !== "READY") throw new ApiError(404, "文件不存在或尚未就绪");
 
     if (file.message_id) {
       const access = await query(
@@ -127,13 +185,16 @@ export function createFileRouter() {
     const download = request.query.download === "1";
     const disposition =
       download || !file.content_type.startsWith("image/") ? "attachment" : "inline";
+    const stream = await retryOperation(() => minio.getObject(file.bucket_name, file.object_key), {
+      attempts: config.storageRetryAttempts,
+      delayMs: 350,
+    });
     response.setHeader("Content-Type", file.content_type);
     response.setHeader("Content-Length", file.size_bytes);
     response.setHeader(
       "Content-Disposition",
       `${disposition}; filename*=UTF-8''${encodeURIComponent(file.original_name)}`,
     );
-    const stream = await minio.getObject(file.bucket_name, file.object_key);
     stream.on("error", (error) => response.destroy(error));
     stream.pipe(response);
   });
@@ -141,17 +202,43 @@ export function createFileRouter() {
   router.delete("/files/:fileId", authenticate, async (request, response) => {
     const user = currentUser(request);
     const fileId = z.string().uuid().parse(request.params.fileId);
-    const file = await findAttachment(fileId);
+    const file = await transaction(async (client) => {
+      const result = await client.query<AttachmentRow>(
+        `SELECT id, uploader_id, message_id, bucket_name, object_key,
+                original_name, content_type, size_bytes, state
+           FROM attachments
+          WHERE id = $1
+          FOR UPDATE`,
+        [fileId],
+      );
+      const candidate = result.rows[0];
+      if (!candidate) return null;
+      if (candidate.uploader_id !== user.id || candidate.message_id) {
+        throw new ApiError(409, "已发送的附件不能移除");
+      }
+      await client.query(
+        `UPDATE attachments
+            SET state = 'CLEANING', state_updated_at = NOW()
+          WHERE id = $1`,
+        [fileId],
+      );
+      return candidate;
+    });
     if (!file) {
       response.status(204).end();
       return;
     }
-    if (file.uploader_id !== user.id || file.message_id) {
-      throw new ApiError(409, "已发送的附件不能移除");
+    try {
+      await removeAttachmentObject(file);
+    } catch (error) {
+      await query(
+        `UPDATE attachments
+            SET state = 'CLEANUP_FAILED', state_updated_at = NOW()
+          WHERE id = $1 AND message_id IS NULL`,
+        [file.id],
+      );
+      throw error;
     }
-
-    await minio.removeObject(file.bucket_name, file.object_key);
-    await query("DELETE FROM attachments WHERE id = $1", [fileId]);
     response.status(204).end();
   });
 

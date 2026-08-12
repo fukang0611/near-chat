@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS conversations (
   name VARCHAR(80),
   avatar_color VARCHAR(20) NOT NULL DEFAULT '#5B6EE1',
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 兼容第一阶段已经创建的数据库：旧表只允许单聊，且 direct_key 不可为空。
@@ -66,6 +68,10 @@ ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS avatar_color VARCHAR(20) NOT NULL DEFAULT '#5B6EE1';
 ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE conversations ALTER COLUMN direct_key DROP NOT NULL;
 ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_type_check;
 ALTER TABLE conversations
@@ -99,8 +105,43 @@ CREATE TABLE IF NOT EXISTS attachments (
   original_name TEXT NOT NULL,
   content_type TEXT NOT NULL,
   size_bytes BIGINT NOT NULL,
+  state VARCHAR(20) NOT NULL DEFAULT 'READY'
+    CHECK (state IN ('PENDING', 'READY', 'CLEANING', 'CLEANUP_FAILED')),
+  state_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 历史附件在升级前已经完整写入 MinIO，因此直接视为 READY。
+ALTER TABLE attachments
+  ADD COLUMN IF NOT EXISTS state VARCHAR(20) NOT NULL DEFAULT 'READY';
+ALTER TABLE attachments
+  ADD COLUMN IF NOT EXISTS state_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE attachments DROP CONSTRAINT IF EXISTS attachments_state_check;
+ALTER TABLE attachments
+  ADD CONSTRAINT attachments_state_check
+  CHECK (state IN ('PENDING', 'READY', 'CLEANING', 'CLEANUP_FAILED'));
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY,
+  actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  action VARCHAR(80) NOT NULL,
+  target_type VARCHAR(40) NOT NULL,
+  target_id TEXT,
+  details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 旧群聊以创建人作为群主；若创建人已删除，则回退为最早加入的成员。
+UPDATE conversations conversation
+   SET owner_id = COALESCE(
+         conversation.created_by,
+         (SELECT member.user_id
+            FROM conversation_members member
+           WHERE member.conversation_id = conversation.id
+           ORDER BY member.joined_at, member.user_id
+           LIMIT 1)
+       )
+ WHERE conversation.type = 'GROUP' AND conversation.owner_id IS NULL;
 
 CREATE TABLE IF NOT EXISTS message_receipts (
   message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -125,9 +166,13 @@ CREATE INDEX IF NOT EXISTS idx_members_user ON conversation_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_time
   ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_uploader ON attachments(uploader_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_orphan_cleanup
+  ON attachments(state, created_at) WHERE message_id IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 `;
 
 const seedUsers = [

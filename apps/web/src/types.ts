@@ -12,6 +12,7 @@ export interface Conversation {
   type: "DIRECT" | "GROUP";
   title: string;
   avatarColor: string;
+  ownerId: string | null;
   peer: User | null;
   members: User[];
   memberCount: number;
@@ -64,4 +65,20 @@ export interface AdminUser extends User {
   enabled: boolean;
   online: boolean;
   createdAt?: string;
+}
+
+export interface FileQuota {
+  usedBytes: number;
+  quotaBytes: number;
+  remainingBytes: number;
+}
+
+export interface AuditLog {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  details: Record<string, unknown>;
+  createdAt: string;
+  actor: Pick<User, "id" | "displayName" | "username"> | null;
 }

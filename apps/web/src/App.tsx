@@ -55,5 +55,5 @@ export default function App() {
     );
   }
 
-  return <ChatPage user={user} onLogout={logout} />;
+  return <ChatPage user={user} onUserUpdated={setUser} onLogout={logout} />;
 }

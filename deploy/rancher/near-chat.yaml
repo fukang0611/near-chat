@@ -16,6 +16,10 @@ data:
   MINIO_USE_SSL: "false"
   MINIO_BUCKET: "near-chat-files"
   FILE_MAX_BYTES: "52428800"
+  FILE_USER_QUOTA_BYTES: "1073741824"
+  FILE_ORPHAN_TTL_HOURS: "24"
+  FILE_CLEANUP_INTERVAL_MINUTES: "30"
+  STORAGE_RETRY_ATTEMPTS: "3"
   SEED_DEMO_USERS: "false"
 ---
 apiVersion: v1
@@ -54,7 +58,7 @@ spec:
       terminationGracePeriodSeconds: 20
       containers:
         - name: near-chat
-          image: near-chat-app:1.1.0
+          image: near-chat-app:1.2.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

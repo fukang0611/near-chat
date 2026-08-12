@@ -7,7 +7,7 @@ export interface RetryOptions {
  * Docker 启动时数据库和对象存储可能晚于应用就绪。
  * 统一重试策略可避免不同基础设施模块各自维护一套循环。
  */
-export async function retryUntilReady<T>(
+export async function retryOperation<T>(
   operation: () => Promise<T>,
   options: RetryOptions = {},
 ): Promise<T> {
@@ -25,4 +25,12 @@ export async function retryUntilReady<T>(
 
   // 循环必然返回或抛错；该分支只用于保持类型完整。
   throw new Error("重试流程意外结束");
+}
+
+/** 基础设施启动重试保留语义化名称，实际复用同一个有界重试实现。 */
+export function retryUntilReady<T>(
+  operation: () => Promise<T>,
+  options: RetryOptions = {},
+): Promise<T> {
+  return retryOperation(operation, options);
 }

@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
+import { recordAudit } from "../audit-service.js";
 import { authenticate, requireAdmin } from "../auth.js";
-import { query } from "../database.js";
+import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { RealtimeHub } from "../realtime.js";
 
@@ -15,6 +16,18 @@ interface AdminUserRow {
   enabled: boolean;
   avatar_color: string;
   created_at?: Date;
+}
+
+interface AuditLogRow {
+  id: string;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  details: Record<string, unknown>;
+  created_at: Date;
+  actor_id: string | null;
+  actor_display_name: string | null;
+  actor_username: string | null;
 }
 
 const createUserSchema = z.object({
@@ -70,26 +83,75 @@ export function createAdminRouter(realtime: RealtimeHub) {
     });
   });
 
+  router.get("/admin/audit-logs", authenticate, requireAdmin, async (request, response) => {
+    const limit = z.coerce.number().int().min(1).max(200).default(100).parse(request.query.limit);
+    const result = await query<AuditLogRow>(
+      `SELECT log.id, log.action, log.target_type, log.target_id, log.details,
+              log.created_at, log.actor_id, actor.display_name AS actor_display_name,
+              actor.username AS actor_username
+         FROM audit_logs log
+         LEFT JOIN users actor ON actor.id = log.actor_id
+        ORDER BY log.created_at DESC
+        LIMIT $1`,
+      [limit],
+    );
+    response.json({
+      logs: result.rows.map((row) => ({
+        id: row.id,
+        action: row.action,
+        targetType: row.target_type,
+        targetId: row.target_id,
+        details: row.details,
+        createdAt: row.created_at.toISOString(),
+        actor: row.actor_id
+          ? {
+              id: row.actor_id,
+              displayName: row.actor_display_name ?? "已删除用户",
+              username: row.actor_username ?? "unknown",
+            }
+          : null,
+      })),
+    });
+  });
+
   router.post("/admin/users", authenticate, requireAdmin, async (request, response) => {
+    const admin = currentUser(request);
     const input = createUserSchema.parse(request.body);
     const passwordHash = await bcrypt.hash(input.password, 10);
     try {
-      const result = await query<AdminUserRow>(
-        `INSERT INTO users
-             (id, username, display_name, password_hash, role, avatar_color)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, username, display_name, role, enabled, avatar_color`,
-        [
-          randomUUID(),
-          input.username.toLowerCase(),
-          input.displayName,
-          passwordHash,
-          input.role,
-          avatarPalette[Math.floor(Math.random() * avatarPalette.length)],
-        ],
-      );
+      const result = await transaction(async (client) => {
+        const created = await client.query<AdminUserRow>(
+          `INSERT INTO users
+               (id, username, display_name, password_hash, role, avatar_color)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id, username, display_name, role, enabled, avatar_color`,
+          [
+            randomUUID(),
+            input.username.toLowerCase(),
+            input.displayName,
+            passwordHash,
+            input.role,
+            avatarPalette[Math.floor(Math.random() * avatarPalette.length)],
+          ],
+        );
+        await recordAudit(
+          {
+            actorId: admin.id,
+            action: "ADMIN_USER_CREATE",
+            targetType: "USER",
+            targetId: created.rows[0].id,
+            details: { username: input.username.toLowerCase(), role: input.role },
+          },
+          client,
+        );
+        return created;
+      });
       response.status(201).json({
         user: toAdminUser(result.rows[0], realtime),
+      });
+      realtime.sendToUsers(realtime.onlineUserIds(), {
+        type: "users.changed",
+        payload: { userId: result.rows[0].id },
       });
     } catch (error) {
       if ((error as { code?: string }).code === "23505") {
@@ -107,22 +169,41 @@ export function createAdminRouter(realtime: RealtimeHub) {
       throw new ApiError(400, "不能禁用当前登录的管理员账号");
     }
 
-    const result = await query<AdminUserRow>(
-      `UPDATE users
-            SET display_name = COALESCE($2, display_name),
-                enabled = COALESCE($3, enabled),
-                token_version = token_version + CASE
-                  WHEN $3::boolean = FALSE THEN 1 ELSE 0 END,
-                updated_at = NOW()
-          WHERE id = $1
-          RETURNING id, username, display_name, role, enabled, avatar_color`,
-      [userId, input.displayName ?? null, input.enabled ?? null],
-    );
+    const result = await transaction(async (client) => {
+      const updated = await client.query<AdminUserRow>(
+        `UPDATE users
+              SET display_name = COALESCE($2, display_name),
+                  enabled = COALESCE($3, enabled),
+                  token_version = token_version + CASE
+                    WHEN $3::boolean = FALSE THEN 1 ELSE 0 END,
+                  updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, username, display_name, role, enabled, avatar_color`,
+        [userId, input.displayName ?? null, input.enabled ?? null],
+      );
+      if (updated.rows[0]) {
+        await recordAudit(
+          {
+            actorId: admin.id,
+            action: "ADMIN_USER_UPDATE",
+            targetType: "USER",
+            targetId: userId,
+            details: input,
+          },
+          client,
+        );
+      }
+      return updated;
+    });
     const row = result.rows[0];
     if (!row) throw new ApiError(404, "用户不存在");
 
     // 禁用时令牌版本已经递增，再主动断开实时连接让失效立即生效。
     if (!row.enabled) realtime.disconnectUser(row.id);
+    realtime.sendToUsers(realtime.onlineUserIds(), {
+      type: "users.changed",
+      payload: { userId: row.id },
+    });
     response.json({ user: toAdminUser(row, realtime) });
   });
 
@@ -131,18 +212,68 @@ export function createAdminRouter(realtime: RealtimeHub) {
     authenticate,
     requireAdmin,
     async (request, response) => {
+      const admin = currentUser(request);
       const userId = z.string().uuid().parse(request.params.userId);
       const input = resetPasswordSchema.parse(request.body);
       const passwordHash = await bcrypt.hash(input.password, 10);
-      const result = await query(
-        `UPDATE users
-            SET password_hash = $2, token_version = token_version + 1,
-                updated_at = NOW()
-          WHERE id = $1`,
-        [userId, passwordHash],
-      );
+      const result = await transaction(async (client) => {
+        const updated = await client.query(
+          `UPDATE users
+              SET password_hash = $2, token_version = token_version + 1,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [userId, passwordHash],
+        );
+        if (updated.rowCount) {
+          await recordAudit(
+            {
+              actorId: admin.id,
+              action: "ADMIN_PASSWORD_RESET",
+              targetType: "USER",
+              targetId: userId,
+            },
+            client,
+          );
+        }
+        return updated;
+      });
       if (result.rowCount === 0) throw new ApiError(404, "用户不存在");
 
+      realtime.disconnectUser(userId);
+      response.status(204).end();
+    },
+  );
+
+  router.post(
+    "/admin/users/:userId/force-logout",
+    authenticate,
+    requireAdmin,
+    async (request, response) => {
+      const admin = currentUser(request);
+      const userId = z.string().uuid().parse(request.params.userId);
+      if (admin.id === userId) throw new ApiError(400, "不能强制退出当前管理员账号");
+
+      const result = await transaction(async (client) => {
+        const updated = await client.query(
+          `UPDATE users
+              SET token_version = token_version + 1, updated_at = NOW()
+            WHERE id = $1`,
+          [userId],
+        );
+        if (updated.rowCount) {
+          await recordAudit(
+            {
+              actorId: admin.id,
+              action: "ADMIN_FORCE_LOGOUT",
+              targetType: "USER",
+              targetId: userId,
+            },
+            client,
+          );
+        }
+        return updated;
+      });
+      if (result.rowCount === 0) throw new ApiError(404, "用户不存在");
       realtime.disconnectUser(userId);
       response.status(204).end();
     },

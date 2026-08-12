@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { startAttachmentCleanup } from "./attachment-cleanup.js";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { initializeDatabase, pool } from "./database.js";
@@ -10,6 +11,7 @@ async function main() {
   // 基础设施就绪后再开放端口，避免健康检查通过但核心依赖仍不可用。
   await initializeDatabase();
   await initializeMinio();
+  const stopAttachmentCleanup = startAttachmentCleanup();
 
   const realtime = new RealtimeHub();
   realtime.onUserOnline(async (userId) => {
@@ -29,6 +31,7 @@ async function main() {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    stopAttachmentCleanup();
     realtime.close();
     server.close(async () => {
       await pool.end();

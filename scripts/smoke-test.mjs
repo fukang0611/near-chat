@@ -25,16 +25,27 @@ const login = await json("/api/auth/login", {
 const headers = { Authorization: `Bearer ${login.token}` };
 const users = await json("/api/users", { headers });
 const conversations = await json("/api/conversations", { headers });
+const quota = await json("/api/files/quota", { headers });
 const search = await json("/api/messages/search?q=__near_chat_smoke_noop__&limit=1", { headers });
 
 if (!Array.isArray(search.messages)) throw new Error("消息搜索响应格式错误");
 if (
   conversations.conversations.some(
     (conversation) =>
-      !["DIRECT", "GROUP"].includes(conversation.type) || !Array.isArray(conversation.members),
+      !["DIRECT", "GROUP"].includes(conversation.type) ||
+      !Array.isArray(conversation.members) ||
+      (conversation.type === "GROUP" && typeof conversation.ownerId !== "string"),
   )
 ) {
   throw new Error("会话响应格式错误");
+}
+
+if (
+  !Number.isFinite(quota.usedBytes) ||
+  !Number.isFinite(quota.quotaBytes) ||
+  quota.quotaBytes <= 0
+) {
+  throw new Error("文件配额响应格式错误");
 }
 
 if (conversations.conversations[0]) {

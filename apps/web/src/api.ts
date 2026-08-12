@@ -1,4 +1,12 @@
-import type { AdminUser, Attachment, Conversation, Message, User } from "./types";
+import type {
+  AdminUser,
+  Attachment,
+  AuditLog,
+  Conversation,
+  FileQuota,
+  Message,
+  User,
+} from "./types";
 
 const TOKEN_KEY = "near-chat-token";
 
@@ -83,6 +91,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, memberIds }),
     }),
+  updateGroup: (conversationId: string, input: { name?: string; avatarColor?: string }) =>
+    request<void>(`/api/conversations/${conversationId}/group`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  addGroupMembers: (conversationId: string, memberIds: string[]) =>
+    request<{ addedIds: string[] }>(`/api/conversations/${conversationId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ memberIds }),
+    }),
+  removeGroupMember: (conversationId: string, userId: string) =>
+    request<void>(`/api/conversations/${conversationId}/members/${userId}`, {
+      method: "DELETE",
+    }),
+  transferGroupOwner: (conversationId: string, userId: string) =>
+    request<void>(`/api/conversations/${conversationId}/transfer-owner`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    }),
+  leaveGroup: (conversationId: string) =>
+    request<{ dissolved: boolean; nextOwnerId: string | null }>(
+      `/api/conversations/${conversationId}/leave`,
+      { method: "POST" },
+    ),
+  disbandGroup: (conversationId: string) =>
+    request<void>(`/api/conversations/${conversationId}`, { method: "DELETE" }),
   messages: (conversationId: string, aroundMessageId?: string) => {
     const query = new URLSearchParams({ limit: "100" });
     if (aroundMessageId) query.set("around", aroundMessageId);
@@ -137,6 +171,7 @@ export const api = {
       xhr.send(form);
     }),
   deleteFile: (fileId: string) => request<void>(`/api/files/${fileId}`, { method: "DELETE" }),
+  fileQuota: () => request<FileQuota>("/api/files/quota"),
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(`/api/files/${fileId}/content${download ? "?download=1" : ""}`, {
@@ -146,6 +181,7 @@ export const api = {
     return response.blob();
   },
   adminUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
+  auditLogs: () => request<{ logs: AuditLog[] }>("/api/admin/audit-logs?limit=100"),
   createUser: (input: CreateUserInput) =>
     request<{ user: AdminUser }>("/api/admin/users", {
       method: "POST",
@@ -160,6 +196,18 @@ export const api = {
     request<void>(`/api/admin/users/${userId}/reset-password`, {
       method: "POST",
       body: JSON.stringify({ password }),
+    }),
+  forceLogout: (userId: string) =>
+    request<void>(`/api/admin/users/${userId}/force-logout`, { method: "POST" }),
+  updateProfile: (input: { displayName?: string; avatarColor?: string }) =>
+    request<{ user: User }>("/api/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<void>("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
     }),
 };
 

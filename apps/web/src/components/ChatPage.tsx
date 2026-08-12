@@ -6,6 +6,7 @@ import {
   MessageCircleMore,
   Paperclip,
   Search,
+  Settings2,
   UsersRound,
   X,
 } from "lucide-react";
@@ -18,12 +19,15 @@ import { AdminPanel } from "./AdminPanel";
 import { Avatar } from "./Avatar";
 import { ChatSidebar, type SidebarMode } from "./ChatSidebar";
 import { CreateGroupDialog } from "./CreateGroupDialog";
+import { GroupManagementDialog } from "./GroupManagementDialog";
 import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
+import { ProfileDialog } from "./ProfileDialog";
 
 interface ChatPageProps {
   user: User;
+  onUserUpdated: (user: User) => void;
   onLogout: () => void;
 }
 
@@ -47,7 +51,7 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
  * 聊天页是前端的数据编排层：负责服务端数据、当前会话和领域操作。
  * 侧边栏、消息时间线、编辑器及实时连接各自隐藏浏览器交互细节。
  */
-export function ChatPage({ user, onLogout }: ChatPageProps) {
+export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -65,7 +69,9 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
   const [sending, setSending] = useState(false);
 
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [toast, setToast] = useState<ToastNotice | null>(null);
@@ -81,6 +87,12 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
   const text = selectedId ? (drafts[selectedId] ?? "") : "";
   const pendingAttachment = selectedId ? (pendingAttachments[selectedId] ?? null) : null;
   const activeUpload = uploadState?.conversationId === selectedId ? uploadState : null;
+
+  useEffect(() => {
+    if (showGroupManagement && selectedConversation?.type !== "GROUP") {
+      setShowGroupManagement(false);
+    }
+  }, [selectedConversation?.type, showGroupManagement]);
 
   const notify = useCallback((message: string, tone: NoticeTone = "error") => {
     setToast({ id: Date.now(), message, tone });
@@ -108,6 +120,11 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
     if (!initializedConversationsRef.current) {
       initializedConversationsRef.current = true;
       setSelectedId((current) => current ?? result.conversations[0]?.id ?? null);
+    } else {
+      // 被移出群聊、主动退出或群聊解散后，及时释放已经失效的选中状态。
+      setSelectedId((current) =>
+        current && result.conversations.some((item) => item.id === current) ? current : null,
+      );
     }
     return result.conversations;
   }, []);
@@ -224,6 +241,17 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
         }),
       );
     },
+    onUsersChanged: (changedUserId) => {
+      const refreshCurrentUser =
+        changedUserId === user.id
+          ? api.me().then((result) => onUserUpdated(result.user))
+          : Promise.resolve();
+      void Promise.all([refreshUsers(), refreshConversations(), refreshCurrentUser]).catch(
+        (error) => {
+          notify(errorMessage(error, "用户资料同步失败"), "error");
+        },
+      );
+    },
     onMessageCreated: (incoming) => {
       if (incoming.conversationId === selectedId) {
         setMessages((current) =>
@@ -242,8 +270,18 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
         current.map((item) => (item.id === conversationId ? { ...item, unreadCount } : item)),
       );
     },
-    onConversationChanged: () => {
-      refreshConversationsInBackground();
+    onConversationChanged: (conversationId) => {
+      void refreshConversations()
+        .then((nextConversations) => {
+          // 成员变化会改变历史消息的回执分母；仍在群内时同步刷新时间线。
+          if (
+            selectedIdRef.current === conversationId &&
+            nextConversations.some((item) => item.id === conversationId)
+          ) {
+            setMessageLoadVersion((current) => current + 1);
+          }
+        })
+        .catch((error) => notify(errorMessage(error, "会话刷新失败"), "error"));
     },
     onReceiptChanged: (receipts) => {
       if (receipts.length === 0) return;
@@ -431,6 +469,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
         }}
         onOpenDirect={(peerId) => void openDirect(peerId)}
         onCreateGroup={() => setShowCreateGroup(true)}
+        onOpenProfile={() => setShowProfile(true)}
         onOpenAdmin={() => setShowAdmin(true)}
         onLogout={() => void logout()}
       />
@@ -485,6 +524,17 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
               >
                 <Search size={17} />
               </button>
+              {selectedConversation.type === "GROUP" && (
+                <button
+                  type="button"
+                  className="header-search-button"
+                  onClick={() => setShowGroupManagement(true)}
+                  aria-label="打开群聊设置"
+                  title="群聊设置"
+                >
+                  <Settings2 size={17} />
+                </button>
+              )}
               <div className={`connection-pill ${connection}`}>
                 <i />
                 {connection === "connected"
@@ -553,6 +603,19 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
       {showAdmin && (
         <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} onNotify={notify} />
       )}
+      {showProfile && (
+        <ProfileDialog
+          user={user}
+          onClose={() => setShowProfile(false)}
+          onUpdated={(updatedUser) => {
+            onUserUpdated(updatedUser);
+            void Promise.all([refreshUsers(), refreshConversations()]).catch((error) => {
+              notify(errorMessage(error, "用户资料同步失败"), "error");
+            });
+          }}
+          onPasswordChanged={onLogout}
+        />
+      )}
       {showCreateGroup && (
         <CreateGroupDialog
           users={users}
@@ -571,6 +634,23 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
             setMessageLoadVersion((current) => current + 1);
             setSidebarMode("recent");
             setShowMessageSearch(false);
+          }}
+        />
+      )}
+      {showGroupManagement && selectedConversation?.type === "GROUP" && (
+        <GroupManagementDialog
+          conversation={selectedConversation}
+          currentUser={user}
+          users={users}
+          onClose={() => setShowGroupManagement(false)}
+          onChanged={async () => {
+            await Promise.all([refreshUsers(), refreshConversations()]);
+          }}
+          onExited={() => {
+            setShowGroupManagement(false);
+            setSelectedId(null);
+            setMessages([]);
+            refreshConversationsInBackground();
           }}
         />
       )}

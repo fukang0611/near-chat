@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm run build",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "smoke:phase2": "node scripts/phase-2-smoke-test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

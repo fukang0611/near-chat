@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
+import { recordAudit } from "../audit-service.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import {
@@ -33,6 +35,7 @@ interface ConversationRow {
   type: "DIRECT" | "GROUP";
   name: string | null;
   avatar_color: string;
+  owner_id: string | null;
   members: ConversationMember[];
   last_message_type: "TEXT" | "IMAGE" | "FILE" | null;
   last_message_text: string | null;
@@ -55,13 +58,26 @@ const createGroupSchema = z.object({
   memberIds: z.array(z.string().uuid()).min(2, "请至少选择 2 位联系人").max(49),
 });
 
+const groupColors = ["#5B6EE1", "#6C5CE7", "#2F9E83", "#D97757", "#B65B7A", "#4477B8"] as const;
+
+const updateGroupSchema = z
+  .object({
+    name: z.string().trim().min(2, "群聊名称至少 2 个字符").max(80).optional(),
+    avatarColor: z.enum(groupColors).optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "没有可更新的群资料");
+
+const groupMembersSchema = z.object({
+  memberIds: z.array(z.string().uuid()).min(1, "请选择要添加的联系人").max(49),
+});
+
+const transferOwnerSchema = z.object({ userId: z.string().uuid() });
+
 const searchSchema = z.object({
   q: z.string().trim().min(1).max(100),
   conversationId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
-
-const groupColors = ["#5B6EE1", "#6C5CE7", "#2F9E83", "#D97757", "#B65B7A", "#4477B8"];
 
 async function ensureMember(conversationId: string, userId: string): Promise<void> {
   const result = await query(
@@ -71,6 +87,56 @@ async function ensureMember(conversationId: string, userId: string): Promise<voi
     [conversationId, userId],
   );
   if (result.rowCount === 0) throw new ApiError(403, "无权访问该会话");
+}
+
+interface LockedGroupRow {
+  id: string;
+  name: string;
+  owner_id: string | null;
+}
+
+/** 群管理操作统一先锁定群记录，确保群主转让、退群和解散不会交叉覆盖。 */
+async function lockGroup(
+  client: PoolClient,
+  conversationId: string,
+  userId: string,
+  ownerRequired = false,
+): Promise<LockedGroupRow> {
+  const result = await client.query<LockedGroupRow>(
+    `SELECT c.id, c.name, c.owner_id
+       FROM conversations c
+       JOIN conversation_members member
+         ON member.conversation_id = c.id AND member.user_id = $2
+      WHERE c.id = $1 AND c.type = 'GROUP'
+      FOR UPDATE OF c`,
+    [conversationId, userId],
+  );
+  const group = result.rows[0];
+  if (!group) throw new ApiError(404, "群聊不存在或你已不在群内");
+  if (ownerRequired && group.owner_id !== userId) {
+    throw new ApiError(403, "只有群主可以执行此操作");
+  }
+  return group;
+}
+
+/**
+ * 删除群聊前先解除附件外键并标记回收，保留 MinIO 删除失败后的重试依据。
+ * 消息随后级联删除，但附件元数据会一直保留到对象确认删除。
+ */
+async function stageConversationAttachmentsForCleanup(
+  client: PoolClient,
+  conversationId: string,
+): Promise<void> {
+  await client.query(
+    `UPDATE attachments attachment
+        SET message_id = NULL,
+            state = 'CLEANUP_FAILED',
+            state_updated_at = NOW()
+       FROM messages message
+      WHERE attachment.message_id = message.id
+        AND message.conversation_id = $1`,
+    [conversationId],
+  );
 }
 
 async function conversationMemberIds(conversationId: string): Promise<string[]> {
@@ -95,6 +161,7 @@ function serializeConversation(row: ConversationRow, currentUserId: string, real
     type: row.type,
     title,
     avatarColor: row.type === "GROUP" ? row.avatar_color : (peer?.avatarColor ?? row.avatar_color),
+    ownerId: row.type === "GROUP" ? row.owner_id : null,
     peer: peer ?? null,
     members,
     memberCount: members.length,
@@ -148,6 +215,7 @@ export function createChatRouter(realtime: RealtimeHub) {
               c.type,
               c.name,
               c.avatar_color,
+              c.owner_id,
               COALESCE(
                 (SELECT json_agg(
                           json_build_object(
@@ -253,14 +321,24 @@ export function createChatRouter(realtime: RealtimeHub) {
     const colorIndex = Number.parseInt(conversationId.slice(0, 2), 16) % groupColors.length;
     await transaction(async (client) => {
       await client.query(
-        `INSERT INTO conversations (id, type, name, avatar_color, created_by)
-         VALUES ($1, 'GROUP', $2, $3, $4)`,
+        `INSERT INTO conversations (id, type, name, avatar_color, created_by, owner_id)
+         VALUES ($1, 'GROUP', $2, $3, $4, $4)`,
         [conversationId, input.name, groupColors[colorIndex], user.id],
       );
       await client.query(
         `INSERT INTO conversation_members (conversation_id, user_id)
          SELECT $1, unnest($2::uuid[])`,
         [conversationId, [user.id, ...memberIds]],
+      );
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "GROUP_CREATE",
+          targetType: "CONVERSATION",
+          targetId: conversationId,
+          details: { name: input.name, memberIds },
+        },
+        client,
       );
     });
 
@@ -269,6 +347,283 @@ export function createChatRouter(realtime: RealtimeHub) {
       payload: { conversationId },
     });
     response.status(201).json({ conversationId });
+  });
+
+  router.patch("/conversations/:conversationId/group", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const conversationId = z.string().uuid().parse(request.params.conversationId);
+    const input = updateGroupSchema.parse(request.body);
+
+    await transaction(async (client) => {
+      await lockGroup(client, conversationId, user.id, true);
+      await client.query(
+        `UPDATE conversations
+            SET name = COALESCE($2, name),
+                avatar_color = COALESCE($3, avatar_color),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [conversationId, input.name ?? null, input.avatarColor ?? null],
+      );
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "GROUP_PROFILE_UPDATE",
+          targetType: "CONVERSATION",
+          targetId: conversationId,
+          details: input,
+        },
+        client,
+      );
+    });
+
+    realtime.sendToUsers(await conversationMemberIds(conversationId), {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
+    response.status(204).end();
+  });
+
+  router.post("/conversations/:conversationId/members", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const conversationId = z.string().uuid().parse(request.params.conversationId);
+    const input = groupMembersSchema.parse(request.body);
+    const requestedIds = [...new Set(input.memberIds)].filter((id) => id !== user.id);
+    if (requestedIds.length === 0) throw new ApiError(400, "请选择尚未加入群聊的联系人");
+
+    const addedIds = await transaction(async (client) => {
+      await lockGroup(client, conversationId, user.id, true);
+      const count = await client.query<{ count: number }>(
+        `SELECT COUNT(*)::int AS count
+             FROM conversation_members
+            WHERE conversation_id = $1`,
+        [conversationId],
+      );
+      const existing = await client.query<{ id: string }>(
+        `SELECT member_id.id
+             FROM unnest($1::uuid[]) AS member_id(id)
+             JOIN users candidate ON candidate.id = member_id.id AND candidate.enabled = TRUE
+            WHERE NOT EXISTS (
+              SELECT 1 FROM conversation_members current_member
+               WHERE current_member.conversation_id = $2
+                 AND current_member.user_id = member_id.id
+            )`,
+        [requestedIds, conversationId],
+      );
+      const newIds = existing.rows.map((row) => row.id);
+      if (newIds.length !== requestedIds.length) {
+        throw new ApiError(400, "部分联系人不存在、已禁用或已在群内");
+      }
+      if (Number(count.rows[0]?.count ?? 0) + newIds.length > 50) {
+        throw new ApiError(400, "群聊最多包含 50 位成员");
+      }
+      await client.query(
+        `INSERT INTO conversation_members (conversation_id, user_id)
+           SELECT $1, unnest($2::uuid[])`,
+        [conversationId, newIds],
+      );
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "GROUP_MEMBERS_ADD",
+          targetType: "CONVERSATION",
+          targetId: conversationId,
+          details: { memberIds: newIds },
+        },
+        client,
+      );
+      return newIds;
+    });
+
+    realtime.sendToUsers(await conversationMemberIds(conversationId), {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
+    response.status(201).json({ addedIds });
+  });
+
+  router.delete(
+    "/conversations/:conversationId/members/:userId",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const conversationId = z.string().uuid().parse(request.params.conversationId);
+      const targetUserId = z.string().uuid().parse(request.params.userId);
+      const previousMemberIds = await conversationMemberIds(conversationId);
+
+      await transaction(async (client) => {
+        const group = await lockGroup(client, conversationId, user.id, true);
+        if (group.owner_id === targetUserId) throw new ApiError(400, "群主不能被移出群聊");
+        const removed = await client.query(
+          `DELETE FROM conversation_members
+            WHERE conversation_id = $1 AND user_id = $2`,
+          [conversationId, targetUserId],
+        );
+        if (removed.rowCount === 0) throw new ApiError(404, "该用户不在群聊中");
+        await client.query(
+          `DELETE FROM message_receipts receipt
+           USING messages message
+           WHERE receipt.message_id = message.id
+             AND message.conversation_id = $1
+             AND receipt.user_id = $2`,
+          [conversationId, targetUserId],
+        );
+        await recordAudit(
+          {
+            actorId: user.id,
+            action: "GROUP_MEMBER_REMOVE",
+            targetType: "CONVERSATION",
+            targetId: conversationId,
+            details: { userId: targetUserId },
+          },
+          client,
+        );
+      });
+
+      realtime.sendToUsers(previousMemberIds, {
+        type: "conversation.changed",
+        payload: { conversationId },
+      });
+      response.status(204).end();
+    },
+  );
+
+  router.post(
+    "/conversations/:conversationId/transfer-owner",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const conversationId = z.string().uuid().parse(request.params.conversationId);
+      const input = transferOwnerSchema.parse(request.body);
+      if (input.userId === user.id) throw new ApiError(400, "你已经是群主");
+
+      await transaction(async (client) => {
+        await lockGroup(client, conversationId, user.id, true);
+        const member = await client.query(
+          `SELECT 1 FROM conversation_members
+            WHERE conversation_id = $1 AND user_id = $2`,
+          [conversationId, input.userId],
+        );
+        if (member.rowCount === 0) throw new ApiError(400, "新群主必须是群成员");
+        await client.query(
+          `UPDATE conversations SET owner_id = $2, updated_at = NOW() WHERE id = $1`,
+          [conversationId, input.userId],
+        );
+        await recordAudit(
+          {
+            actorId: user.id,
+            action: "GROUP_OWNER_TRANSFER",
+            targetType: "CONVERSATION",
+            targetId: conversationId,
+            details: { ownerId: input.userId },
+          },
+          client,
+        );
+      });
+
+      realtime.sendToUsers(await conversationMemberIds(conversationId), {
+        type: "conversation.changed",
+        payload: { conversationId },
+      });
+      response.status(204).end();
+    },
+  );
+
+  router.post("/conversations/:conversationId/leave", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const conversationId = z.string().uuid().parse(request.params.conversationId);
+    const previousMemberIds = await conversationMemberIds(conversationId);
+
+    const result = await transaction(async (client) => {
+      const group = await lockGroup(client, conversationId, user.id);
+      let nextOwnerId: string | null = null;
+      if (group.owner_id === user.id) {
+        const successor = await client.query<{ user_id: string }>(
+          `SELECT user_id
+             FROM conversation_members
+            WHERE conversation_id = $1 AND user_id <> $2
+            ORDER BY joined_at, user_id
+            LIMIT 1`,
+          [conversationId, user.id],
+        );
+        nextOwnerId = successor.rows[0]?.user_id ?? null;
+        if (!nextOwnerId) {
+          await stageConversationAttachmentsForCleanup(client, conversationId);
+          await client.query("DELETE FROM conversations WHERE id = $1", [conversationId]);
+          await recordAudit(
+            {
+              actorId: user.id,
+              action: "GROUP_DISBAND",
+              targetType: "CONVERSATION",
+              targetId: conversationId,
+              details: { reason: "last_owner_left" },
+            },
+            client,
+          );
+          return { dissolved: true, nextOwnerId: null };
+        }
+        await client.query(
+          "UPDATE conversations SET owner_id = $2, updated_at = NOW() WHERE id = $1",
+          [conversationId, nextOwnerId],
+        );
+      }
+      await client.query(
+        `DELETE FROM message_receipts receipt
+         USING messages message
+         WHERE receipt.message_id = message.id
+           AND message.conversation_id = $1
+           AND receipt.user_id = $2`,
+        [conversationId, user.id],
+      );
+      await client.query(
+        "DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2",
+        [conversationId, user.id],
+      );
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "GROUP_LEAVE",
+          targetType: "CONVERSATION",
+          targetId: conversationId,
+          details: { nextOwnerId },
+        },
+        client,
+      );
+      return { dissolved: false, nextOwnerId };
+    });
+
+    realtime.sendToUsers(previousMemberIds, {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
+    response.json(result);
+  });
+
+  router.delete("/conversations/:conversationId", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const conversationId = z.string().uuid().parse(request.params.conversationId);
+    const previousMemberIds = await conversationMemberIds(conversationId);
+
+    await transaction(async (client) => {
+      const group = await lockGroup(client, conversationId, user.id, true);
+      await stageConversationAttachmentsForCleanup(client, conversationId);
+      await client.query("DELETE FROM conversations WHERE id = $1", [conversationId]);
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "GROUP_DISBAND",
+          targetType: "CONVERSATION",
+          targetId: conversationId,
+          details: { name: group.name },
+        },
+        client,
+      );
+    });
+
+    realtime.sendToUsers(previousMemberIds, {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
+    response.status(204).end();
   });
 
   router.get("/messages/search", authenticate, async (request, response) => {
@@ -321,7 +676,9 @@ export function createChatRouter(realtime: RealtimeHub) {
                FROM attachments
               WHERE id = ANY($1::uuid[])
                 AND uploader_id = $2
-                AND message_id IS NULL`,
+                AND message_id IS NULL
+                AND state = 'READY'
+              FOR UPDATE`,
             [input.attachmentIds, user.id],
           );
           if (attachments.rows.length !== input.attachmentIds.length) {

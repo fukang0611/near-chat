@@ -12,6 +12,11 @@ function integer(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function positiveInteger(name: string, fallback: number): number {
+  const value = integer(name, fallback);
+  return value > 0 ? value : fallback;
+}
+
 function bool(name: string, fallback: boolean): boolean {
   const value = process.env[name];
   if (value === undefined) return fallback;
@@ -32,7 +37,12 @@ export const config = {
     secretKey: process.env.MINIO_SECRET_KEY ?? "near-chat-secret",
     bucket: process.env.MINIO_BUCKET ?? "near-chat-files",
   },
-  fileMaxBytes: integer("FILE_MAX_BYTES", 50 * 1024 * 1024),
+  fileMaxBytes: positiveInteger("FILE_MAX_BYTES", 50 * 1024 * 1024),
+  // 配额统计包含已发送附件和仍在等待发送的附件，避免上传后再校验导致超额。
+  fileUserQuotaBytes: positiveInteger("FILE_USER_QUOTA_BYTES", 1024 * 1024 * 1024),
+  fileOrphanTtlHours: positiveInteger("FILE_ORPHAN_TTL_HOURS", 24),
+  fileCleanupIntervalMinutes: positiveInteger("FILE_CLEANUP_INTERVAL_MINUTES", 30),
+  storageRetryAttempts: positiveInteger("STORAGE_RETRY_ATTEMPTS", 3),
   seedDemoUsers: bool("SEED_DEMO_USERS", true),
   seedPasswords: {
     admin: process.env.SEED_ADMIN_PASSWORD ?? "admin123",

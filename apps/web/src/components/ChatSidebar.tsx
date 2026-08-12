@@ -5,8 +5,8 @@ import {
   MoreHorizontal,
   Radio,
   Search,
-  Settings2,
   ShieldCheck,
+  UserRoundCog,
   UserRoundPlus,
   UsersRound,
   X,
@@ -33,6 +33,7 @@ interface ChatSidebarProps {
   onSelectConversation: (conversationId: string) => void;
   onOpenDirect: (userId: string) => void;
   onCreateGroup: () => void;
+  onOpenProfile: () => void;
   onOpenAdmin: () => void;
   onLogout: () => void;
 }
@@ -68,6 +69,7 @@ export function ChatSidebar({
   onSelectConversation,
   onOpenDirect,
   onCreateGroup,
+  onOpenProfile,
   onOpenAdmin,
   onLogout,
 }: ChatSidebarProps) {
@@ -364,9 +366,12 @@ export function ChatSidebar({
                 : "连接已断开"}
           </small>
         </span>
+        <button type="button" onClick={onOpenProfile} aria-label="打开个人设置" title="个人设置">
+          <UserRoundCog size={17} />
+        </button>
         {currentUser.role === "ADMIN" && (
           <button type="button" onClick={onOpenAdmin} aria-label="打开用户管理" title="用户管理">
-            <Settings2 size={17} />
+            <ShieldCheck size={17} />
           </button>
         )}
         <button type="button" onClick={onLogout} aria-label="退出登录" title="退出登录">
