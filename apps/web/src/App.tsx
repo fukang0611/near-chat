@@ -4,10 +4,17 @@ import { api, clearToken, getToken, saveToken } from "./api";
 import { ChatPage } from "./components/ChatPage";
 import { LoginPage } from "./components/LoginPage";
 import type { User } from "./types";
+import { getCurrentTheme, setThemePreference, type ThemeMode } from "./utils/theme";
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(Boolean(getToken()));
+  const [theme, setTheme] = useState<ThemeMode>(getCurrentTheme);
+
+  const changeTheme = useCallback((nextTheme: ThemeMode) => {
+    setThemePreference(nextTheme);
+    setTheme(nextTheme);
+  }, []);
 
   const logout = useCallback(() => {
     clearToken();
@@ -47,6 +54,8 @@ export default function App() {
   if (!user) {
     return (
       <LoginPage
+        theme={theme}
+        onThemeChange={changeTheme}
         onLogin={(token, nextUser) => {
           saveToken(token);
           setUser(nextUser);
@@ -55,5 +64,13 @@ export default function App() {
     );
   }
 
-  return <ChatPage user={user} onUserUpdated={setUser} onLogout={logout} />;
+  return (
+    <ChatPage
+      user={user}
+      theme={theme}
+      onThemeChange={changeTheme}
+      onUserUpdated={setUser}
+      onLogout={logout}
+    />
+  );
 }

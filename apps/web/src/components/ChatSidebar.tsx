@@ -15,7 +15,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionState } from "../hooks/useRealtimeConnection";
 import type { Attachment, Conversation, User } from "../types";
 import { formatConversationPreview, formatSidebarTime } from "../utils/format";
+import type { ThemeMode } from "../utils/theme";
 import { Avatar } from "./Avatar";
+import { ThemeToggle } from "./ThemeToggle";
 
 export type SidebarMode = "recent" | "people";
 
@@ -28,7 +30,9 @@ interface ChatSidebarProps {
   pendingAttachments: Record<string, Attachment>;
   loading: boolean;
   connection: ConnectionState;
+  theme: ThemeMode;
   mode: SidebarMode;
+  onThemeChange: (theme: ThemeMode) => void;
   onModeChange: (mode: SidebarMode) => void;
   onSelectConversation: (conversationId: string) => void;
   onOpenDirect: (userId: string) => void;
@@ -64,7 +68,9 @@ export function ChatSidebar({
   pendingAttachments,
   loading,
   connection,
+  theme,
   mode,
+  onThemeChange,
   onModeChange,
   onSelectConversation,
   onOpenDirect,
@@ -142,54 +148,57 @@ export function ChatSidebar({
           </span>
           <strong>近聊</strong>
         </div>
-        <div className="system-menu-anchor" ref={systemMenuRef}>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="查看系统信息"
-            aria-expanded={showSystemMenu}
-            onClick={() => setShowSystemMenu((current) => !current)}
-          >
-            <MoreHorizontal size={19} />
-          </button>
-          {showSystemMenu && (
-            <div className="system-popover" role="dialog" aria-label="系统信息">
-              <header>
-                <span className="brand-symbol">
-                  <MessageCircleMore size={16} />
-                </span>
-                <div>
-                  <strong>近聊 NearChat</strong>
-                  <small>局域网轻量聊天工具</small>
+        <div className="sidebar-top-actions">
+          <ThemeToggle compact theme={theme} onChange={onThemeChange} />
+          <div className="system-menu-anchor" ref={systemMenuRef}>
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="查看系统信息"
+              aria-expanded={showSystemMenu}
+              onClick={() => setShowSystemMenu((current) => !current)}
+            >
+              <MoreHorizontal size={19} />
+            </button>
+            {showSystemMenu && (
+              <div className="system-popover" role="dialog" aria-label="系统信息">
+                <header>
+                  <span className="brand-symbol">
+                    <MessageCircleMore size={16} />
+                  </span>
+                  <div>
+                    <strong>近聊 NearChat</strong>
+                    <small>局域网轻量聊天工具</small>
+                  </div>
+                </header>
+                <div className="system-status-row">
+                  <Radio size={16} />
+                  <span>
+                    <strong>实时连接</strong>
+                    <small>
+                      {connection === "connected"
+                        ? "工作正常"
+                        : connection === "connecting"
+                          ? "正在建立连接"
+                          : "正在尝试恢复"}
+                    </small>
+                  </span>
+                  <i className={connection} />
                 </div>
-              </header>
-              <div className="system-status-row">
-                <Radio size={16} />
-                <span>
-                  <strong>实时连接</strong>
-                  <small>
-                    {connection === "connected"
-                      ? "工作正常"
-                      : connection === "connecting"
-                        ? "正在建立连接"
-                        : "正在尝试恢复"}
-                  </small>
-                </span>
-                <i className={connection} />
+                <div className="system-status-row">
+                  <HardDrive size={16} />
+                  <span>
+                    <strong>私有文件服务</strong>
+                    <small>单文件最大 50 MB</small>
+                  </span>
+                </div>
+                <footer>
+                  <ShieldCheck size={13} />
+                  消息和文件仅保存在当前局域网
+                </footer>
               </div>
-              <div className="system-status-row">
-                <HardDrive size={16} />
-                <span>
-                  <strong>私有文件服务</strong>
-                  <small>单文件最大 50 MB</small>
-                </span>
-              </div>
-              <footer>
-                <ShieldCheck size={13} />
-                消息和文件仅保存在当前局域网
-              </footer>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </header>
 

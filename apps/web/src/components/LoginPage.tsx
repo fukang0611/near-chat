@@ -13,12 +13,16 @@ import { type FormEvent, type KeyboardEvent, useState } from "react";
 import { api } from "../api";
 import type { User } from "../types";
 import { errorMessage } from "../utils/errors";
+import type { ThemeMode } from "../utils/theme";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface LoginPageProps {
+  theme: ThemeMode;
+  onThemeChange: (theme: ThemeMode) => void;
   onLogin: (token: string, user: User) => void;
 }
 
-export function LoginPage({ onLogin }: LoginPageProps) {
+export function LoginPage({ theme, onThemeChange, onLogin }: LoginPageProps) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -60,6 +64,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           <i className="dot-yellow" />
           <i className="dot-green" />
         </div>
+        <ThemeToggle theme={theme} onChange={onThemeChange} className="login-theme-toggle" />
 
         <div className="login-intro">
           <div className="brand-lockup">

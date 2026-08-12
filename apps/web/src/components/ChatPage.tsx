@@ -30,6 +30,7 @@ import {
   playMessageSound,
   saveNotificationPreferences,
 } from "../utils/notifications";
+import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
 import { Avatar } from "./Avatar";
 import { ChatSidebar, type SidebarMode } from "./ChatSidebar";
@@ -39,9 +40,12 @@ import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
 import { ProfileDialog } from "./ProfileDialog";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface ChatPageProps {
   user: User;
+  theme: ThemeMode;
+  onThemeChange: (theme: ThemeMode) => void;
   onUserUpdated: (user: User) => void;
   onLogout: () => void;
 }
@@ -95,7 +99,7 @@ function applyMessageUpdate(current: Message[], incoming: Message): Message[] {
  * 聊天页是前端的数据编排层：负责服务端数据、当前会话和领域操作。
  * 侧边栏、消息时间线、编辑器及实时连接各自隐藏浏览器交互细节。
  */
-export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
+export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }: ChatPageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -838,7 +842,9 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
         pendingAttachments={pendingAttachments}
         loading={sidebarLoading}
         connection={connection}
+        theme={theme}
         mode={sidebarMode}
+        onThemeChange={onThemeChange}
         onModeChange={setSidebarMode}
         onSelectConversation={(conversationId) => {
           messageTargetRef.current = null;
@@ -893,6 +899,12 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
                       : "离线 · 消息将在下次登录时送达"}
                 </span>
               </div>
+              <ThemeToggle
+                compact
+                theme={theme}
+                onChange={onThemeChange}
+                className="mobile-theme-toggle"
+              />
               <button
                 type="button"
                 className="header-search-button"
