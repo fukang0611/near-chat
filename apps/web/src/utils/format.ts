@@ -53,9 +53,14 @@ export function formatBytes(bytes: number): string {
 
 export function formatConversationPreview(conversation: Conversation): string {
   const message = conversation.lastMessage;
-  if (!message) return "开始你们的第一段对话";
-  if (message.text) return message.text;
-  if (message.type === "IMAGE") return "[图片]";
-  if (message.type === "FILE") return "[附件]";
-  return "新消息";
+  if (!message)
+    return conversation.type === "GROUP"
+      ? `${conversation.memberCount} 位成员`
+      : "开始你们的第一段对话";
+  const prefix =
+    conversation.type === "GROUP" && message.senderName ? `${message.senderName}: ` : "";
+  if (message.text) return `${prefix}${message.text}`;
+  if (message.type === "IMAGE") return `${prefix}[图片]`;
+  if (message.type === "FILE") return `${prefix}[附件]`;
+  return `${prefix}新消息`;
 }

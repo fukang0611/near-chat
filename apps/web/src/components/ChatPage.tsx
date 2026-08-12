@@ -5,6 +5,7 @@ import {
   Info,
   MessageCircleMore,
   Paperclip,
+  Search,
   UsersRound,
   X,
 } from "lucide-react";
@@ -16,7 +17,9 @@ import { errorMessage } from "../utils/errors";
 import { AdminPanel } from "./AdminPanel";
 import { Avatar } from "./Avatar";
 import { ChatSidebar, type SidebarMode } from "./ChatSidebar";
+import { CreateGroupDialog } from "./CreateGroupDialog";
 import { MessageComposer } from "./MessageComposer";
+import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
 
 interface ChatPageProps {
@@ -51,6 +54,8 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageLoadVersion, setMessageLoadVersion] = useState(0);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("recent");
 
   // 草稿与待发送附件按会话隔离，切换会话时保留各自上下文。
@@ -60,10 +65,13 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
   const [sending, setSending] = useState(false);
 
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const messageTargetRef = useRef<{ conversationId: string; messageId: string } | null>(null);
   const initializedConversationsRef = useRef(false);
 
   const selectedConversation = useMemo(
@@ -104,6 +112,12 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
     return result.conversations;
   }, []);
 
+  const refreshConversationsInBackground = useCallback(() => {
+    void refreshConversations().catch((error) => {
+      notify(errorMessage(error, "会话刷新失败"), "error");
+    });
+  }, [notify, refreshConversations]);
+
   useEffect(() => {
     void Promise.all([refreshUsers(), refreshConversations()])
       .catch((error) => notify(errorMessage(error, "数据加载失败"), "error"))
@@ -118,28 +132,55 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 
     let active = true;
     setLoadingMessages(true);
-    void api
-      .messages(selectedId)
-      .then((result) => {
-        if (active) setMessages(result.messages);
-      })
-      .then(() => api.markRead(selectedId))
-      .then(() =>
+    const target = messageTargetRef.current;
+    const aroundMessageId = target?.conversationId === selectedId ? target.messageId : undefined;
+    void (async () => {
+      try {
+        const result = await api.messages(selectedId, aroundMessageId);
+        if (!active) return;
+        setMessages(result.messages);
+        setHighlightedMessageId(aroundMessageId ?? null);
+        if (aroundMessageId) messageTargetRef.current = null;
+        const latestMessage = result.messages.at(-1);
+        const readResult = latestMessage
+          ? await api.markRead(selectedId, latestMessage.id)
+          : { unreadCount: 0 };
+        if (!active) return;
         setConversations((current) =>
-          current.map((item) => (item.id === selectedId ? { ...item, unreadCount: 0 } : item)),
-        ),
-      )
-      .catch((error) => notify(errorMessage(error, "消息加载失败"), "error"))
-      .finally(() => active && setLoadingMessages(false));
+          current.map((item) =>
+            item.id === selectedId ? { ...item, unreadCount: readResult.unreadCount } : item,
+          ),
+        );
+      } catch (error) {
+        if (active) notify(errorMessage(error, "消息加载失败"), "error");
+      } finally {
+        if (active) setLoadingMessages(false);
+      }
+    })();
 
     return () => {
       active = false;
     };
-  }, [notify, selectedId]);
+  }, [messageLoadVersion, notify, selectedId]);
 
   useEffect(() => {
+    if (highlightedMessageId) return;
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, selectedId]);
+
+  useEffect(() => {
+    if (!highlightedMessageId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`message-${highlightedMessageId}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 2_600);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [highlightedMessageId]);
 
   const connection = useRealtimeConnection({
     onSessionInvalid: onLogout,
@@ -147,20 +188,40 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
       const onlineIds = new Set(onlineUserIds);
       setUsers((current) => current.map((item) => ({ ...item, online: onlineIds.has(item.id) })));
       setConversations((current) =>
-        current.map((item) => ({
-          ...item,
-          peer: { ...item.peer, online: onlineIds.has(item.peer.id) },
-        })),
+        current.map((item) => {
+          const members = item.members.map((member) => ({
+            ...member,
+            online: onlineIds.has(member.id),
+          }));
+          const peer = item.peer ? { ...item.peer, online: onlineIds.has(item.peer.id) } : null;
+          return {
+            ...item,
+            members,
+            peer,
+            onlineMemberCount: members.filter((member) => member.online).length,
+          };
+        }),
       );
+      // 重连时一并补齐断线期间新建的群聊或单聊。
+      refreshConversationsInBackground();
     },
     onPresenceChanged: (userId, online) => {
       setUsers((current) =>
         current.map((item) => (item.id === userId ? { ...item, online } : item)),
       );
       setConversations((current) =>
-        current.map((item) =>
-          item.peer.id === userId ? { ...item, peer: { ...item.peer, online } } : item,
-        ),
+        current.map((item) => {
+          if (!item.members.some((member) => member.id === userId)) return item;
+          const members = item.members.map((member) =>
+            member.id === userId ? { ...member, online } : member,
+          );
+          return {
+            ...item,
+            members,
+            peer: item.peer?.id === userId ? { ...item.peer, online } : item.peer,
+            onlineMemberCount: members.filter((member) => member.online).length,
+          };
+        }),
       );
     },
     onMessageCreated: (incoming) => {
@@ -168,13 +229,32 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
         setMessages((current) =>
           current.some((item) => item.id === incoming.id) ? current : [...current, incoming],
         );
-        if (incoming.senderId !== user.id) void api.markRead(incoming.conversationId);
+        if (incoming.senderId !== user.id) {
+          void api.markRead(incoming.conversationId, incoming.id).catch((error) => {
+            notify(errorMessage(error, "已读状态同步失败"), "error");
+          });
+        }
       }
-      void refreshConversations();
+      refreshConversationsInBackground();
     },
     onUnreadChanged: (conversationId, unreadCount) => {
       setConversations((current) =>
         current.map((item) => (item.id === conversationId ? { ...item, unreadCount } : item)),
+      );
+    },
+    onConversationChanged: () => {
+      refreshConversationsInBackground();
+    },
+    onReceiptChanged: (receipts) => {
+      if (receipts.length === 0) return;
+      const receiptByMessageId = new Map(
+        receipts.map((receipt) => [receipt.messageId, receipt.receipt]),
+      );
+      setMessages((current) =>
+        current.map((message) => {
+          const receipt = receiptByMessageId.get(message.id);
+          return receipt ? { ...message, receipt } : message;
+        }),
       );
     },
   });
@@ -193,11 +273,24 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
     try {
       const result = await api.directConversation(peerId);
       await refreshConversations();
+      messageTargetRef.current = null;
+      setHighlightedMessageId(null);
       setSelectedId(result.conversationId);
       setSidebarMode("recent");
     } catch (error) {
       notify(errorMessage(error, "会话创建失败"), "error");
     }
+  };
+
+  const createGroup = async (name: string, memberIds: string[]) => {
+    const result = await api.createGroup(name, memberIds);
+    await refreshConversations();
+    messageTargetRef.current = null;
+    setHighlightedMessageId(null);
+    setSelectedId(result.conversationId);
+    setSidebarMode("recent");
+    setShowCreateGroup(false);
+    notify(`群聊“${name}”已创建`, "success");
   };
 
   const chooseFile = async (file: File | undefined) => {
@@ -264,11 +357,11 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
       });
       // 发送期间允许切换会话；只把结果写入它所属且仍处于选中状态的时间线。
       if (selectedIdRef.current === conversationId) {
-        setMessages((current) =>
-          current.some((item) => item.id === result.message.id)
-            ? current
-            : [...current, result.message],
-        );
+        setMessages((current) => {
+          const existingIndex = current.findIndex((item) => item.id === result.message.id);
+          if (existingIndex < 0) return [...current, result.message];
+          return current.map((item, index) => (index === existingIndex ? result.message : item));
+        });
       }
       setDrafts((current) => {
         const next = { ...current };
@@ -331,8 +424,13 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
         connection={connection}
         mode={sidebarMode}
         onModeChange={setSidebarMode}
-        onSelectConversation={setSelectedId}
+        onSelectConversation={(conversationId) => {
+          messageTargetRef.current = null;
+          setHighlightedMessageId(null);
+          setSelectedId(conversationId);
+        }}
         onOpenDirect={(peerId) => void openDirect(peerId)}
+        onCreateGroup={() => setShowCreateGroup(true)}
         onOpenAdmin={() => setShowAdmin(true)}
         onLogout={() => void logout()}
       />
@@ -349,25 +447,44 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
               <button
                 className="mobile-back"
                 type="button"
-                onClick={() => setSelectedId(null)}
+                onClick={() => {
+                  messageTargetRef.current = null;
+                  setHighlightedMessageId(null);
+                  setSelectedId(null);
+                }}
                 aria-label="返回会话列表"
               >
                 <ChevronLeft size={21} />
               </button>
               <Avatar
-                name={selectedConversation.peer.displayName}
-                color={selectedConversation.peer.avatarColor}
+                name={selectedConversation.title}
+                color={selectedConversation.avatarColor}
                 size="small"
-                online={selectedConversation.peer.online}
+                online={
+                  selectedConversation.type === "DIRECT"
+                    ? selectedConversation.peer?.online
+                    : undefined
+                }
               />
               <div className="chat-title">
-                <strong>{selectedConversation.peer.displayName}</strong>
+                <strong>{selectedConversation.title}</strong>
                 <span>
-                  {selectedConversation.peer.online
-                    ? "在线 · 可以即时收到消息"
-                    : "离线 · 消息将在下次登录时送达"}
+                  {selectedConversation.type === "GROUP"
+                    ? `${selectedConversation.onlineMemberCount} 人在线 · 共 ${selectedConversation.memberCount} 位成员`
+                    : selectedConversation.peer?.online
+                      ? "在线 · 可以即时收到消息"
+                      : "离线 · 消息将在下次登录时送达"}
                 </span>
               </div>
+              <button
+                type="button"
+                className="header-search-button"
+                onClick={() => setShowMessageSearch(true)}
+                aria-label="搜索消息"
+                title="搜索消息"
+              >
+                <Search size={17} />
+              </button>
               <div className={`connection-pill ${connection}`}>
                 <i />
                 {connection === "connected"
@@ -385,11 +502,12 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
                 currentUserId={user.id}
                 loading={loadingMessages}
                 endRef={endRef}
+                highlightedMessageId={highlightedMessageId}
               />
             </div>
 
             <MessageComposer
-              peerName={selectedConversation.peer.displayName}
+              peerName={selectedConversation.title}
               text={text}
               pendingAttachment={pendingAttachment}
               upload={activeUpload}
@@ -434,6 +552,27 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 
       {showAdmin && (
         <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} onNotify={notify} />
+      )}
+      {showCreateGroup && (
+        <CreateGroupDialog
+          users={users}
+          onClose={() => setShowCreateGroup(false)}
+          onCreate={createGroup}
+        />
+      )}
+      {showMessageSearch && (
+        <MessageSearchPanel
+          conversations={conversations}
+          selectedConversationId={selectedId}
+          onClose={() => setShowMessageSearch(false)}
+          onOpenResult={(conversationId, messageId) => {
+            messageTargetRef.current = { conversationId, messageId };
+            setSelectedId(conversationId);
+            setMessageLoadVersion((current) => current + 1);
+            setSidebarMode("recent");
+            setShowMessageSearch(false);
+          }}
+        />
       )}
       {toast && (
         <div

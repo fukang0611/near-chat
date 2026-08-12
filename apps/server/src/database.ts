@@ -52,10 +52,24 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY,
-  type VARCHAR(20) NOT NULL DEFAULT 'DIRECT' CHECK (type IN ('DIRECT')),
-  direct_key TEXT NOT NULL UNIQUE,
+  type VARCHAR(20) NOT NULL DEFAULT 'DIRECT' CHECK (type IN ('DIRECT', 'GROUP')),
+  direct_key TEXT UNIQUE,
+  name VARCHAR(80),
+  avatar_color VARCHAR(20) NOT NULL DEFAULT '#5B6EE1',
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 兼容第一阶段已经创建的数据库：旧表只允许单聊，且 direct_key 不可为空。
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS name VARCHAR(80);
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS avatar_color VARCHAR(20) NOT NULL DEFAULT '#5B6EE1';
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE conversations ALTER COLUMN direct_key DROP NOT NULL;
+ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_type_check;
+ALTER TABLE conversations
+  ADD CONSTRAINT conversations_type_check CHECK (type IN ('DIRECT', 'GROUP'));
 
 CREATE TABLE IF NOT EXISTS conversation_members (
   conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
@@ -88,10 +102,32 @@ CREATE TABLE IF NOT EXISTS attachments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS message_receipts (
+  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  delivered_at TIMESTAMPTZ,
+  read_at TIMESTAMPTZ,
+  PRIMARY KEY (message_id, user_id)
+);
+
+-- 为升级前的历史消息补齐回执。已被成员读过的历史消息同时视为已送达。
+INSERT INTO message_receipts (message_id, user_id, delivered_at, read_at)
+SELECT m.id,
+       cm.user_id,
+       CASE WHEN m.created_at <= cm.last_read_at THEN cm.last_read_at ELSE NULL END,
+       CASE WHEN m.created_at <= cm.last_read_at THEN cm.last_read_at ELSE NULL END
+  FROM messages m
+  JOIN conversation_members cm ON cm.conversation_id = m.conversation_id
+ WHERE cm.user_id <> m.sender_id
+ON CONFLICT (message_id, user_id) DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_members_user ON conversation_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_time
   ON messages(conversation_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
+  ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);
 `;
 
 const seedUsers = [
@@ -124,7 +160,10 @@ export async function initializeDatabase(): Promise<void> {
   await pool.query(schema);
 
   // 种子账号只在首次启动时写入，已有账号的密码和资料不会被容器重启覆盖。
-  for (const user of seedUsers) {
+  const usersToSeed = config.seedDemoUsers
+    ? seedUsers
+    : seedUsers.filter((user) => user.username === "admin");
+  for (const user of usersToSeed) {
     const passwordHash = await bcrypt.hash(user.password, 10);
     await pool.query(
       `INSERT INTO users

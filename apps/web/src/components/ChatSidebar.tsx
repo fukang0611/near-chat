@@ -7,6 +7,7 @@ import {
   Search,
   Settings2,
   ShieldCheck,
+  UserRoundPlus,
   UsersRound,
   X,
 } from "lucide-react";
@@ -31,6 +32,7 @@ interface ChatSidebarProps {
   onModeChange: (mode: SidebarMode) => void;
   onSelectConversation: (conversationId: string) => void;
   onOpenDirect: (userId: string) => void;
+  onCreateGroup: () => void;
   onOpenAdmin: () => void;
   onLogout: () => void;
 }
@@ -65,6 +67,7 @@ export function ChatSidebar({
   onModeChange,
   onSelectConversation,
   onOpenDirect,
+  onCreateGroup,
   onOpenAdmin,
   onLogout,
 }: ChatSidebarProps) {
@@ -111,8 +114,12 @@ export function ChatSidebar({
     return conversations.filter(
       (item) =>
         !keyword ||
-        item.peer.displayName.toLowerCase().includes(keyword) ||
-        item.peer.username.toLowerCase().includes(keyword),
+        item.title.toLowerCase().includes(keyword) ||
+        item.members.some(
+          (member) =>
+            member.displayName.toLowerCase().includes(keyword) ||
+            member.username.toLowerCase().includes(keyword),
+        ),
     );
   }, [conversations, search]);
 
@@ -228,9 +235,14 @@ export function ChatSidebar({
 
         <div className="list-heading">
           <span>{mode === "recent" ? "最近会话" : "全部联系人"}</span>
-          <small>
-            {mode === "recent" ? `${filteredConversations.length} 个` : `${onlineCount} 在线`}
-          </small>
+          <span className="list-heading-actions">
+            <small>
+              {mode === "recent" ? `${filteredConversations.length} 个` : `${onlineCount} 在线`}
+            </small>
+            <button type="button" onClick={onCreateGroup} aria-label="创建群聊" title="创建群聊">
+              <UserRoundPlus size={15} />
+            </button>
+          </span>
         </div>
 
         <div className="contact-list">
@@ -247,13 +259,13 @@ export function ChatSidebar({
                   aria-current={selectedId === conversation.id ? "page" : undefined}
                 >
                   <Avatar
-                    name={conversation.peer.displayName}
-                    color={conversation.peer.avatarColor}
-                    online={conversation.peer.online}
+                    name={conversation.title}
+                    color={conversation.avatarColor}
+                    online={conversation.type === "DIRECT" ? conversation.peer?.online : undefined}
                   />
                   <span className="conversation-copy">
                     <span>
-                      <strong>{conversation.peer.displayName}</strong>
+                      <strong>{conversation.title}</strong>
                       <time>{formatSidebarTime(conversation.lastMessage?.createdAt)}</time>
                     </span>
                     <span>

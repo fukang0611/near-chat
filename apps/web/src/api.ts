@@ -78,16 +78,32 @@ export const api = {
     request<{ conversationId: string }>(`/api/conversations/direct/${userId}`, {
       method: "POST",
     }),
-  messages: (conversationId: string) =>
-    request<{ messages: Message[] }>(`/api/conversations/${conversationId}/messages?limit=100`),
+  createGroup: (name: string, memberIds: string[]) =>
+    request<{ conversationId: string }>("/api/conversations/groups", {
+      method: "POST",
+      body: JSON.stringify({ name, memberIds }),
+    }),
+  messages: (conversationId: string, aroundMessageId?: string) => {
+    const query = new URLSearchParams({ limit: "100" });
+    if (aroundMessageId) query.set("around", aroundMessageId);
+    return request<{ messages: Message[] }>(
+      `/api/conversations/${conversationId}/messages?${query}`,
+    );
+  },
+  searchMessages: (keyword: string, conversationId?: string) => {
+    const query = new URLSearchParams({ q: keyword, limit: "50" });
+    if (conversationId) query.set("conversationId", conversationId);
+    return request<{ messages: Message[] }>(`/api/messages/search?${query}`);
+  },
   sendMessage: (conversationId: string, input: SendMessageInput) =>
     request<{ message: Message }>(`/api/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
-  markRead: (conversationId: string) =>
-    request<void>(`/api/conversations/${conversationId}/read`, {
+  markRead: (conversationId: string, throughMessageId?: string) =>
+    request<{ unreadCount: number }>(`/api/conversations/${conversationId}/read`, {
       method: "POST",
+      body: JSON.stringify({ throughMessageId }),
     }),
   upload: (file: File, onProgress?: (progress: number) => void): Promise<Attachment> =>
     new Promise((resolve, reject) => {

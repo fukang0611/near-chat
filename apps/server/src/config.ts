@@ -33,6 +33,7 @@ export const config = {
     bucket: process.env.MINIO_BUCKET ?? "near-chat-files",
   },
   fileMaxBytes: integer("FILE_MAX_BYTES", 50 * 1024 * 1024),
+  seedDemoUsers: bool("SEED_DEMO_USERS", true),
   seedPasswords: {
     admin: process.env.SEED_ADMIN_PASSWORD ?? "admin123",
     alice: process.env.SEED_ALICE_PASSWORD ?? "alice123",

@@ -22,7 +22,12 @@ export function createApp(realtime: RealtimeHub) {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
 
-  app.get("/api/health", async (_request, response) => {
+  // 存活检查只证明 Node 进程可响应；依赖故障不应触发 Kubernetes 重启风暴。
+  app.get("/api/health/live", (_request, response) => {
+    response.json({ status: "UP" });
+  });
+
+  const readiness = async (_request: express.Request, response: express.Response) => {
     try {
       await pool.query("SELECT 1");
       await minio.bucketExists(config.minio.bucket);
@@ -30,7 +35,10 @@ export function createApp(realtime: RealtimeHub) {
     } catch {
       response.status(503).json({ status: "DOWN" });
     }
-  });
+  };
+  app.get("/api/health/ready", readiness);
+  // 保留第一阶段健康地址，兼容已有 Docker Compose 和运维脚本。
+  app.get("/api/health", readiness);
 
   app.use("/api", createAuthRouter());
   app.use("/api", createChatRouter(realtime));

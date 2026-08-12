@@ -9,11 +9,19 @@ export interface User {
 
 export interface Conversation {
   id: string;
-  peer: User;
+  type: "DIRECT" | "GROUP";
+  title: string;
+  avatarColor: string;
+  peer: User | null;
+  members: User[];
+  memberCount: number;
+  onlineMemberCount: number;
   lastMessage: {
     type: "TEXT" | "IMAGE" | "FILE";
     text: string | null;
     createdAt: string | null;
+    senderId: string | null;
+    senderName: string | null;
   } | null;
   unreadCount: number;
 }
@@ -36,6 +44,19 @@ export interface Message {
   textContent: string | null;
   createdAt: string;
   attachments: Attachment[];
+  receipt: ReceiptSummary;
+}
+
+export interface ReceiptSummary {
+  recipientCount: number;
+  deliveredCount: number;
+  readCount: number;
+}
+
+export interface ReceiptChange {
+  messageId: string;
+  conversationId: string;
+  receipt: ReceiptSummary;
 }
 
 export interface AdminUser extends User {

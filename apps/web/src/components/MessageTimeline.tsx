@@ -3,7 +3,7 @@ import type { Conversation, Message } from "../types";
 import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/format";
 import { AttachmentView } from "./AttachmentView";
 import { Avatar } from "./Avatar";
-import { LoaderCircle, MessageCircleMore } from "lucide-react";
+import { Check, CheckCheck, LoaderCircle, MessageCircleMore } from "lucide-react";
 
 interface MessageTimelineProps {
   conversation: Conversation;
@@ -11,15 +11,43 @@ interface MessageTimelineProps {
   currentUserId: string;
   loading: boolean;
   endRef: RefObject<HTMLDivElement | null>;
+  highlightedMessageId?: string | null;
 }
 
-function MessageBubble({ message, mine }: { message: Message; mine: boolean }) {
+function receiptText(message: Message): { label: string; read: boolean; delivered: boolean } {
+  const { recipientCount, deliveredCount, readCount } = message.receipt;
+  if (recipientCount > 0 && readCount === recipientCount) {
+    return { label: "已读", read: true, delivered: true };
+  }
+  if (readCount > 0) {
+    return { label: `已读 ${readCount}/${recipientCount}`, read: true, delivered: true };
+  }
+  if (recipientCount > 0 && deliveredCount === recipientCount) {
+    return { label: "已送达", read: false, delivered: true };
+  }
+  if (deliveredCount > 0) {
+    return { label: `已送达 ${deliveredCount}/${recipientCount}`, read: false, delivered: true };
+  }
+  return { label: "已发送", read: false, delivered: false };
+}
+
+function MessageBubble({
+  message,
+  mine,
+  highlighted,
+}: {
+  message: Message;
+  mine: boolean;
+  highlighted: boolean;
+}) {
   const hasAttachment = message.attachments.length > 0;
   const hasText = Boolean(message.textContent);
+  const receipt = mine ? receiptText(message) : null;
 
   return (
     <div
-      className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""}`}
+      id={`message-${message.id}`}
+      className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""}`}
     >
       {!mine && <Avatar name={message.senderName} color={message.senderAvatarColor} size="small" />}
       <div className="message-stack">
@@ -34,7 +62,18 @@ function MessageBubble({ message, mine }: { message: Message; mine: boolean }) {
             </div>
           )}
         </div>
-        <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
+        <span className="message-meta">
+          <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
+          {receipt && (
+            <span
+              className={`message-receipt ${receipt.read ? "is-read" : receipt.delivered ? "is-delivered" : ""}`}
+              title={receipt.label}
+            >
+              {receipt.delivered ? <CheckCheck size={13} /> : <Check size={13} />}
+              {receipt.label}
+            </span>
+          )}
+        </span>
       </div>
     </div>
   );
@@ -47,17 +86,18 @@ export function MessageTimeline({
   currentUserId,
   loading,
   endRef,
+  highlightedMessageId,
 }: MessageTimelineProps) {
   return (
     <div className="message-canvas">
       <div className="conversation-intro">
-        <Avatar
-          name={conversation.peer.displayName}
-          color={conversation.peer.avatarColor}
-          size="large"
-        />
-        <strong>{conversation.peer.displayName}</strong>
-        <span>@{conversation.peer.username} · 你们的局域网私聊</span>
+        <Avatar name={conversation.title} color={conversation.avatarColor} size="large" />
+        <strong>{conversation.title}</strong>
+        <span>
+          {conversation.type === "GROUP"
+            ? `${conversation.memberCount} 位成员 · 局域网群聊`
+            : `@${conversation.peer?.username ?? "unknown"} · 你们的局域网私聊`}
+        </span>
       </div>
 
       {loading ? (
@@ -80,7 +120,11 @@ export function MessageTimeline({
                 <span>{formatMessageDay(message.createdAt)}</span>
               </div>
             )}
-            <MessageBubble message={message} mine={message.senderId === currentUserId} />
+            <MessageBubble
+              message={message}
+              mine={message.senderId === currentUserId}
+              highlighted={highlightedMessageId === message.id}
+            />
           </Fragment>
         ))
       )}

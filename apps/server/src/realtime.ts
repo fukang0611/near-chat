@@ -12,6 +12,7 @@ export class RealtimeHub {
   // 同一账号可能同时打开多个标签页；只有最后一个连接关闭时才广播离线。
   private readonly sockets = new Map<string, Set<WebSocket>>();
   private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly onlineHandlers = new Set<(userId: string) => void | Promise<void>>();
 
   attach(server: Server): void {
     server.on("upgrade", async (request, socket: Socket, head) => {
@@ -49,13 +50,29 @@ export class RealtimeHub {
       .map(([userId]) => userId);
   }
 
-  sendToUsers(userIds: string[], event: RealtimeEvent): void {
+  /**
+   * 向指定账号的所有标签页发送事件，并返回至少有一个连接成功接收的账号。
+   * 返回值用于把持久化消息从“已发送”推进到“已送达”。
+   */
+  sendToUsers(userIds: string[], event: RealtimeEvent): string[] {
     const data = JSON.stringify(event);
+    const deliveredUserIds: string[] = [];
     for (const userId of new Set(userIds)) {
+      let delivered = false;
       for (const socket of this.sockets.get(userId) ?? []) {
-        if (socket.readyState === WebSocket.OPEN) socket.send(data);
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(data);
+          delivered = true;
+        }
       }
+      if (delivered) deliveredUserIds.push(userId);
     }
+    return deliveredUserIds;
+  }
+
+  onUserOnline(handler: (userId: string) => void | Promise<void>): () => void {
+    this.onlineHandlers.add(handler);
+    return () => this.onlineHandlers.delete(handler);
   }
 
   disconnectUser(userId: string): void {
@@ -91,6 +108,11 @@ export class RealtimeHub {
         type: "presence.changed",
         payload: { userId: user.id, online: true },
       });
+      for (const handler of this.onlineHandlers) {
+        void Promise.resolve(handler(user.id)).catch((error) => {
+          console.error("Failed to process online user event:", error);
+        });
+      }
     }
 
     socket.on("close", () => {

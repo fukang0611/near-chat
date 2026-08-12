@@ -1,6 +1,6 @@
 # 近聊 NearChat
 
-面向局域网的轻量单聊工具，支持账号管理、在线状态、文本消息、图片和附件。PostgreSQL 保存业务数据，MinIO 提供私有文件存储。
+面向局域网的轻量聊天工具，支持账号管理、单聊与群聊、在线状态、未读与消息回执、消息搜索、文本、图片和附件。PostgreSQL 保存业务数据，MinIO 提供私有文件存储。
 
 完整边界与设计见 [第一阶段整体方案](docs/phase-1-plan.md)。
 
@@ -24,6 +24,13 @@ docker compose up --build -d
 | `bob`   | `bob123`   | 普通用户 |
 
 这些密码仅用于本地快速体验。共享给局域网其他用户前，请通过环境变量更换初始化密码和 `JWT_SECRET`。
+设置 `SEED_DEMO_USERS=false` 可在全新数据库中只创建管理员，不创建 Alice 和 Bob。
+
+## Rancher 部署
+
+Rancher/Kubernetes 单文件资源清单位于 `deploy/rancher/near-chat.yaml`。导入前修改镜像地址、PostgreSQL URL、MinIO 服务信息、密钥和 Ingress 域名，具体说明见 `deploy/rancher/README.md`。
+
+当前 WebSocket 在线状态保存在应用进程内，Rancher 部署必须保持单副本。
 
 查看状态和日志：
 
@@ -71,6 +78,7 @@ apps/server/src/
   app.ts                 HTTP 应用装配与静态资源托管
   routes/                登录、聊天、文件和用户管理领域路由
   message-service.ts     消息查询与 DTO 映射
+  receipt-service.ts     送达/已读状态推进与实时广播
   realtime.ts            WebSocket 在线状态与事件分发
   database.ts / minio.ts 基础设施初始化
 
@@ -84,10 +92,10 @@ apps/web/src/
 
 注释主要说明不直观的约束和设计原因，例如消息幂等、文件访问权限、实时连接生命周期与焦点管理；能够由代码直接表达的步骤不重复注释。
 
-## 第一阶段限制
+## 当前限制
 
-- 只支持一对一聊天。
 - 单文件默认最大 50 MB，上传由应用服务代理。
-- 在线状态保存在单个应用实例内。
+- 在线状态与实时广播保存在单个应用实例内，暂不支持多副本。
 - 不进行 IP/端口扫描；在线用户由聊天服务统一发现。
-- 暂无消息撤回、群聊、端到端加密和音视频。
+- 群聊暂不支持成员增删、转让或解散。
+- 暂无消息撤回、端到端加密和音视频。

@@ -49,6 +49,7 @@ services:
       MINIO_SECRET_KEY: near-chat-secret
       MINIO_BUCKET: near-chat-files
       FILE_MAX_BYTES: 52428800
+      SEED_DEMO_USERS: "true"
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
       SEED_ALICE_PASSWORD: ${SEED_ALICE_PASSWORD:-alice123}
       SEED_BOB_PASSWORD: ${SEED_BOB_PASSWORD:-bob123}

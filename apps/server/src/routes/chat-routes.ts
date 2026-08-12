@@ -4,22 +4,41 @@ import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
-import { findMessage, listMessages } from "../message-service.js";
+import {
+  findMessage,
+  listMessages,
+  listMessagesAround,
+  searchMessages,
+} from "../message-service.js";
+import {
+  broadcastReceiptChanges,
+  markConversationRead,
+  markMessageDelivered,
+} from "../receipt-service.js";
 import { RealtimeHub } from "../realtime.js";
 
 interface MemberRow {
   user_id: string;
 }
 
+interface ConversationMember {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarColor: string;
+}
+
 interface ConversationRow {
   id: string;
-  peer_id: string;
-  peer_username: string;
-  peer_name: string;
-  peer_avatar_color: string;
+  type: "DIRECT" | "GROUP";
+  name: string | null;
+  avatar_color: string;
+  members: ConversationMember[];
   last_message_type: "TEXT" | "IMAGE" | "FILE" | null;
   last_message_text: string | null;
   last_message_at: Date | null;
+  last_message_sender_id: string | null;
+  last_message_sender_name: string | null;
   unread_count: number;
 }
 
@@ -31,7 +50,20 @@ const sendMessageSchema = z
   })
   .refine((value) => Boolean(value.text) || value.attachmentIds.length > 0, "消息内容不能为空");
 
-async function ensureMember(conversationId: string, userId: string) {
+const createGroupSchema = z.object({
+  name: z.string().trim().min(2, "群聊名称至少 2 个字符").max(80),
+  memberIds: z.array(z.string().uuid()).min(2, "请至少选择 2 位联系人").max(49),
+});
+
+const searchSchema = z.object({
+  q: z.string().trim().min(1).max(100),
+  conversationId: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+const groupColors = ["#5B6EE1", "#6C5CE7", "#2F9E83", "#D97757", "#B65B7A", "#4477B8"];
+
+async function ensureMember(conversationId: string, userId: string): Promise<void> {
   const result = await query(
     `SELECT 1
        FROM conversation_members
@@ -49,7 +81,38 @@ async function conversationMemberIds(conversationId: string): Promise<string[]> 
   return result.rows.map((row) => row.user_id);
 }
 
-/** 会话路由模块：联系人发现、单聊建立、消息历史、发送与已读状态。 */
+function serializeConversation(row: ConversationRow, currentUserId: string, realtime: RealtimeHub) {
+  const members = row.members.map((member) => ({
+    ...member,
+    online: realtime.isOnline(member.id),
+  }));
+  const peer = row.type === "DIRECT" ? members.find((member) => member.id !== currentUserId) : null;
+  const title =
+    row.type === "GROUP" ? (row.name ?? "未命名群聊") : (peer?.displayName ?? "未知用户");
+
+  return {
+    id: row.id,
+    type: row.type,
+    title,
+    avatarColor: row.type === "GROUP" ? row.avatar_color : (peer?.avatarColor ?? row.avatar_color),
+    peer: peer ?? null,
+    members,
+    memberCount: members.length,
+    onlineMemberCount: members.filter((member) => member.online).length,
+    lastMessage: row.last_message_type
+      ? {
+          type: row.last_message_type,
+          text: row.last_message_text,
+          createdAt: row.last_message_at?.toISOString() ?? null,
+          senderId: row.last_message_sender_id,
+          senderName: row.last_message_sender_name,
+        }
+      : null,
+    unreadCount: row.unread_count,
+  };
+}
+
+/** 会话路由模块：联系人、单聊与群聊、消息搜索、发送和精确回执。 */
 export function createChatRouter(realtime: RealtimeHub) {
   const router = Router();
 
@@ -82,25 +145,39 @@ export function createChatRouter(realtime: RealtimeHub) {
     const user = currentUser(request);
     const result = await query<ConversationRow>(
       `SELECT c.id,
-              peer_user.id AS peer_id,
-              peer_user.username AS peer_username,
-              peer_user.display_name AS peer_name,
-              peer_user.avatar_color AS peer_avatar_color,
+              c.type,
+              c.name,
+              c.avatar_color,
+              COALESCE(
+                (SELECT json_agg(
+                          json_build_object(
+                            'id', member_user.id,
+                            'username', member_user.username,
+                            'displayName', member_user.display_name,
+                            'avatarColor', member_user.avatar_color
+                          )
+                          ORDER BY member_user.display_name, member_user.username
+                        )
+                   FROM conversation_members all_members
+                   JOIN users member_user ON member_user.id = all_members.user_id
+                  WHERE all_members.conversation_id = c.id),
+                '[]'::json
+              ) AS members,
               last_message.type AS last_message_type,
               last_message.text_content AS last_message_text,
               last_message.created_at AS last_message_at,
+              last_message.sender_id AS last_message_sender_id,
+              last_message.sender_name AS last_message_sender_name,
               COALESCE(unread.count, 0)::int AS unread_count
          FROM conversations c
          JOIN conversation_members mine
            ON mine.conversation_id = c.id AND mine.user_id = $1
-         JOIN conversation_members peer
-           ON peer.conversation_id = c.id AND peer.user_id <> $1
-         JOIN users peer_user ON peer_user.id = peer.user_id
          LEFT JOIN LATERAL (
-           SELECT type, text_content, created_at
-             FROM messages
-            WHERE conversation_id = c.id
-            ORDER BY created_at DESC
+           SELECT m.type, m.text_content, m.created_at, m.sender_id, sender.display_name AS sender_name
+             FROM messages m
+             JOIN users sender ON sender.id = m.sender_id
+            WHERE m.conversation_id = c.id
+            ORDER BY m.created_at DESC
             LIMIT 1
          ) last_message ON TRUE
          LEFT JOIN LATERAL (
@@ -115,24 +192,7 @@ export function createChatRouter(realtime: RealtimeHub) {
     );
 
     response.json({
-      conversations: result.rows.map((row) => ({
-        id: row.id,
-        peer: {
-          id: row.peer_id,
-          username: row.peer_username,
-          displayName: row.peer_name,
-          avatarColor: row.peer_avatar_color,
-          online: realtime.isOnline(row.peer_id),
-        },
-        lastMessage: row.last_message_type
-          ? {
-              type: row.last_message_type,
-              text: row.last_message_text,
-              createdAt: row.last_message_at?.toISOString() ?? null,
-            }
-          : null,
-        unreadCount: row.unread_count,
-      })),
+      conversations: result.rows.map((row) => serializeConversation(row, user.id, realtime)),
     });
   });
 
@@ -151,12 +211,12 @@ export function createChatRouter(realtime: RealtimeHub) {
     const directKey = [user.id, peerId].sort().join(":");
     const conversationId = await transaction(async (client) => {
       const conversation = await client.query<{ id: string }>(
-        `INSERT INTO conversations (id, type, direct_key)
-           VALUES ($1, 'DIRECT', $2)
+        `INSERT INTO conversations (id, type, direct_key, created_by)
+           VALUES ($1, 'DIRECT', $2, $3)
            ON CONFLICT (direct_key)
            DO UPDATE SET direct_key = EXCLUDED.direct_key
            RETURNING id`,
-        [randomUUID(), directKey],
+        [randomUUID(), directKey, user.id],
       );
       const id = conversation.rows[0].id;
       await client.query(
@@ -168,7 +228,59 @@ export function createChatRouter(realtime: RealtimeHub) {
       return id;
     });
 
+    realtime.sendToUsers([user.id, peerId], {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
     response.status(201).json({ conversationId });
+  });
+
+  router.post("/conversations/groups", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const input = createGroupSchema.parse(request.body);
+    const memberIds = [...new Set(input.memberIds)].filter((memberId) => memberId !== user.id);
+    if (memberIds.length < 2) throw new ApiError(400, "请至少选择 2 位不同的联系人");
+
+    const eligibleMembers = await query<{ id: string }>(
+      "SELECT id FROM users WHERE enabled = TRUE AND id = ANY($1::uuid[])",
+      [memberIds],
+    );
+    if (eligibleMembers.rows.length !== memberIds.length) {
+      throw new ApiError(400, "部分群成员不存在或已被禁用");
+    }
+
+    const conversationId = randomUUID();
+    const colorIndex = Number.parseInt(conversationId.slice(0, 2), 16) % groupColors.length;
+    await transaction(async (client) => {
+      await client.query(
+        `INSERT INTO conversations (id, type, name, avatar_color, created_by)
+         VALUES ($1, 'GROUP', $2, $3, $4)`,
+        [conversationId, input.name, groupColors[colorIndex], user.id],
+      );
+      await client.query(
+        `INSERT INTO conversation_members (conversation_id, user_id)
+         SELECT $1, unnest($2::uuid[])`,
+        [conversationId, [user.id, ...memberIds]],
+      );
+    });
+
+    realtime.sendToUsers([user.id, ...memberIds], {
+      type: "conversation.changed",
+      payload: { conversationId },
+    });
+    response.status(201).json({ conversationId });
+  });
+
+  router.get("/messages/search", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const input = searchSchema.parse(request.query);
+    const messages = await searchMessages(
+      user.id,
+      input.q,
+      input.conversationId ?? null,
+      input.limit,
+    );
+    response.json({ messages });
   });
 
   router.get("/conversations/:conversationId/messages", authenticate, async (request, response) => {
@@ -177,12 +289,12 @@ export function createChatRouter(realtime: RealtimeHub) {
     await ensureMember(conversationId, user.id);
 
     const beforeRaw = z.string().datetime().optional().parse(request.query.before);
+    const aroundMessageId = z.string().uuid().optional().parse(request.query.around);
     const limit = z.coerce.number().int().min(1).max(100).default(50).parse(request.query.limit);
-    const messages = await listMessages(
-      conversationId,
-      beforeRaw ? new Date(beforeRaw) : null,
-      limit,
-    );
+    const messages = aroundMessageId
+      ? await listMessagesAround(conversationId, aroundMessageId, limit)
+      : await listMessages(conversationId, beforeRaw ? new Date(beforeRaw) : null, limit);
+    if (aroundMessageId && messages.length === 0) throw new ApiError(404, "目标消息不存在");
     response.json({ messages });
   });
 
@@ -194,22 +306,17 @@ export function createChatRouter(realtime: RealtimeHub) {
       const conversationId = z.string().uuid().parse(request.params.conversationId);
       const input = sendMessageSchema.parse(request.body);
 
-      const message = await transaction(async (client) => {
+      const saved = await transaction(async (client) => {
         const membership = await client.query(
           `SELECT 1 FROM conversation_members
             WHERE conversation_id = $1 AND user_id = $2`,
           [conversationId, user.id],
         );
-        if (membership.rowCount === 0) {
-          throw new ApiError(403, "无权访问该会话");
-        }
+        if (membership.rowCount === 0) throw new ApiError(403, "无权访问该会话");
 
         let attachmentContentType: string | null = null;
         if (input.attachmentIds.length > 0) {
-          const attachments = await client.query<{
-            id: string;
-            content_type: string;
-          }>(
+          const attachments = await client.query<{ id: string; content_type: string }>(
             `SELECT id, content_type
                FROM attachments
               WHERE id = ANY($1::uuid[])
@@ -238,7 +345,7 @@ export function createChatRouter(realtime: RealtimeHub) {
           [messageId, conversationId, user.id, input.clientMessageId, type, input.text || null],
         );
 
-        // clientMessageId 是客户端重试的幂等键；冲突时返回第一次写入的消息。
+        // clientMessageId 是客户端重试的幂等键；冲突时只返回第一次写入的消息。
         const effectiveMessageId = inserted.rows[0]?.id;
         if (!effectiveMessageId) {
           const existing = await client.query<{ id: string }>(
@@ -248,45 +355,78 @@ export function createChatRouter(realtime: RealtimeHub) {
           );
           const existingId = existing.rows[0]?.id;
           if (!existingId) throw new ApiError(500, "消息幂等记录读取失败");
-          return findMessage(existingId, client);
+          return { message: await findMessage(existingId, client), created: false };
         }
 
         if (input.attachmentIds.length > 0) {
-          await client.query(
-            `UPDATE attachments
-                SET message_id = $1
-              WHERE id = ANY($2::uuid[])`,
-            [effectiveMessageId, input.attachmentIds],
-          );
+          await client.query(`UPDATE attachments SET message_id = $1 WHERE id = ANY($2::uuid[])`, [
+            effectiveMessageId,
+            input.attachmentIds,
+          ]);
         }
-        return findMessage(effectiveMessageId, client);
+        await client.query(
+          `INSERT INTO message_receipts (message_id, user_id)
+           SELECT $1, user_id
+             FROM conversation_members
+            WHERE conversation_id = $2 AND user_id <> $3
+           ON CONFLICT DO NOTHING`,
+          [effectiveMessageId, conversationId, user.id],
+        );
+        return { message: await findMessage(effectiveMessageId, client), created: true };
       });
 
-      if (!message) throw new ApiError(500, "消息保存失败");
-      const members = await conversationMemberIds(conversationId);
-      realtime.sendToUsers(members, {
-        type: "message.created",
-        payload: { message },
-      });
-      response.status(201).json({ message });
+      if (!saved.message) throw new ApiError(500, "消息保存失败");
+      let responseMessage = saved.message;
+
+      if (saved.created) {
+        const members = await conversationMemberIds(conversationId);
+        const deliveredUsers = realtime
+          .sendToUsers(members, {
+            type: "message.created",
+            payload: { message: saved.message },
+          })
+          .filter((memberId) => memberId !== user.id);
+        const receiptChanges = await markMessageDelivered(saved.message.id, deliveredUsers);
+        await broadcastReceiptChanges(realtime, receiptChanges);
+        if (receiptChanges[0]) {
+          responseMessage = { ...saved.message, receipt: receiptChanges[0].receipt };
+        }
+      }
+
+      response.status(201).json({ message: responseMessage });
     },
   );
 
   router.post("/conversations/:conversationId/read", authenticate, async (request, response) => {
     const user = currentUser(request);
     const conversationId = z.string().uuid().parse(request.params.conversationId);
-    const result = await query(
-      `UPDATE conversation_members
-            SET last_read_at = NOW()
-          WHERE conversation_id = $1 AND user_id = $2`,
+    const input = z
+      .object({ throughMessageId: z.string().uuid().optional() })
+      .parse(request.body ?? {});
+    await ensureMember(conversationId, user.id);
+
+    const changes = await markConversationRead(
+      conversationId,
+      user.id,
+      input.throughMessageId ?? null,
+    );
+    await broadcastReceiptChanges(realtime, changes);
+    const unread = await query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count
+         FROM messages m
+         JOIN conversation_members mine
+           ON mine.conversation_id = m.conversation_id AND mine.user_id = $2
+        WHERE m.conversation_id = $1
+          AND m.sender_id <> $2
+          AND m.created_at > mine.last_read_at`,
       [conversationId, user.id],
     );
-    if (result.rowCount === 0) throw new ApiError(403, "无权访问该会话");
+    const unreadCount = Number(unread.rows[0]?.count ?? 0);
     realtime.sendToUsers([user.id], {
       type: "unread.changed",
-      payload: { conversationId, unreadCount: 0 },
+      payload: { conversationId, unreadCount },
     });
-    response.status(204).end();
+    response.json({ unreadCount });
   });
 
   return router;

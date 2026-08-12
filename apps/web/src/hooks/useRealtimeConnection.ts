@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { websocketUrl } from "../api";
-import type { Message } from "../types";
+import type { Message, ReceiptChange } from "../types";
 
 export type ConnectionState = "connected" | "connecting" | "offline";
 
@@ -10,13 +10,17 @@ interface RealtimeHandlers {
   onPresenceChanged: (userId: string, online: boolean) => void;
   onMessageCreated: (message: Message) => void;
   onUnreadChanged: (conversationId: string, unreadCount: number) => void;
+  onConversationChanged: (conversationId: string) => void;
+  onReceiptChanged: (receipts: ReceiptChange[]) => void;
 }
 
 type RealtimeEvent =
   | { type: "presence.snapshot"; payload: { onlineUserIds: string[] } }
   | { type: "presence.changed"; payload: { userId: string; online: boolean } }
   | { type: "message.created"; payload: { message: Message } }
-  | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } };
+  | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } }
+  | { type: "conversation.changed"; payload: { conversationId: string } }
+  | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -34,7 +38,26 @@ function isMessage(value: unknown): value is Message {
     (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
     (value.textContent === null || typeof value.textContent === "string") &&
     typeof value.createdAt === "string" &&
-    Array.isArray(value.attachments)
+    Array.isArray(value.attachments) &&
+    isReceiptSummary(value.receipt)
+  );
+}
+
+function isReceiptSummary(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.recipientCount === "number" &&
+    typeof value.deliveredCount === "number" &&
+    typeof value.readCount === "number"
+  );
+}
+
+function isReceiptChange(value: unknown): value is ReceiptChange {
+  return (
+    isRecord(value) &&
+    typeof value.messageId === "string" &&
+    typeof value.conversationId === "string" &&
+    isReceiptSummary(value.receipt)
   );
 }
 
@@ -70,6 +93,14 @@ function parseRealtimeEvent(raw: string): RealtimeEvent | null {
                 unreadCount: payload.unreadCount,
               },
             }
+          : null;
+      case "conversation.changed":
+        return typeof payload.conversationId === "string"
+          ? { type: event.type, payload: { conversationId: payload.conversationId } }
+          : null;
+      case "receipt.changed":
+        return Array.isArray(payload.receipts) && payload.receipts.every(isReceiptChange)
+          ? { type: event.type, payload: { receipts: payload.receipts } }
           : null;
       default:
         return null;
@@ -119,6 +150,12 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "unread.changed":
             current.onUnreadChanged(event.payload.conversationId, event.payload.unreadCount);
+            break;
+          case "conversation.changed":
+            current.onConversationChanged(event.payload.conversationId);
+            break;
+          case "receipt.changed":
+            current.onReceiptChanged(event.payload.receipts);
             break;
         }
       };

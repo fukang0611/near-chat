@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { initializeDatabase, pool } from "./database.js";
 import { initializeMinio } from "./minio.js";
+import { broadcastReceiptChanges, markPendingMessagesDelivered } from "./receipt-service.js";
 import { RealtimeHub } from "./realtime.js";
 
 async function main() {
@@ -11,6 +12,10 @@ async function main() {
   await initializeMinio();
 
   const realtime = new RealtimeHub();
+  realtime.onUserOnline(async (userId) => {
+    const changes = await markPendingMessagesDelivered(userId);
+    await broadcastReceiptChanges(realtime, changes);
+  });
   const app = createApp(realtime);
   const server = createServer(app);
   realtime.attach(server);
