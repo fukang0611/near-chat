@@ -1,0 +1,24 @@
+{
+  "name": "near-chat",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @near-chat/server && npm run build -w @near-chat/web",
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w @near-chat/server\" \"npm run dev -w @near-chat/web\"",
+    "typecheck": "npm run typecheck -w @near-chat/server && npm run typecheck -w @near-chat/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && npm run typecheck && npm run build",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.6.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

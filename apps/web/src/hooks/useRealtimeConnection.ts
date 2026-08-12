@@ -1,0 +1,147 @@
+import { useEffect, useRef, useState } from "react";
+import { websocketUrl } from "../api";
+import type { Message } from "../types";
+
+export type ConnectionState = "connected" | "connecting" | "offline";
+
+interface RealtimeHandlers {
+  onSessionInvalid: () => void;
+  onPresenceSnapshot: (onlineUserIds: string[]) => void;
+  onPresenceChanged: (userId: string, online: boolean) => void;
+  onMessageCreated: (message: Message) => void;
+  onUnreadChanged: (conversationId: string, unreadCount: number) => void;
+}
+
+type RealtimeEvent =
+  | { type: "presence.snapshot"; payload: { onlineUserIds: string[] } }
+  | { type: "presence.changed"; payload: { userId: string; online: boolean } }
+  | { type: "message.created"; payload: { message: Message } }
+  | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isMessage(value: unknown): value is Message {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.conversationId === "string" &&
+    typeof value.senderId === "string" &&
+    typeof value.senderName === "string" &&
+    typeof value.senderAvatarColor === "string" &&
+    typeof value.clientMessageId === "string" &&
+    (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
+    (value.textContent === null || typeof value.textContent === "string") &&
+    typeof value.createdAt === "string" &&
+    Array.isArray(value.attachments)
+  );
+}
+
+function parseRealtimeEvent(raw: string): RealtimeEvent | null {
+  try {
+    const event = JSON.parse(raw) as { type?: unknown; payload?: unknown };
+    if (typeof event.type !== "string" || !isRecord(event.payload)) return null;
+
+    const payload = event.payload;
+    switch (event.type) {
+      case "presence.snapshot":
+        return Array.isArray(payload.onlineUserIds) &&
+          payload.onlineUserIds.every((id) => typeof id === "string")
+          ? { type: event.type, payload: { onlineUserIds: payload.onlineUserIds } }
+          : null;
+      case "presence.changed":
+        return typeof payload.userId === "string" && typeof payload.online === "boolean"
+          ? {
+              type: event.type,
+              payload: { userId: payload.userId, online: payload.online },
+            }
+          : null;
+      case "message.created":
+        return isMessage(payload.message)
+          ? { type: event.type, payload: { message: payload.message } }
+          : null;
+      case "unread.changed":
+        return typeof payload.conversationId === "string" && typeof payload.unreadCount === "number"
+          ? {
+              type: event.type,
+              payload: {
+                conversationId: payload.conversationId,
+                unreadCount: payload.unreadCount,
+              },
+            }
+          : null;
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 管理 WebSocket 的完整生命周期：连接、事件分发、断线重连和令牌失效。
+ * 调用方只处理领域事件，不需要了解定时器或 socket 状态机。
+ */
+export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionState {
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const handlersRef = useRef(handlers);
+  handlersRef.current = handlers;
+
+  useEffect(() => {
+    let active = true;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
+
+    const connect = () => {
+      if (!active) return;
+      setConnection("connecting");
+      socket = new WebSocket(websocketUrl());
+
+      socket.onopen = () => setConnection("connected");
+      socket.onmessage = (messageEvent) => {
+        const event = parseRealtimeEvent(messageEvent.data as string);
+        if (!event) {
+          console.warn("忽略无法解析的实时事件");
+          return;
+        }
+
+        const current = handlersRef.current;
+        switch (event.type) {
+          case "presence.snapshot":
+            current.onPresenceSnapshot(event.payload.onlineUserIds);
+            break;
+          case "presence.changed":
+            current.onPresenceChanged(event.payload.userId, event.payload.online);
+            break;
+          case "message.created":
+            current.onMessageCreated(event.payload.message);
+            break;
+          case "unread.changed":
+            current.onUnreadChanged(event.payload.conversationId, event.payload.unreadCount);
+            break;
+        }
+      };
+      socket.onclose = (event) => {
+        if (!active) return;
+        // 4003 由服务端用于账号禁用或令牌版本失效，不应继续重连。
+        if (event.code === 4003) {
+          handlersRef.current.onSessionInvalid();
+          return;
+        }
+        setConnection("offline");
+        reconnectTimer = window.setTimeout(connect, 1_500);
+      };
+      socket.onerror = () => socket?.close();
+    };
+
+    connect();
+    return () => {
+      active = false;
+      if (reconnectTimer) window.clearTimeout(reconnectTimer);
+      socket?.close();
+    };
+  }, []);
+
+  return connection;
+}

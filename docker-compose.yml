@@ -1,0 +1,77 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: near_chat
+      POSTGRES_USER: near_chat
+      POSTGRES_PASSWORD: near_chat
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U near_chat -d near_chat"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: near-chat
+      MINIO_ROOT_PASSWORD: near-chat-secret
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+    environment:
+      APP_PORT: 3000
+      DATABASE_URL: postgres://near_chat:near_chat@postgres:5432/near_chat
+      JWT_SECRET: ${JWT_SECRET:-near-chat-local-dev-secret-change-before-sharing}
+      JWT_EXPIRES_IN: 7d
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: near-chat
+      MINIO_SECRET_KEY: near-chat-secret
+      MINIO_BUCKET: near-chat-files
+      FILE_MAX_BYTES: 52428800
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
+      SEED_ALICE_PASSWORD: ${SEED_ALICE_PASSWORD:-alice123}
+      SEED_BOB_PASSWORD: ${SEED_BOB_PASSWORD:-bob123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:
