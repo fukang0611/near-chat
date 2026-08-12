@@ -92,8 +92,12 @@ describe("MessageTimeline", () => {
     });
     const { props, user } = renderTimeline([reply]);
 
+    const actionBar = screen.getByLabelText("消息操作");
+    expect(actionBar.textContent).toBe("");
+
     await user.click(screen.getByRole("button", { name: /被引用的内容/ }));
     await user.click(screen.getByRole("button", { name: "撤回" }));
+    expect(actionBar.textContent).toBe("");
     await user.click(screen.getByRole("button", { name: "确认撤回" }));
 
     expect(props.onJumpToMessage).toHaveBeenCalledWith(reply.replyTo!.id);

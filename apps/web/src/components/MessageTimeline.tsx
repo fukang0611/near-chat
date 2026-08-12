@@ -8,6 +8,7 @@ import {
   Reply,
   RotateCcw,
   Trash2,
+  X,
 } from "lucide-react";
 import { Fragment, type RefObject, useEffect, useState } from "react";
 import type { Conversation, Message } from "../types";
@@ -132,44 +133,6 @@ function MessageBubble({
           )}
         </div>
 
-        {!recalled && !failed && !sending && (
-          <div className="message-actions" aria-label="消息操作">
-            <button type="button" onClick={() => onReply(message)} title="回复">
-              <Reply size={13} />
-              回复
-            </button>
-            {message.textContent && (
-              <button type="button" onClick={() => onCopy(message)} title="复制文本">
-                <Copy size={13} />
-                复制
-              </button>
-            )}
-            {canRecall &&
-              (confirmRecall ? (
-                <span className="recall-confirm">
-                  <button
-                    type="button"
-                    className="is-danger"
-                    onClick={() => {
-                      onRecallIntent(null);
-                      onRecall(message);
-                    }}
-                  >
-                    确认撤回
-                  </button>
-                  <button type="button" onClick={() => onRecallIntent(null)}>
-                    取消
-                  </button>
-                </span>
-              ) : (
-                <button type="button" onClick={() => onRecallIntent(message.id)} title="撤回">
-                  <RotateCcw size={13} />
-                  撤回
-                </button>
-              ))}
-          </div>
-        )}
-
         {failed && (
           <div className="message-failure" role="status">
             <span>{message.sendError ?? "发送失败"}</span>
@@ -184,23 +147,77 @@ function MessageBubble({
           </div>
         )}
 
-        <span className="message-meta">
-          <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
-          {sending && (
-            <span className="message-delivery-state">
-              <LoaderCircle className="spin" size={12} /> 发送中
-            </span>
+        <div className="message-footer">
+          {!recalled && !failed && !sending && (
+            <div className="message-actions" aria-label="消息操作">
+              <button type="button" onClick={() => onReply(message)} title="回复" aria-label="回复">
+                <Reply size={15} />
+              </button>
+              {message.textContent && (
+                <button
+                  type="button"
+                  onClick={() => onCopy(message)}
+                  title="复制文本"
+                  aria-label="复制文本"
+                >
+                  <Copy size={15} />
+                </button>
+              )}
+              {canRecall &&
+                (confirmRecall ? (
+                  <span className="recall-confirm">
+                    <button
+                      type="button"
+                      className="is-danger"
+                      onClick={() => {
+                        onRecallIntent(null);
+                        onRecall(message);
+                      }}
+                      title="确认撤回"
+                      aria-label="确认撤回"
+                    >
+                      <Check size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRecallIntent(null)}
+                      title="取消撤回"
+                      aria-label="取消撤回"
+                    >
+                      <X size={15} />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onRecallIntent(message.id)}
+                    title="撤回"
+                    aria-label="撤回"
+                  >
+                    <RotateCcw size={15} />
+                  </button>
+                ))}
+            </div>
           )}
-          {receipt && (
-            <span
-              className={`message-receipt ${receipt.read ? "is-read" : receipt.delivered ? "is-delivered" : ""}`}
-              title={receipt.label}
-            >
-              {receipt.delivered ? <CheckCheck size={13} /> : <Check size={13} />}
-              {receipt.label}
-            </span>
-          )}
-        </span>
+
+          <span className="message-meta">
+            <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
+            {sending && (
+              <span className="message-delivery-state">
+                <LoaderCircle className="spin" size={12} /> 发送中
+              </span>
+            )}
+            {receipt && (
+              <span
+                className={`message-receipt ${receipt.read ? "is-read" : receipt.delivered ? "is-delivered" : ""}`}
+                title={receipt.label}
+              >
+                {receipt.delivered ? <CheckCheck size={13} /> : <Check size={13} />}
+                {receipt.label}
+              </span>
+            )}
+          </span>
+        </div>
       </div>
     </div>
   );

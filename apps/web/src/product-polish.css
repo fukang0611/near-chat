@@ -2142,18 +2142,16 @@ textarea {
 .message-actions {
   position: absolute;
   z-index: 2;
-  top: -29px;
+  top: 50%;
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 3px;
-  border: 1px solid rgba(228, 229, 233, 0.92);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 22px rgba(38, 40, 48, 0.09);
+  padding: 0;
+  border: 0;
+  background: transparent;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(4px);
+  transform: translateY(calc(-50% + 3px));
   transition:
     opacity 130ms ease,
     transform 130ms ease;
@@ -2167,35 +2165,38 @@ textarea {
   left: 0;
 }
 
-.message-row:hover .message-actions,
-.message-actions:focus-within {
+.message-stack:hover .message-actions,
+.message-footer:focus-within .message-actions {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translateY(-50%);
 }
 
 .message-actions button {
-  min-height: 23px;
-  display: inline-flex;
+  width: 25px;
+  height: 25px;
+  display: grid;
   align-items: center;
-  gap: 4px;
-  padding: 0 7px;
+  justify-content: center;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   color: #777a83;
   background: transparent;
-  font-size: 9px;
-  white-space: nowrap;
+  transition:
+    color 120ms ease,
+    transform 120ms ease;
 }
 
 .message-actions button:hover {
-  color: #46484f;
-  background: #f1f1f3;
+  color: var(--accent);
+  background: transparent;
+  transform: translateY(-1px);
 }
 
 .message-actions button.is-danger {
   color: var(--danger);
-  background: #fff0f2;
+  background: transparent;
 }
 
 .recall-confirm {
@@ -2398,26 +2399,6 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  .message-actions {
-    position: static;
-    align-self: inherit;
-    margin-top: 6px;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
-  }
-
-  .is-mine .message-actions {
-    justify-content: flex-end;
-  }
-
-  .message-actions button {
-    background: #f5f5f7;
-  }
-
   .message-quote {
     max-width: 280px;
   }
@@ -3149,6 +3130,28 @@ textarea {
   gap: 7px;
   margin-top: 8px;
   padding: 0 3px;
+}
+
+.message-footer {
+  position: relative;
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.is-mine .message-footer {
+  justify-content: flex-end;
+}
+
+.message-footer .message-meta {
+  margin-top: 0;
+  transition: opacity 100ms ease;
+}
+
+.message-stack:hover .message-actions ~ .message-meta,
+.message-footer:focus-within .message-actions ~ .message-meta {
+  opacity: 0;
 }
 
 .message-meta time {
@@ -4425,9 +4428,7 @@ body,
 }
 
 :root[data-theme="dark"] .message-actions {
-  border-color: #3d3f47;
-  background: rgba(47, 48, 55, 0.97);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  background: transparent;
 }
 
 :root[data-theme="dark"] .message-actions button {
@@ -4435,13 +4436,13 @@ body,
 }
 
 :root[data-theme="dark"] .message-actions button:hover {
-  color: #f0f1f3;
-  background: #3a3c44;
+  color: #bcb3ff;
+  background: transparent;
 }
 
 :root[data-theme="dark"] .message-actions button.is-danger {
   color: #f1949f;
-  background: rgba(129, 45, 56, 0.28);
+  background: transparent;
 }
 
 :root[data-theme="dark"] .message-failure {
@@ -4824,13 +4825,18 @@ body,
     border-color: #383a42;
     background: #27282e;
   }
+}
 
-  :root[data-theme="dark"] .message-actions {
-    background: transparent;
+/* 触屏设备没有悬停状态，始终以同样的纯图标形式保留消息操作入口。 */
+@media (hover: none) {
+  .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(-50%);
   }
 
-  :root[data-theme="dark"] .message-actions button {
-    background: #303139;
+  .message-actions ~ .message-meta {
+    opacity: 0;
   }
 }
 

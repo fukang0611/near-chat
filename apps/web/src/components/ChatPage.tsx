@@ -311,14 +311,17 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   useLayoutEffect(() => {
     const scroll = messageScrollRef.current;
     const action = scrollActionRef.current;
-    if (!scroll || !action) return;
+    // 消息数组会先于“标记已读”请求完成；加载占位仍在时不能提前消费滚动动作。
+    if (!scroll || !action || loadingMessages) return;
     if (action.type === "bottom") {
       scroll.scrollTop = scroll.scrollHeight;
     } else {
       scroll.scrollTop = action.previousTop + (scroll.scrollHeight - action.previousHeight);
     }
     scrollActionRef.current = null;
-  }, [displayMessages.length, selectedId]);
+    // 不能只依赖消息数量：两个会话的消息条数相同时，数组内容仍已整体替换。
+    // 依赖实际展示数组，确保会话切换、发送新消息和历史分页都执行各自的滚动动作。
+  }, [displayMessages, loadingMessages, selectedId]);
 
   useEffect(() => {
     if (!highlightedMessageId) return;
