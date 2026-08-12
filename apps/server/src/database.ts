@@ -92,9 +92,16 @@ CREATE TABLE IF NOT EXISTS messages (
   client_message_id UUID NOT NULL,
   type VARCHAR(20) NOT NULL CHECK (type IN ('TEXT', 'IMAGE', 'FILE')),
   text_content TEXT,
+  reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+  recalled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (sender_id, client_message_id)
 );
+
+-- 增量升级旧数据库：引用和撤回字段均允许为空，不影响现有历史消息。
+ALTER TABLE messages
+  ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS recalled_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS attachments (
   id UUID PRIMARY KEY,
@@ -165,6 +172,9 @@ ON CONFLICT (message_id, user_id) DO NOTHING;
 CREATE INDEX IF NOT EXISTS idx_members_user ON conversation_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_time
   ON messages(conversation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_cursor
+  ON messages(conversation_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to_message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_uploader ON attachments(uploader_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_orphan_cleanup

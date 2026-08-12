@@ -1,10 +1,21 @@
-import { Check, HardDrive, KeyRound, LoaderCircle, Palette, UserRoundCog, X } from "lucide-react";
+import {
+  Bell,
+  Check,
+  HardDrive,
+  KeyRound,
+  LoaderCircle,
+  Palette,
+  UserRoundCog,
+  Volume2,
+  X,
+} from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { FileQuota, User } from "../types";
 import { errorMessage } from "../utils/errors";
 import { formatBytes } from "../utils/format";
+import { type NotificationPreferences, playMessageSound } from "../utils/notifications";
 import { Avatar } from "./Avatar";
 
 interface ProfileDialogProps {
@@ -12,12 +23,21 @@ interface ProfileDialogProps {
   onClose: () => void;
   onUpdated: (user: User) => void;
   onPasswordChanged: () => void;
+  notificationPreferences: NotificationPreferences;
+  onNotificationPreferencesChanged: (preferences: NotificationPreferences) => void;
 }
 
 const avatarPalette = ["#6757E8", "#E76F88", "#2FA98C", "#E08A45", "#4A86D8", "#9A63C7"];
 
 /** 个人资料、存储用量和密码安全集中在一个自助设置面板中。 */
-export function ProfileDialog({ user, onClose, onUpdated, onPasswordChanged }: ProfileDialogProps) {
+export function ProfileDialog({
+  user,
+  onClose,
+  onUpdated,
+  onPasswordChanged,
+  notificationPreferences,
+  onNotificationPreferencesChanged,
+}: ProfileDialogProps) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarColor, setAvatarColor] = useState(user.avatarColor);
   const [quota, setQuota] = useState<FileQuota | null>(null);
@@ -27,6 +47,9 @@ export function ProfileDialog({ user, onClose, onUpdated, onPasswordChanged }: P
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | "unsupported"
+  >(() => ("Notification" in window ? Notification.permission : "unsupported"));
 
   useEffect(() => {
     void api
@@ -76,6 +99,34 @@ export function ProfileDialog({ user, onClose, onUpdated, onPasswordChanged }: P
   };
 
   const quotaPercent = quota ? Math.min(100, (quota.usedBytes / quota.quotaBytes) * 100) : 0;
+
+  const toggleDesktopNotifications = async () => {
+    if (notificationPreferences.desktop) {
+      onNotificationPreferencesChanged({ ...notificationPreferences, desktop: false });
+      return;
+    }
+    if (!("Notification" in window)) {
+      setNotice({ tone: "error", text: "当前浏览器不支持桌面通知" });
+      return;
+    }
+    const permission =
+      Notification.permission === "default"
+        ? await Notification.requestPermission()
+        : Notification.permission;
+    setNotificationPermission(permission);
+    if (permission !== "granted") {
+      setNotice({ tone: "error", text: "浏览器未授予通知权限，请在站点设置中开启" });
+      return;
+    }
+    onNotificationPreferencesChanged({ ...notificationPreferences, desktop: true });
+    setNotice({ tone: "success", text: "桌面通知已开启" });
+  };
+
+  const toggleSound = () => {
+    const enabled = !notificationPreferences.sound;
+    onNotificationPreferencesChanged({ ...notificationPreferences, sound: enabled });
+    if (enabled) void playMessageSound().catch(() => undefined);
+  };
 
   return createPortal(
     <div
@@ -182,6 +233,55 @@ export function ProfileDialog({ user, onClose, onUpdated, onPasswordChanged }: P
                 <LoaderCircle className="spin" size={15} /> 正在读取空间用量
               </div>
             )}
+          </section>
+
+          <section className="settings-section notification-section">
+            <div className="settings-section-heading">
+              <Bell size={16} />
+              <span>
+                <strong>消息提醒</strong>
+                <small>仅保存在当前浏览器，不会同步到其他设备</small>
+              </span>
+            </div>
+            <button
+              className="preference-row"
+              type="button"
+              onClick={() => void toggleDesktopNotifications()}
+              disabled={notificationPermission === "unsupported"}
+              aria-pressed={notificationPreferences.desktop}
+            >
+              <span className="preference-icon">
+                <Bell size={16} />
+              </span>
+              <span>
+                <strong>桌面通知</strong>
+                <small>
+                  {notificationPermission === "denied"
+                    ? "已被浏览器阻止"
+                    : "应用不在前台时显示新消息"}
+                </small>
+              </span>
+              <i className={notificationPreferences.desktop ? "is-on" : ""} aria-hidden="true">
+                <b />
+              </i>
+            </button>
+            <button
+              className="preference-row"
+              type="button"
+              onClick={toggleSound}
+              aria-pressed={notificationPreferences.sound}
+            >
+              <span className="preference-icon">
+                <Volume2 size={16} />
+              </span>
+              <span>
+                <strong>消息提示音</strong>
+                <small>收到非当前会话消息时播放轻提示音</small>
+              </span>
+              <i className={notificationPreferences.sound ? "is-on" : ""} aria-hidden="true">
+                <b />
+              </i>
+            </button>
           </section>
 
           <form className="settings-section password-section" onSubmit={changePassword}>

@@ -4,9 +4,11 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { recordAudit } from "../audit-service.js";
+import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import {
+  decodeMessageCursor,
   findMessage,
   listMessages,
   listMessagesAround,
@@ -42,6 +44,7 @@ interface ConversationRow {
   last_message_at: Date | null;
   last_message_sender_id: string | null;
   last_message_sender_name: string | null;
+  last_message_recalled_at: Date | null;
   unread_count: number;
 }
 
@@ -50,6 +53,7 @@ const sendMessageSchema = z
     clientMessageId: z.string().uuid(),
     text: z.string().trim().max(5_000).optional(),
     attachmentIds: z.array(z.string().uuid()).max(5).default([]),
+    replyToMessageId: z.string().uuid().optional(),
   })
   .refine((value) => Boolean(value.text) || value.attachmentIds.length > 0, "消息内容不能为空");
 
@@ -173,6 +177,7 @@ function serializeConversation(row: ConversationRow, currentUserId: string, real
           createdAt: row.last_message_at?.toISOString() ?? null,
           senderId: row.last_message_sender_id,
           senderName: row.last_message_sender_name,
+          recalled: Boolean(row.last_message_recalled_at),
         }
       : null,
     unreadCount: row.unread_count,
@@ -236,12 +241,18 @@ export function createChatRouter(realtime: RealtimeHub) {
               last_message.created_at AS last_message_at,
               last_message.sender_id AS last_message_sender_id,
               last_message.sender_name AS last_message_sender_name,
+              last_message.recalled_at AS last_message_recalled_at,
               COALESCE(unread.count, 0)::int AS unread_count
          FROM conversations c
          JOIN conversation_members mine
            ON mine.conversation_id = c.id AND mine.user_id = $1
          LEFT JOIN LATERAL (
-           SELECT m.type, m.text_content, m.created_at, m.sender_id, sender.display_name AS sender_name
+           SELECT m.type,
+                  CASE WHEN m.recalled_at IS NULL THEN m.text_content ELSE NULL END AS text_content,
+                  m.created_at,
+                  m.sender_id,
+                  m.recalled_at,
+                  sender.display_name AS sender_name
              FROM messages m
              JOIN users sender ON sender.id = m.sender_id
             WHERE m.conversation_id = c.id
@@ -253,6 +264,7 @@ export function createChatRouter(realtime: RealtimeHub) {
              FROM messages m
             WHERE m.conversation_id = c.id
               AND m.sender_id <> $1
+              AND m.recalled_at IS NULL
               AND m.created_at > mine.last_read_at
          ) unread ON TRUE
         ORDER BY last_message.created_at DESC NULLS LAST, c.created_at DESC`,
@@ -644,13 +656,18 @@ export function createChatRouter(realtime: RealtimeHub) {
     await ensureMember(conversationId, user.id);
 
     const beforeRaw = z.string().datetime().optional().parse(request.query.before);
+    const cursorRaw = z.string().max(512).optional().parse(request.query.cursor);
     const aroundMessageId = z.string().uuid().optional().parse(request.query.around);
     const limit = z.coerce.number().int().min(1).max(100).default(50).parse(request.query.limit);
-    const messages = aroundMessageId
+    const cursor = cursorRaw ? decodeMessageCursor(cursorRaw) : null;
+    if (cursorRaw && !cursor) throw new ApiError(400, "消息游标无效");
+    const page = aroundMessageId
       ? await listMessagesAround(conversationId, aroundMessageId, limit)
-      : await listMessages(conversationId, beforeRaw ? new Date(beforeRaw) : null, limit);
-    if (aroundMessageId && messages.length === 0) throw new ApiError(404, "目标消息不存在");
-    response.json({ messages });
+      : await listMessages(conversationId, cursor, limit, beforeRaw ? new Date(beforeRaw) : null);
+    if (aroundMessageId && page.messages.length === 0) {
+      throw new ApiError(404, "目标消息不存在");
+    }
+    response.json(page);
   });
 
   router.post(
@@ -668,6 +685,39 @@ export function createChatRouter(realtime: RealtimeHub) {
           [conversationId, user.id],
         );
         if (membership.rowCount === 0) throw new ApiError(403, "无权访问该会话");
+
+        // 幂等键必须先于附件和引用校验：首次请求已经成功但响应丢失时，
+        // 附件可能已经绑定、引用源也可能随后被撤回，重试仍应返回第一次结果。
+        // 事务级锁同时覆盖并发重复请求，避免第二个请求在附件刚绑定后误报失效。
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))", [
+          user.id,
+          input.clientMessageId,
+        ]);
+        const existingMessage = await client.query<{ id: string }>(
+          `SELECT id FROM messages
+            WHERE sender_id = $1 AND client_message_id = $2`,
+          [user.id, input.clientMessageId],
+        );
+        if (existingMessage.rows[0]) {
+          return {
+            message: await findMessage(existingMessage.rows[0].id, client),
+            created: false,
+          };
+        }
+
+        if (input.replyToMessageId) {
+          const replyTarget = await client.query(
+            `SELECT 1
+               FROM messages
+              WHERE id = $1
+                AND conversation_id = $2
+                AND recalled_at IS NULL`,
+            [input.replyToMessageId, conversationId],
+          );
+          if (replyTarget.rowCount === 0) {
+            throw new ApiError(400, "引用的消息不存在或已被撤回");
+          }
+        }
 
         let attachmentContentType: string | null = null;
         if (input.attachmentIds.length > 0) {
@@ -695,11 +745,20 @@ export function createChatRouter(realtime: RealtimeHub) {
         const messageId = randomUUID();
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO messages
-             (id, conversation_id, sender_id, client_message_id, type, text_content)
-           VALUES ($1, $2, $3, $4, $5, $6)
+             (id, conversation_id, sender_id, client_message_id, type, text_content,
+              reply_to_message_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
            ON CONFLICT (sender_id, client_message_id) DO NOTHING
            RETURNING id`,
-          [messageId, conversationId, user.id, input.clientMessageId, type, input.text || null],
+          [
+            messageId,
+            conversationId,
+            user.id,
+            input.clientMessageId,
+            type,
+            input.text || null,
+            input.replyToMessageId ?? null,
+          ],
         );
 
         // clientMessageId 是客户端重试的幂等键；冲突时只返回第一次写入的消息。
@@ -754,6 +813,80 @@ export function createChatRouter(realtime: RealtimeHub) {
     },
   );
 
+  router.post(
+    "/conversations/:conversationId/messages/:messageId/recall",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const conversationId = z.string().uuid().parse(request.params.conversationId);
+      const messageId = z.string().uuid().parse(request.params.messageId);
+
+      const recalled = await transaction(async (client) => {
+        const membership = await client.query(
+          `SELECT 1 FROM conversation_members
+            WHERE conversation_id = $1 AND user_id = $2`,
+          [conversationId, user.id],
+        );
+        if (membership.rowCount === 0) throw new ApiError(403, "无权访问该会话");
+
+        const result = await client.query<{
+          sender_id: string;
+          created_at: Date;
+          recalled_at: Date | null;
+          recall_expired: boolean;
+        }>(
+          `SELECT sender_id,
+                  created_at,
+                  recalled_at,
+                  created_at + ($3::int * INTERVAL '1 second') < NOW() AS recall_expired
+             FROM messages
+            WHERE id = $1 AND conversation_id = $2
+            FOR UPDATE`,
+          [messageId, conversationId, config.messageRecallWindowSeconds],
+        );
+        const message = result.rows[0];
+        if (!message) throw new ApiError(404, "消息不存在");
+        if (message.sender_id !== user.id) throw new ApiError(403, "只能撤回自己发送的消息");
+
+        // 重复请求返回同一结果，使客户端在响应丢失后可以安全重试。
+        if (message.recalled_at) {
+          return { message: await findMessage(messageId, client), changed: false };
+        }
+        if (message.recall_expired) {
+          throw new ApiError(409, "已超过消息撤回时限");
+        }
+
+        // 先解除附件关系并进入回收队列，撤回成功后原文件立即不可从消息访问。
+        await client.query(
+          `UPDATE attachments
+              SET message_id = NULL,
+                  state = 'CLEANUP_FAILED',
+                  state_updated_at = NOW()
+            WHERE message_id = $1`,
+          [messageId],
+        );
+        await client.query(
+          `UPDATE messages
+              SET text_content = NULL,
+                  recalled_at = NOW()
+            WHERE id = $1`,
+          [messageId],
+        );
+        return { message: await findMessage(messageId, client), changed: true };
+      });
+
+      if (!recalled.message) throw new ApiError(500, "撤回结果读取失败");
+      if (recalled.changed) {
+        const members = await conversationMemberIds(conversationId);
+        realtime.sendToUsers(members, {
+          type: "message.updated",
+          payload: { message: recalled.message },
+        });
+      }
+      response.json({ message: recalled.message });
+    },
+  );
+
   router.post("/conversations/:conversationId/read", authenticate, async (request, response) => {
     const user = currentUser(request);
     const conversationId = z.string().uuid().parse(request.params.conversationId);
@@ -775,6 +908,7 @@ export function createChatRouter(realtime: RealtimeHub) {
            ON mine.conversation_id = m.conversation_id AND mine.user_id = $2
         WHERE m.conversation_id = $1
           AND m.sender_id <> $2
+          AND m.recalled_at IS NULL
           AND m.created_at > mine.last_read_at`,
       [conversationId, user.id],
     );

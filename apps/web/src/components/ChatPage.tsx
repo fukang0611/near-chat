@@ -10,11 +10,26 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { type DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type { Attachment, Conversation, Message, User } from "../types";
 import { errorMessage } from "../utils/errors";
+import { messageSummary, toMessageReply } from "../utils/message";
+import {
+  loadNotificationPreferences,
+  type NotificationPreferences,
+  playMessageSound,
+  saveNotificationPreferences,
+} from "../utils/notifications";
 import { AdminPanel } from "./AdminPanel";
 import { Avatar } from "./Avatar";
 import { ChatSidebar, type SidebarMode } from "./ChatSidebar";
@@ -47,6 +62,35 @@ interface UploadState {
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
+function upsertServerMessage(current: Message[], incoming: Message): Message[] {
+  const index = current.findIndex(
+    (message) =>
+      message.id === incoming.id ||
+      (message.senderId === incoming.senderId &&
+        message.clientMessageId === incoming.clientMessageId),
+  );
+  if (index < 0) return [...current, incoming];
+  return current.map((message, messageIndex) => (messageIndex === index ? incoming : message));
+}
+
+function applyMessageUpdate(current: Message[], incoming: Message): Message[] {
+  return current.map((message) => {
+    if (message.id === incoming.id) return incoming;
+    if (message.replyTo?.id === incoming.id && incoming.recalledAt) {
+      return {
+        ...message,
+        replyTo: {
+          ...message.replyTo,
+          textContent: null,
+          attachmentName: null,
+          recalled: true,
+        },
+      };
+    }
+    return message;
+  });
+}
+
 /**
  * 聊天页是前端的数据编排层：负责服务端数据、当前会话和领域操作。
  * 侧边栏、消息时间线、编辑器及实时连接各自隐藏浏览器交互细节。
@@ -58,6 +102,9 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [messageCursor, setMessageCursor] = useState<string | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [messageLoadVersion, setMessageLoadVersion] = useState(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("recent");
@@ -65,8 +112,12 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   // 草稿与待发送附件按会话隔离，切换会话时保留各自上下文。
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pendingAttachments, setPendingAttachments] = useState<Record<string, Attachment>>({});
+  const [replyTargets, setReplyTargets] = useState<Record<string, Message>>({});
+  const [outbox, setOutbox] = useState<Record<string, Message[]>>({});
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
-  const [sending, setSending] = useState(false);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
+    () => loadNotificationPreferences(user.id),
+  );
 
   const [showAdmin, setShowAdmin] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -76,7 +127,15 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   const [draggingFile, setDraggingFile] = useState(false);
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const messageScrollRef = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
+  const messagesRef = useRef<Message[]>([]);
+  const notificationPreferencesRef = useRef(notificationPreferences);
+  const confirmedClientMessageIdsRef = useRef(new Set<string>());
+  const scrollActionRef = useRef<
+    { type: "bottom" } | { type: "preserve"; previousHeight: number; previousTop: number } | null
+  >(null);
   const messageTargetRef = useRef<{ conversationId: string; messageId: string } | null>(null);
   const initializedConversationsRef = useRef(false);
 
@@ -86,6 +145,21 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   );
   const text = selectedId ? (drafts[selectedId] ?? "") : "";
   const pendingAttachment = selectedId ? (pendingAttachments[selectedId] ?? null) : null;
+  const replyingTo = selectedId ? (replyTargets[selectedId] ?? null) : null;
+  const selectedOutbox = useMemo(
+    () => (selectedId ? (outbox[selectedId] ?? []) : []),
+    [outbox, selectedId],
+  );
+  const displayMessages = useMemo(
+    () =>
+      [...messages, ...selectedOutbox].sort(
+        (left, right) =>
+          new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime() ||
+          left.id.localeCompare(right.id),
+      ),
+    [messages, selectedOutbox],
+  );
+  const sending = selectedOutbox.some((message) => message.deliveryState === "SENDING");
   const activeUpload = uploadState?.conversationId === selectedId ? uploadState : null;
 
   useEffect(() => {
@@ -107,6 +181,31 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    notificationPreferencesRef.current = notificationPreferences;
+    saveNotificationPreferences(user.id, notificationPreferences);
+  }, [notificationPreferences, user.id]);
+
+  useEffect(() => {
+    const markVisibleConversationRead = () => {
+      if (document.visibilityState !== "visible") return;
+      const conversationId = selectedIdRef.current;
+      const latest = messagesRef.current.at(-1);
+      if (!conversationId || !latest || latest.senderId === user.id) return;
+      void api.markRead(conversationId, latest.id).catch(() => undefined);
+    };
+    document.addEventListener("visibilitychange", markVisibleConversationRead);
+    return () => document.removeEventListener("visibilitychange", markVisibleConversationRead);
+  }, [user.id]);
 
   const refreshUsers = useCallback(async () => {
     const result = await api.users();
@@ -144,6 +243,8 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   useEffect(() => {
     if (!selectedId) {
       setMessages([]);
+      setMessageCursor(null);
+      setHasMoreMessages(false);
       return;
     }
 
@@ -153,9 +254,32 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
     const aroundMessageId = target?.conversationId === selectedId ? target.messageId : undefined;
     void (async () => {
       try {
-        const result = await api.messages(selectedId, aroundMessageId);
+        const result = await api.messages(selectedId, { around: aroundMessageId, limit: 50 });
         if (!active) return;
+        scrollActionRef.current = aroundMessageId ? null : { type: "bottom" };
         setMessages(result.messages);
+        const confirmedClientMessageIds = new Set(
+          result.messages
+            .filter((message) => message.senderId === user.id)
+            .map((message) => message.clientMessageId),
+        );
+        for (const clientMessageId of confirmedClientMessageIds) {
+          confirmedClientMessageIdsRef.current.add(clientMessageId);
+        }
+        setOutbox((current) => {
+          const queued = current[selectedId];
+          if (!queued) return current;
+          const remaining = queued.filter(
+            (message) => !confirmedClientMessageIds.has(message.clientMessageId),
+          );
+          if (remaining.length === queued.length) return current;
+          const next = { ...current };
+          if (remaining.length > 0) next[selectedId] = remaining;
+          else delete next[selectedId];
+          return next;
+        });
+        setMessageCursor(result.nextCursor);
+        setHasMoreMessages(result.hasMore);
         setHighlightedMessageId(aroundMessageId ?? null);
         if (aroundMessageId) messageTargetRef.current = null;
         const latestMessage = result.messages.at(-1);
@@ -180,10 +304,17 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
     };
   }, [messageLoadVersion, notify, selectedId]);
 
-  useEffect(() => {
-    if (highlightedMessageId) return;
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, selectedId]);
+  useLayoutEffect(() => {
+    const scroll = messageScrollRef.current;
+    const action = scrollActionRef.current;
+    if (!scroll || !action) return;
+    if (action.type === "bottom") {
+      scroll.scrollTop = scroll.scrollHeight;
+    } else {
+      scroll.scrollTop = action.previousTop + (scroll.scrollHeight - action.previousHeight);
+    }
+    scrollActionRef.current = null;
+  }, [displayMessages.length, selectedId]);
 
   useEffect(() => {
     if (!highlightedMessageId) return;
@@ -198,6 +329,37 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
       window.clearTimeout(timer);
     };
   }, [highlightedMessageId]);
+
+  const loadOlderMessages = useCallback(async () => {
+    const conversationId = selectedId;
+    const cursor = messageCursor;
+    if (!conversationId || !cursor || !hasMoreMessages || loadingOlder) return;
+
+    const scroll = messageScrollRef.current;
+    if (scroll) {
+      scrollActionRef.current = {
+        type: "preserve",
+        previousHeight: scroll.scrollHeight,
+        previousTop: scroll.scrollTop,
+      };
+    }
+    setLoadingOlder(true);
+    try {
+      const result = await api.messages(conversationId, { cursor, limit: 50 });
+      if (selectedIdRef.current !== conversationId) return;
+      setMessages((current) => {
+        const knownIds = new Set(current.map((message) => message.id));
+        return [...result.messages.filter((message) => !knownIds.has(message.id)), ...current];
+      });
+      setMessageCursor(result.nextCursor);
+      setHasMoreMessages(result.hasMore);
+    } catch (error) {
+      scrollActionRef.current = null;
+      notify(errorMessage(error, "历史消息加载失败"), "error");
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [hasMoreMessages, loadingOlder, messageCursor, notify, selectedId]);
 
   const connection = useRealtimeConnection({
     onSessionInvalid: onLogout,
@@ -253,15 +415,100 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
       );
     },
     onMessageCreated: (incoming) => {
-      if (incoming.conversationId === selectedId) {
-        setMessages((current) =>
-          current.some((item) => item.id === incoming.id) ? current : [...current, incoming],
+      if (incoming.senderId === user.id) {
+        confirmedClientMessageIdsRef.current.add(incoming.clientMessageId);
+      }
+      setOutbox((current) => {
+        const queued = current[incoming.conversationId];
+        if (!queued?.some((message) => message.clientMessageId === incoming.clientMessageId)) {
+          return current;
+        }
+        const next = { ...current };
+        const remaining = queued.filter(
+          (message) => message.clientMessageId !== incoming.clientMessageId,
         );
-        if (incoming.senderId !== user.id) {
+        if (remaining.length > 0) next[incoming.conversationId] = remaining;
+        else delete next[incoming.conversationId];
+        return next;
+      });
+
+      const isCurrentConversation = incoming.conversationId === selectedIdRef.current;
+      const isActivelyReading = isCurrentConversation && document.visibilityState === "visible";
+      if (isCurrentConversation) {
+        const scroll = messageScrollRef.current;
+        const closeToBottom =
+          !scroll || scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 120;
+        if (closeToBottom || incoming.senderId === user.id) {
+          scrollActionRef.current = { type: "bottom" };
+        }
+        setMessages((current) => upsertServerMessage(current, incoming));
+        if (incoming.senderId !== user.id && isActivelyReading) {
           void api.markRead(incoming.conversationId, incoming.id).catch((error) => {
             notify(errorMessage(error, "已读状态同步失败"), "error");
           });
         }
+      }
+
+      if (incoming.senderId !== user.id && !isActivelyReading) {
+        const preferences = notificationPreferencesRef.current;
+        if (preferences.sound) void playMessageSound().catch(() => undefined);
+        if (
+          preferences.desktop &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
+          const conversation = conversationsRef.current.find(
+            (item) => item.id === incoming.conversationId,
+          );
+          try {
+            const notification = new Notification(
+              conversation?.type === "GROUP"
+                ? `${incoming.senderName} · ${conversation.title}`
+                : incoming.senderName,
+              {
+                body: messageSummary(incoming),
+                tag: `near-chat:${incoming.conversationId}`,
+              },
+            );
+            notification.onclick = () => {
+              window.focus();
+              setSelectedId(incoming.conversationId);
+              notification.close();
+            };
+          } catch {
+            // 浏览器或操作系统可能临时拒绝通知，不能影响实时消息主流程。
+          }
+        }
+      }
+      refreshConversationsInBackground();
+    },
+    onMessageUpdated: (incoming) => {
+      if (incoming.conversationId === selectedIdRef.current) {
+        setMessages((current) => applyMessageUpdate(current, incoming));
+      }
+      setOutbox((current) => {
+        let changed = false;
+        const next = Object.fromEntries(
+          Object.entries(current).map(([conversationId, queued]) => {
+            const updated = applyMessageUpdate(queued, incoming);
+            if (updated.some((message, index) => message !== queued[index])) changed = true;
+            return [conversationId, updated];
+          }),
+        );
+        return changed ? next : current;
+      });
+      if (incoming.recalledAt) {
+        setReplyTargets((current) => {
+          const next = { ...current };
+          let changed = false;
+          for (const [conversationId, target] of Object.entries(next)) {
+            if (target.id === incoming.id) {
+              delete next[conversationId];
+              changed = true;
+            }
+          }
+          return changed ? next : current;
+        });
       }
       refreshConversationsInBackground();
     },
@@ -383,40 +630,166 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
     }
   };
 
-  const send = async () => {
-    if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
-    const conversationId = selectedId;
-    setSending(true);
+  const removeOutboxMessage = (conversationId: string, clientMessageId: string) => {
+    setOutbox((current) => {
+      const queued = current[conversationId] ?? [];
+      const remaining = queued.filter((message) => message.clientMessageId !== clientMessageId);
+      if (remaining.length === queued.length) return current;
+      const next = { ...current };
+      if (remaining.length > 0) next[conversationId] = remaining;
+      else delete next[conversationId];
+      return next;
+    });
+  };
+
+  const deliverOutboxMessage = async (message: Message) => {
+    const conversationId = message.conversationId;
+    setOutbox((current) => ({
+      ...current,
+      [conversationId]: (current[conversationId] ?? []).map((queued) =>
+        queued.clientMessageId === message.clientMessageId
+          ? { ...queued, deliveryState: "SENDING", sendError: undefined }
+          : queued,
+      ),
+    }));
     try {
       const result = await api.sendMessage(conversationId, {
-        clientMessageId: crypto.randomUUID(),
-        text: text.trim() || undefined,
-        attachmentIds: pendingAttachment ? [pendingAttachment.id] : [],
+        clientMessageId: message.clientMessageId,
+        text: message.textContent ?? undefined,
+        attachmentIds: message.attachments.map((attachment) => attachment.id),
+        replyToMessageId: message.replyTo?.id,
       });
-      // 发送期间允许切换会话；只把结果写入它所属且仍处于选中状态的时间线。
+      confirmedClientMessageIdsRef.current.add(message.clientMessageId);
+      removeOutboxMessage(conversationId, message.clientMessageId);
       if (selectedIdRef.current === conversationId) {
-        setMessages((current) => {
-          const existingIndex = current.findIndex((item) => item.id === result.message.id);
-          if (existingIndex < 0) return [...current, result.message];
-          return current.map((item, index) => (index === existingIndex ? result.message : item));
-        });
+        scrollActionRef.current = { type: "bottom" };
+        setMessages((current) => upsertServerMessage(current, result.message));
       }
-      setDrafts((current) => {
-        const next = { ...current };
-        delete next[conversationId];
-        return next;
-      });
-      setPendingAttachments((current) => {
-        const next = { ...current };
-        delete next[conversationId];
-        return next;
-      });
-      await refreshConversations();
+      refreshConversationsInBackground();
     } catch (error) {
-      notify(errorMessage(error, "消息发送失败"), "error");
-    } finally {
-      setSending(false);
+      // WebSocket 可能先于 HTTP 响应确认消息；此时不能把已送达消息误标为失败。
+      if (confirmedClientMessageIdsRef.current.has(message.clientMessageId)) {
+        removeOutboxMessage(conversationId, message.clientMessageId);
+        return;
+      }
+      const failure = errorMessage(error, "发送失败，请重试");
+      setOutbox((current) => ({
+        ...current,
+        [conversationId]: (current[conversationId] ?? []).map((queued) =>
+          queued.clientMessageId === message.clientMessageId
+            ? { ...queued, deliveryState: "FAILED", sendError: failure }
+            : queued,
+        ),
+      }));
+      notify("消息发送失败，可在消息下方重试", "error");
     }
+  };
+
+  const send = () => {
+    if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
+    const conversationId = selectedId;
+    const clientMessageId = crypto.randomUUID();
+    const createdAt = new Date().toISOString();
+    const type = pendingAttachment
+      ? pendingAttachment.contentType.startsWith("image/")
+        ? "IMAGE"
+        : "FILE"
+      : "TEXT";
+    const optimisticMessage: Message = {
+      id: `local-${clientMessageId}`,
+      conversationId,
+      senderId: user.id,
+      senderName: user.displayName,
+      senderAvatarColor: user.avatarColor,
+      clientMessageId,
+      type,
+      textContent: text.trim() || null,
+      createdAt,
+      recalledAt: null,
+      recallableUntil: new Date(Date.now() + 120_000).toISOString(),
+      replyTo: replyingTo ? toMessageReply(replyingTo) : null,
+      attachments: pendingAttachment ? [pendingAttachment] : [],
+      receipt: { recipientCount: 0, deliveredCount: 0, readCount: 0 },
+      deliveryState: "SENDING",
+    };
+
+    setOutbox((current) => ({
+      ...current,
+      [conversationId]: [...(current[conversationId] ?? []), optimisticMessage],
+    }));
+    setDrafts((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    setPendingAttachments((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    setReplyTargets((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+    scrollActionRef.current = { type: "bottom" };
+    void deliverOutboxMessage(optimisticMessage);
+  };
+
+  const retryMessage = (message: Message) => {
+    if (message.deliveryState !== "FAILED") return;
+    void deliverOutboxMessage(message);
+  };
+
+  const discardMessage = (message: Message) => {
+    removeOutboxMessage(message.conversationId, message.clientMessageId);
+    void Promise.allSettled(
+      message.attachments.map((attachment) => api.deleteFile(attachment.id)),
+    ).then((results) => {
+      if (results.some((result) => result.status === "rejected")) {
+        notify("未发送附件将在后台自动清理", "info");
+      }
+    });
+  };
+
+  const copyMessage = async (message: Message) => {
+    if (!message.textContent) return;
+    try {
+      await navigator.clipboard.writeText(message.textContent);
+      notify("消息文本已复制", "success");
+    } catch {
+      notify("复制失败，请检查浏览器剪贴板权限", "error");
+    }
+  };
+
+  const recallMessage = async (message: Message) => {
+    try {
+      const result = await api.recallMessage(message.conversationId, message.id);
+      setMessages((current) => applyMessageUpdate(current, result.message));
+      setReplyTargets((current) => {
+        const next = { ...current };
+        for (const [conversationId, target] of Object.entries(next)) {
+          if (target.id === message.id) delete next[conversationId];
+        }
+        return next;
+      });
+      refreshConversationsInBackground();
+      notify("消息已撤回", "success");
+    } catch (error) {
+      notify(errorMessage(error, "消息撤回失败"), "error");
+    }
+  };
+
+  const jumpToMessage = (messageId: string) => {
+    const element = document.getElementById(`message-${messageId}`);
+    if (element) {
+      setHighlightedMessageId(messageId);
+      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    if (!selectedId) return;
+    messageTargetRef.current = { conversationId: selectedId, messageId };
+    setMessageLoadVersion((current) => current + 1);
   };
 
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
@@ -441,7 +814,12 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
   const logout = async () => {
     try {
       await Promise.allSettled(
-        Object.values(pendingAttachments).map((attachment) => api.deleteFile(attachment.id)),
+        [
+          ...Object.values(pendingAttachments),
+          ...Object.values(outbox)
+            .flat()
+            .flatMap((message) => message.attachments),
+        ].map((attachment) => api.deleteFile(attachment.id)),
       );
       await api.logout();
     } finally {
@@ -545,14 +923,32 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
               </div>
             </header>
 
-            <div className="message-scroll">
+            <div
+              className="message-scroll"
+              ref={messageScrollRef}
+              onScroll={(event) => {
+                if (event.currentTarget.scrollTop < 120) void loadOlderMessages();
+              }}
+            >
               <MessageTimeline
                 conversation={selectedConversation}
-                messages={messages}
+                messages={displayMessages}
                 currentUserId={user.id}
                 loading={loadingMessages}
+                loadingOlder={loadingOlder}
+                hasMore={hasMoreMessages}
                 endRef={endRef}
                 highlightedMessageId={highlightedMessageId}
+                onLoadOlder={() => void loadOlderMessages()}
+                onReply={(message) => {
+                  if (!selectedId) return;
+                  setReplyTargets((current) => ({ ...current, [selectedId]: message }));
+                }}
+                onCopy={(message) => void copyMessage(message)}
+                onRecall={(message) => void recallMessage(message)}
+                onRetry={retryMessage}
+                onDiscard={discardMessage}
+                onJumpToMessage={jumpToMessage}
               />
             </div>
 
@@ -563,10 +959,19 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
               upload={activeUpload}
               uploadBlocked={Boolean(uploadState)}
               sending={sending}
+              replyingTo={replyingTo}
               onTextChange={updateDraft}
               onChooseFile={(file) => void chooseFile(file)}
               onRemoveAttachment={() => void removePendingAttachment()}
-              onSend={() => void send()}
+              onSend={send}
+              onCancelReply={() => {
+                if (!selectedId) return;
+                setReplyTargets((current) => {
+                  const next = { ...current };
+                  delete next[selectedId];
+                  return next;
+                });
+              }}
             />
           </>
         ) : (
@@ -614,6 +1019,8 @@ export function ChatPage({ user, onUserUpdated, onLogout }: ChatPageProps) {
             });
           }}
           onPasswordChanged={onLogout}
+          notificationPreferences={notificationPreferences}
+          onNotificationPreferencesChanged={setNotificationPreferences}
         />
       )}
       {showCreateGroup && (

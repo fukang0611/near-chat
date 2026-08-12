@@ -10,6 +10,7 @@ interface RealtimeHandlers {
   onPresenceChanged: (userId: string, online: boolean) => void;
   onUsersChanged: (userId: string) => void;
   onMessageCreated: (message: Message) => void;
+  onMessageUpdated: (message: Message) => void;
   onUnreadChanged: (conversationId: string, unreadCount: number) => void;
   onConversationChanged: (conversationId: string) => void;
   onReceiptChanged: (receipts: ReceiptChange[]) => void;
@@ -20,6 +21,7 @@ type RealtimeEvent =
   | { type: "presence.changed"; payload: { userId: string; online: boolean } }
   | { type: "users.changed"; payload: { userId: string } }
   | { type: "message.created"; payload: { message: Message } }
+  | { type: "message.updated"; payload: { message: Message } }
   | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } }
   | { type: "conversation.changed"; payload: { conversationId: string } }
   | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } };
@@ -40,8 +42,24 @@ function isMessage(value: unknown): value is Message {
     (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
     (value.textContent === null || typeof value.textContent === "string") &&
     typeof value.createdAt === "string" &&
+    (value.recalledAt === null || typeof value.recalledAt === "string") &&
+    typeof value.recallableUntil === "string" &&
+    (value.replyTo === null || isMessageReply(value.replyTo)) &&
     Array.isArray(value.attachments) &&
     isReceiptSummary(value.receipt)
+  );
+}
+
+function isMessageReply(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.senderId === "string" &&
+    typeof value.senderName === "string" &&
+    (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
+    (value.textContent === null || typeof value.textContent === "string") &&
+    (value.attachmentName === null || typeof value.attachmentName === "string") &&
+    typeof value.recalled === "boolean"
   );
 }
 
@@ -87,6 +105,7 @@ function parseRealtimeEvent(raw: string): RealtimeEvent | null {
           ? { type: event.type, payload: { userId: payload.userId } }
           : null;
       case "message.created":
+      case "message.updated":
         return isMessage(payload.message)
           ? { type: event.type, payload: { message: payload.message } }
           : null;
@@ -156,6 +175,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "message.created":
             current.onMessageCreated(event.payload.message);
+            break;
+          case "message.updated":
+            current.onMessageUpdated(event.payload.message);
             break;
           case "unread.changed":
             current.onUnreadChanged(event.payload.conversationId, event.payload.unreadCount);

@@ -58,6 +58,7 @@ export function formatConversationPreview(conversation: Conversation): string {
     return conversation.type === "GROUP"
       ? `${conversation.memberCount} 位成员`
       : "开始你们的第一段对话";
+  if (message.recalled) return "[消息已撤回]";
   const prefix =
     conversation.type === "GROUP" && message.senderName ? `${message.senderName}: ` : "";
   if (message.text) return `${prefix}${message.text}`;

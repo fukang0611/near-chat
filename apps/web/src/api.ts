@@ -5,6 +5,7 @@ import type {
   Conversation,
   FileQuota,
   Message,
+  MessagePage,
   User,
 } from "./types";
 
@@ -14,6 +15,7 @@ export interface SendMessageInput {
   clientMessageId: string;
   text?: string;
   attachmentIds?: string[];
+  replyToMessageId?: string;
 }
 
 export interface CreateUserInput {
@@ -117,12 +119,14 @@ export const api = {
     ),
   disbandGroup: (conversationId: string) =>
     request<void>(`/api/conversations/${conversationId}`, { method: "DELETE" }),
-  messages: (conversationId: string, aroundMessageId?: string) => {
-    const query = new URLSearchParams({ limit: "100" });
-    if (aroundMessageId) query.set("around", aroundMessageId);
-    return request<{ messages: Message[] }>(
-      `/api/conversations/${conversationId}/messages?${query}`,
-    );
+  messages: (
+    conversationId: string,
+    options: { around?: string; cursor?: string; limit?: number } = {},
+  ) => {
+    const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.around) query.set("around", options.around);
+    if (options.cursor) query.set("cursor", options.cursor);
+    return request<MessagePage>(`/api/conversations/${conversationId}/messages?${query}`);
   },
   searchMessages: (keyword: string, conversationId?: string) => {
     const query = new URLSearchParams({ q: keyword, limit: "50" });
@@ -134,6 +138,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  recallMessage: (conversationId: string, messageId: string) =>
+    request<{ message: Message }>(
+      `/api/conversations/${conversationId}/messages/${messageId}/recall`,
+      { method: "POST" },
+    ),
   markRead: (conversationId: string, throughMessageId?: string) =>
     request<{ unreadCount: number }>(`/api/conversations/${conversationId}/read`, {
       method: "POST",

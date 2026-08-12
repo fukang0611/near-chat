@@ -43,6 +43,8 @@ export const config = {
   fileOrphanTtlHours: positiveInteger("FILE_ORPHAN_TTL_HOURS", 24),
   fileCleanupIntervalMinutes: positiveInteger("FILE_CLEANUP_INTERVAL_MINUTES", 30),
   storageRetryAttempts: positiveInteger("STORAGE_RETRY_ATTEMPTS", 3),
+  // 第一阶段采用简洁的发送者撤回规则，部署时可按组织要求调整时限。
+  messageRecallWindowSeconds: positiveInteger("MESSAGE_RECALL_WINDOW_SECONDS", 120),
   seedDemoUsers: bool("SEED_DEMO_USERS", true),
   seedPasswords: {
     admin: process.env.SEED_ADMIN_PASSWORD ?? "admin123",

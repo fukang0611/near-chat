@@ -2057,6 +2057,376 @@ textarea {
   }
 }
 
+/* 消息分页、引用、撤回与弱网状态 */
+.load-older-button {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: -18px auto 24px;
+  padding: 0 13px;
+  border: 1px solid #e5e6ea;
+  border-radius: 11px;
+  color: #777a83;
+  background: rgba(248, 248, 250, 0.9);
+  font-size: 10px;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.load-older-button:hover:not(:disabled) {
+  border-color: rgba(103, 87, 232, 0.25);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.message-stack {
+  position: relative;
+}
+
+.message-quote {
+  max-width: min(390px, 100%);
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 11px 8px 12px;
+  border: 0;
+  border-left: 3px solid rgba(103, 87, 232, 0.45);
+  border-radius: 5px 11px 11px 5px;
+  color: #7b7e87;
+  text-align: left;
+  background: #f5f4fa;
+}
+
+.is-peer .message-quote {
+  background: #f6f6f8;
+}
+
+.message-quote:hover {
+  color: #595c65;
+  background: #efedf9;
+}
+
+.message-quote span {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.message-quote strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 520;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-recalled {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 11px;
+  border: 1px solid #ececef;
+  border-radius: 11px;
+  color: #989ba3;
+  background: #fafafb;
+  font-size: 10px;
+}
+
+.message-actions {
+  position: absolute;
+  z-index: 2;
+  top: -29px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(228, 229, 233, 0.92);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 8px 22px rgba(38, 40, 48, 0.09);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease;
+}
+
+.is-mine .message-actions {
+  right: 0;
+}
+
+.is-peer .message-actions {
+  left: 0;
+}
+
+.message-row:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.message-actions button {
+  min-height: 23px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 6px;
+  color: #777a83;
+  background: transparent;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.message-actions button:hover {
+  color: #46484f;
+  background: #f1f1f3;
+}
+
+.message-actions button.is-danger {
+  color: var(--danger);
+  background: #fff0f2;
+}
+
+.recall-confirm {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.message-failure {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 7px;
+  color: #b44c5a;
+  font-size: 9px;
+}
+
+.message-failure > span {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-failure button {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid #edcdd2;
+  border-radius: 8px;
+  color: #a84654;
+  background: #fff7f8;
+  font-size: 9px;
+}
+
+.message-row.is-failed .message-bubble,
+.message-row.is-failed .file-attachment,
+.message-row.is-failed .image-attachment {
+  border-color: #efcbd1;
+  opacity: 0.78;
+}
+
+.message-delivery-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #999ca4;
+  font-size: 9px;
+}
+
+.message-highlight .message-quote,
+.message-highlight .message-recalled {
+  animation: message-locate 2.4s ease;
+}
+
+.composer-reply {
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 2px 9px;
+  padding: 8px 8px 8px 10px;
+  border: 1px solid #e7e5f3;
+  border-radius: 12px;
+  background: #f7f6fc;
+}
+
+.composer-reply-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--accent);
+  background: #ece9fb;
+}
+
+.composer-reply > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.composer-reply small {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.composer-reply strong {
+  overflow: hidden;
+  margin-top: 3px;
+  color: #646770;
+  font-size: 10px;
+  font-weight: 520;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-reply > button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #8d9098;
+  background: transparent;
+}
+
+.composer-reply > button:hover {
+  color: #575a62;
+  background: #ebeaf1;
+}
+
+/* 当前浏览器的消息提醒偏好 */
+.notification-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.preference-row {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 3px;
+  border: 0;
+  text-align: left;
+  background: transparent;
+}
+
+.preference-row + .preference-row {
+  border-top: 1px solid #eff0f2;
+}
+
+.preference-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  border-radius: 10px;
+  color: #7772a8;
+  background: #f0eef9;
+}
+
+.preference-row > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.preference-row strong {
+  color: #484a51;
+  font-size: 11px;
+}
+
+.preference-row small {
+  margin-top: 4px;
+  color: #999ca4;
+  font-size: 9px;
+}
+
+.preference-row > i {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: none;
+  border-radius: 11px;
+  background: #dfe0e4;
+  transition: background 160ms ease;
+}
+
+.preference-row > i > b {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 4px rgba(38, 40, 48, 0.22);
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.preference-row > i.is-on {
+  background: var(--accent);
+}
+
+.preference-row > i.is-on > b {
+  transform: translateX(14px);
+}
+
+@media (max-width: 720px) {
+  .message-actions {
+    position: static;
+    align-self: inherit;
+    margin-top: 6px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+
+  .is-mine .message-actions {
+    justify-content: flex-end;
+  }
+
+  .message-actions button {
+    background: #f5f5f7;
+  }
+
+  .message-quote {
+    max-width: 280px;
+  }
+
+  .message-failure {
+    flex-wrap: wrap;
+  }
+}
+
 /* 第二阶段：个人设置与群聊管理 */
 .settings-dialog,
 .group-manage-dialog {

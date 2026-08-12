@@ -1,7 +1,8 @@
-import { FileText, LoaderCircle, Paperclip, Send, X } from "lucide-react";
+import { FileText, LoaderCircle, Paperclip, Reply, Send, X } from "lucide-react";
 import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
-import type { Attachment } from "../types";
+import type { Attachment, Message } from "../types";
 import { formatBytes } from "../utils/format";
+import { messageSummary } from "../utils/message";
 
 export interface UploadProgress {
   name: string;
@@ -15,10 +16,12 @@ interface MessageComposerProps {
   upload: UploadProgress | null;
   uploadBlocked: boolean;
   sending: boolean;
+  replyingTo: Message | null;
   onTextChange: (value: string) => void;
   onChooseFile: (file: File | undefined) => void;
   onRemoveAttachment: () => void;
   onSend: () => void;
+  onCancelReply: () => void;
 }
 
 /**
@@ -32,10 +35,12 @@ export function MessageComposer({
   upload,
   uploadBlocked,
   sending,
+  replyingTo,
   onTextChange,
   onChooseFile,
   onRemoveAttachment,
   onSend,
+  onCancelReply,
 }: MessageComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -46,6 +51,10 @@ export function MessageComposer({
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`;
   }, [text]);
+
+  useEffect(() => {
+    if (replyingTo) textareaRef.current?.focus();
+  }, [replyingTo]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -71,6 +80,20 @@ export function MessageComposer({
   return (
     <form className="composer-wrap" onSubmit={submit}>
       <div className="composer">
+        {replyingTo && (
+          <div className="composer-reply">
+            <span className="composer-reply-icon">
+              <Reply size={15} />
+            </span>
+            <span>
+              <small>回复 {replyingTo.senderName}</small>
+              <strong>{messageSummary(replyingTo)}</strong>
+            </span>
+            <button type="button" onClick={onCancelReply} aria-label="取消回复">
+              <X size={15} />
+            </button>
+          </div>
+        )}
         {pendingAttachment && (
           <div className="pending-file">
             <span className="pending-file-icon">
