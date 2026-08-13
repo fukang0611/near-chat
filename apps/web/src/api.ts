@@ -213,6 +213,18 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  uploadAvatar: (file: File) => {
+    const form = new FormData();
+    form.append("avatar", file);
+    return request<{ user: User }>("/api/auth/avatar", {
+      method: "POST",
+      body: form,
+    });
+  },
+  deleteAvatar: () =>
+    request<{ user: User }>("/api/auth/avatar", {
+      method: "DELETE",
+    }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<void>("/api/auth/change-password", {
       method: "POST",

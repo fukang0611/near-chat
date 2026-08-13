@@ -380,6 +380,7 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
                       <Avatar
                         name={target.displayName}
                         color={target.avatarColor}
+                        src={target.avatarUrl}
                         online={target.enabled ? target.online : false}
                       />
                       <div className="admin-user-copy">

@@ -2,14 +2,16 @@ import {
   Bell,
   Check,
   HardDrive,
+  ImagePlus,
   KeyRound,
   LoaderCircle,
   Palette,
+  Trash2,
   UserRoundCog,
   Volume2,
   X,
 } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { FileQuota, User } from "../types";
@@ -28,6 +30,8 @@ interface ProfileDialogProps {
 }
 
 const avatarPalette = ["#6757E8", "#E76F88", "#2FA98C", "#E08A45", "#4A86D8", "#9A63C7"];
+const avatarContentTypes = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+const AVATAR_MAX_BYTES = 8 * 1024 * 1024;
 
 /** 个人资料、存储用量和密码安全集中在一个自助设置面板中。 */
 export function ProfileDialog({
@@ -40,6 +44,8 @@ export function ProfileDialog({
 }: ProfileDialogProps) {
   const [displayName, setDisplayName] = useState(user.displayName);
   const [avatarColor, setAvatarColor] = useState(user.avatarColor);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
+  const [updatingAvatar, setUpdatingAvatar] = useState(false);
   const [quota, setQuota] = useState<FileQuota | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -50,6 +56,7 @@ export function ProfileDialog({
   const [notificationPermission, setNotificationPermission] = useState<
     NotificationPermission | "unsupported"
   >(() => ("Notification" in window ? Notification.permission : "unsupported"));
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void api
@@ -60,11 +67,64 @@ export function ProfileDialog({
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !savingProfile && !changingPassword) onClose();
+      if (event.key === "Escape" && !savingProfile && !changingPassword && !updatingAvatar) {
+        onClose();
+      }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [changingPassword, onClose, savingProfile]);
+  }, [changingPassword, onClose, savingProfile, updatingAvatar]);
+
+  useEffect(
+    () => () => {
+      if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
+    },
+    [avatarPreviewUrl],
+  );
+
+  const uploadAvatar = async (file: File | undefined) => {
+    if (!file) return;
+    if (!avatarContentTypes.has(file.type)) {
+      setNotice({ tone: "error", text: "头像仅支持 GIF、PNG、JPG 和 WebP 图片" });
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      setNotice({ tone: "error", text: "头像不能超过 8 MB" });
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setAvatarPreviewUrl(previewUrl);
+    setUpdatingAvatar(true);
+    setNotice(null);
+    try {
+      const result = await api.uploadAvatar(file);
+      onUpdated(result.user);
+      setNotice({
+        tone: "success",
+        text: file.type === "image/gif" ? "GIF 动态头像已更新" : "头像已更新",
+      });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "头像上传失败") });
+    } finally {
+      setAvatarPreviewUrl(null);
+      setUpdatingAvatar(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    setUpdatingAvatar(true);
+    setNotice(null);
+    try {
+      const result = await api.deleteAvatar();
+      onUpdated(result.user);
+      setNotice({ tone: "success", text: "已恢复为文字头像" });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "头像移除失败") });
+    } finally {
+      setUpdatingAvatar(false);
+    }
+  };
 
   const saveProfile = async (event: FormEvent) => {
     event.preventDefault();
@@ -133,7 +193,14 @@ export function ProfileDialog({
       className="dialog-layer"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !savingProfile && !changingPassword) onClose();
+        if (
+          event.target === event.currentTarget &&
+          !savingProfile &&
+          !changingPassword &&
+          !updatingAvatar
+        ) {
+          onClose();
+        }
       }}
     >
       <section
@@ -150,7 +217,12 @@ export function ProfileDialog({
             <strong id="profile-title">个人设置</strong>
             <small>管理你的公开资料、文件空间与登录密码</small>
           </div>
-          <button type="button" onClick={onClose} aria-label="关闭个人设置">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={savingProfile || changingPassword || updatingAvatar}
+            aria-label="关闭个人设置"
+          >
             <X size={18} />
           </button>
         </header>
@@ -164,12 +236,64 @@ export function ProfileDialog({
                 <small>群成员与联系人会看到这些信息</small>
               </span>
             </div>
-            <div className="profile-preview">
-              <Avatar name={displayName || user.username} color={avatarColor} />
-              <span>
+            <div className="avatar-editor">
+              <button
+                className="avatar-editor-preview"
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={updatingAvatar}
+                aria-label={user.avatarUrl ? "更换头像" : "上传头像"}
+              >
+                <Avatar
+                  name={displayName || user.username}
+                  color={avatarColor}
+                  src={avatarPreviewUrl ?? user.avatarUrl}
+                  size="large"
+                />
+                <span>
+                  {updatingAvatar ? (
+                    <LoaderCircle className="spin" size={16} />
+                  ) : (
+                    <ImagePlus size={16} />
+                  )}
+                </span>
+              </button>
+              <span className="avatar-editor-copy">
                 <strong>{displayName || "未命名用户"}</strong>
-                <small>@{user.username}</small>
+                <small>GIF、PNG、JPG 或 WebP · 最大 8 MB</small>
+                <span className="avatar-editor-actions">
+                  <button
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={updatingAvatar}
+                  >
+                    <ImagePlus size={13} />
+                    {user.avatarUrl ? "更换图片" : "选择图片"}
+                  </button>
+                  {user.avatarUrl && (
+                    <button
+                      type="button"
+                      className="is-danger"
+                      onClick={() => void removeAvatar()}
+                      disabled={updatingAvatar}
+                    >
+                      <Trash2 size={13} />
+                      移除
+                    </button>
+                  )}
+                </span>
               </span>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/gif,image/jpeg,image/png,image/webp"
+                aria-label="选择头像文件"
+                hidden
+                onChange={(event) => {
+                  void uploadAvatar(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
             </div>
             <label className="settings-field">
               <span>显示名称</span>
@@ -202,7 +326,7 @@ export function ProfileDialog({
             <button
               className="settings-submit"
               type="submit"
-              disabled={savingProfile || !displayName.trim()}
+              disabled={savingProfile || updatingAvatar || !displayName.trim()}
             >
               {savingProfile ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
               保存资料

@@ -140,6 +140,7 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
                 <Avatar
                   name={user.displayName}
                   color={user.avatarColor}
+                  src={user.avatarUrl}
                   size="small"
                   online={user.online}
                 />

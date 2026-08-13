@@ -156,30 +156,6 @@ textarea {
   font-size: 12px;
 }
 
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-}
-
-.intro-copy h1 {
-  max-width: 470px;
-  display: flex;
-  flex-direction: column;
-  margin-top: 20px;
-  font-size: clamp(39px, 3.9vw, 50px);
-  line-height: 1.12;
-}
-
-.intro-copy h1 span {
-  white-space: nowrap;
-}
-
-.intro-copy p {
-  color: #6d7079;
-  font-size: 16px;
-  line-height: 1.75;
-}
-
 .intro-status {
   align-items: flex-start;
   gap: 11px;
@@ -329,6 +305,442 @@ textarea {
 }
 .demo-dot.bob {
   background: #2fa98c;
+}
+
+/* 登录页局域网消息流视觉 -------------------------------------------------- */
+.login-intro {
+  padding: 78px 50px 40px;
+}
+
+.login-story {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0 20px;
+}
+
+.login-network-visual {
+  --network-frame-bg: rgba(255, 255, 255, 0.42);
+  --network-frame-line: rgba(255, 255, 255, 0.88);
+  --network-grid-dot: rgba(85, 88, 101, 0.13);
+  --network-route: rgba(103, 87, 232, 0.38);
+  --network-node-bg: rgba(255, 255, 255, 0.82);
+  --network-node-line: rgba(211, 213, 221, 0.82);
+  --network-node-title: #3f4148;
+  --network-node-caption: #92959e;
+  --network-hub-bg: #5e50db;
+  --network-hub-line: rgba(255, 255, 255, 0.28);
+  --network-hub-copy: rgba(255, 255, 255, 0.68);
+  position: relative;
+  width: min(100%, 480px);
+  margin: 0 auto;
+  user-select: none;
+}
+
+.network-visual-meta {
+  position: absolute;
+  z-index: 2;
+  top: 18px;
+  right: 23px;
+  left: 23px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.network-visual-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--network-node-title);
+  font-size: 9px;
+  font-weight: 670;
+}
+
+.network-visual-meta span i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 0 4px rgba(46, 175, 125, 0.12);
+}
+
+.network-visual-meta small {
+  color: var(--network-node-caption);
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.14em;
+}
+
+.login-network-art {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  filter: drop-shadow(0 18px 34px rgba(49, 51, 64, 0.08));
+}
+
+.login-network-art text {
+  font-family: inherit;
+}
+
+.network-frame {
+  fill: var(--network-frame-bg);
+  stroke: var(--network-frame-line);
+  stroke-width: 1.5;
+}
+
+.network-grid {
+  opacity: 0.72;
+}
+
+.network-grid-dot {
+  fill: var(--network-grid-dot);
+}
+
+.network-hub-glow {
+  fill: var(--accent);
+  opacity: 0.065;
+}
+
+.network-routes path {
+  fill: none;
+  stroke: var(--network-route);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 3 8;
+  animation: login-network-flow 7s linear infinite;
+}
+
+@keyframes login-network-flow {
+  to {
+    stroke-dashoffset: -44;
+  }
+}
+
+.network-packet {
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+.network-packet.is-violet {
+  color: #7969ed;
+  fill: currentColor;
+}
+
+.network-packet.is-green {
+  color: #3abb8c;
+  fill: currentColor;
+}
+
+.network-packet.is-coral {
+  color: #e7778d;
+  fill: currentColor;
+}
+
+.network-node > rect:first-child {
+  fill: var(--network-node-bg);
+  stroke: var(--network-node-line);
+  stroke-width: 1;
+  filter: drop-shadow(0 8px 14px rgba(46, 48, 59, 0.07));
+}
+
+.network-node-title {
+  fill: var(--network-node-title);
+  font-size: 11px;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+}
+
+.network-node-caption {
+  fill: var(--network-node-caption);
+  font-size: 8.5px;
+  font-weight: 520;
+}
+
+.network-portrait {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: network-portrait-float 3.4s ease-in-out infinite;
+}
+
+.network-portrait.is-bob {
+  animation-delay: -1.35s;
+  animation-direction: reverse;
+}
+
+@keyframes network-portrait-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-1.2px) rotate(-1deg);
+  }
+}
+
+.portrait-outline {
+  fill: var(--network-node-bg);
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 2;
+  filter: drop-shadow(0 5px 8px rgba(31, 34, 43, 0.16));
+}
+
+.network-portrait.is-alice .portrait-bg {
+  fill: #f5b5c4;
+}
+
+.network-portrait.is-bob .portrait-bg {
+  fill: #8edacb;
+}
+
+.portrait-face {
+  fill: #ffddc8;
+}
+
+.network-portrait.is-bob .portrait-face {
+  fill: #e7bc99;
+}
+
+.network-portrait.is-alice .portrait-hair,
+.network-portrait.is-alice .portrait-fringe {
+  fill: #4b354c;
+}
+
+.network-portrait.is-bob .portrait-hair {
+  fill: #283c47;
+}
+
+.network-portrait.is-alice .portrait-body {
+  fill: #7969e8;
+}
+
+.network-portrait.is-bob .portrait-body {
+  fill: #3f7488;
+}
+
+.portrait-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: network-portrait-blink 5.6s step-end infinite;
+}
+
+.network-portrait.is-bob .portrait-eyes {
+  animation-delay: -2.3s;
+}
+
+@keyframes network-portrait-blink {
+  0%,
+  46%,
+  50%,
+  100% {
+    transform: scaleY(1);
+  }
+  48% {
+    transform: scaleY(0.12);
+  }
+}
+
+.network-portrait.is-alice .portrait-eyes path,
+.portrait-smile {
+  fill: none;
+  stroke: #5d3c48;
+  stroke-width: 1.15;
+  stroke-linecap: round;
+}
+
+.network-portrait.is-bob .portrait-eyes circle {
+  fill: #263945;
+}
+
+.portrait-blush {
+  fill: #ef9ba4;
+  opacity: 0.55;
+}
+
+.portrait-glasses {
+  fill: none;
+  stroke: #34525d;
+  stroke-width: 1;
+}
+
+.portrait-light {
+  fill: rgba(255, 255, 255, 0.32);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: network-portrait-light 2.8s ease-in-out infinite alternate;
+}
+
+@keyframes network-portrait-light {
+  from {
+    opacity: 0.32;
+    transform: translateX(-1px) rotate(-8deg);
+  }
+  to {
+    opacity: 0.58;
+    transform: translateX(1px) rotate(-2deg);
+  }
+}
+
+.portrait-sparkle {
+  color: var(--accent);
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-linecap: round;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: network-portrait-sparkle 2.6s ease-in-out infinite;
+}
+
+.network-portrait.is-bob .portrait-sparkle {
+  color: var(--online);
+  stroke: var(--online);
+  animation-delay: -1.1s;
+}
+
+.portrait-sparkle circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+@keyframes network-portrait-sparkle {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+.network-presence,
+.network-hub-status {
+  fill: var(--online);
+  stroke: var(--network-node-bg);
+  stroke-width: 2;
+}
+
+.network-file-icon,
+.network-message-icon {
+  stroke: none !important;
+}
+
+.network-file-icon {
+  fill: rgba(103, 87, 232, 0.12) !important;
+}
+
+.network-message-icon {
+  fill: rgba(46, 175, 125, 0.13) !important;
+}
+
+.network-file path,
+.network-message path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.network-message path {
+  stroke: var(--online);
+}
+
+.network-message circle {
+  fill: var(--online);
+}
+
+.network-hub-ring {
+  fill: none;
+  stroke: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.network-hub-ring.is-outer {
+  opacity: 0.22;
+  stroke-width: 1;
+  stroke-dasharray: 2 8;
+  animation: login-network-ring 3.6s ease-in-out infinite;
+}
+
+.network-hub-ring.is-inner {
+  opacity: 0.12;
+  stroke-width: 9;
+}
+
+@keyframes login-network-ring {
+  0%,
+  100% {
+    opacity: 0.16;
+    transform: scale(0.97);
+  }
+  50% {
+    opacity: 0.36;
+    transform: scale(1.035);
+  }
+}
+
+.network-hub-card {
+  fill: var(--network-hub-bg);
+  stroke: var(--network-hub-line);
+  stroke-width: 1;
+  filter: drop-shadow(0 13px 20px rgba(71, 59, 176, 0.24));
+}
+
+.network-hub-icon {
+  fill: rgba(255, 255, 255, 0.15);
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1;
+}
+
+.network-chat-symbol path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.network-chat-symbol circle {
+  fill: #fff;
+}
+
+.network-hub-title {
+  fill: #fff;
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -0.025em;
+}
+
+.network-hub-caption {
+  fill: var(--network-hub-copy);
+  font-size: 9px;
+  font-weight: 540;
+}
+
+.network-hub-status-text {
+  fill: rgba(255, 255, 255, 0.72);
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+}
+
+.network-frame,
+.network-grid-dot,
+.network-routes path,
+.network-node > rect:first-child,
+.network-node-title,
+.network-node-caption,
+.network-hub-card {
+  transition:
+    fill 220ms ease,
+    stroke 220ms ease;
 }
 
 /* Electron 使用原生窗口控制按钮，桌面壳内隐藏网页模拟的红黄绿圆点。 */
@@ -2606,6 +3018,106 @@ html[data-near-chat-desktop="true"] .window-dots {
   font-size: 9px;
 }
 
+.avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 15px;
+  padding: 13px;
+  border: 1px solid transparent;
+  border-radius: 15px;
+  background: #f6f6f8;
+}
+
+.avatar-editor-preview {
+  position: relative;
+  width: 70px;
+  height: 70px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 23px;
+  background: transparent;
+}
+
+.avatar-editor-preview .avatar-large {
+  width: 70px;
+  height: 70px;
+  border-radius: 23px;
+  box-shadow: 0 9px 22px rgba(39, 41, 51, 0.13);
+}
+
+.avatar-editor-preview > span:last-child {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #f6f6f8;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 5px 12px rgba(69, 57, 174, 0.25);
+}
+
+.avatar-editor-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.avatar-editor-copy > strong {
+  overflow: hidden;
+  color: #3b3d43;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar-editor-copy > small {
+  margin-top: 4px;
+  color: #92959e;
+  font-size: 9px;
+}
+
+.avatar-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.avatar-editor-actions button {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid #e0e1e5;
+  border-radius: 8px;
+  color: #686b74;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.avatar-editor-actions button:hover:not(:disabled) {
+  border-color: rgba(103, 87, 232, 0.3);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.avatar-editor-actions button.is-danger:hover:not(:disabled) {
+  border-color: rgba(212, 84, 100, 0.25);
+  color: var(--danger);
+  background: rgba(212, 84, 100, 0.07);
+}
+
 .settings-field {
   min-width: 0;
   display: flex;
@@ -4420,7 +4932,28 @@ body,
     linear-gradient(148deg, #24252b 0%, #191a1f 100%);
 }
 
-:root[data-theme="dark"] .intro-copy p,
+:root[data-theme="dark"] .login-network-visual {
+  --network-frame-bg: rgba(17, 18, 22, 0.34);
+  --network-frame-line: rgba(255, 255, 255, 0.08);
+  --network-grid-dot: rgba(255, 255, 255, 0.09);
+  --network-route: rgba(135, 120, 242, 0.45);
+  --network-node-bg: rgba(45, 46, 53, 0.9);
+  --network-node-line: rgba(255, 255, 255, 0.09);
+  --network-node-title: #e5e6e9;
+  --network-node-caption: #9296a0;
+  --network-hub-bg: #7566e7;
+  --network-hub-line: rgba(255, 255, 255, 0.22);
+  --network-hub-copy: rgba(255, 255, 255, 0.73);
+}
+
+:root[data-theme="dark"] .login-network-art {
+  filter: drop-shadow(0 20px 38px rgba(0, 0, 0, 0.2));
+}
+
+:root[data-theme="dark"] .network-hub-card {
+  filter: drop-shadow(0 14px 22px rgba(20, 14, 62, 0.38));
+}
+
 :root[data-theme="dark"] .intro-status {
   color: #a1a4ad;
 }
@@ -5165,6 +5698,7 @@ body,
 }
 
 :root[data-theme="dark"] .profile-preview,
+:root[data-theme="dark"] .avatar-editor,
 :root[data-theme="dark"] .group-profile-preview,
 :root[data-theme="dark"] .group-member-search {
   border-color: #3b3d45;
@@ -5173,16 +5707,34 @@ body,
 }
 
 :root[data-theme="dark"] .profile-preview strong,
+:root[data-theme="dark"] .avatar-editor-copy > strong,
 :root[data-theme="dark"] .group-profile-preview strong,
 :root[data-theme="dark"] .group-member-list strong {
   color: #d5d7db;
 }
 
 :root[data-theme="dark"] .profile-preview small,
+:root[data-theme="dark"] .avatar-editor-copy > small,
 :root[data-theme="dark"] .group-profile-preview small,
 :root[data-theme="dark"] .group-member-list small,
 :root[data-theme="dark"] .group-danger-card small {
   color: #8e929b;
+}
+
+:root[data-theme="dark"] .avatar-editor-preview > span:last-child {
+  border-color: #24252b;
+}
+
+:root[data-theme="dark"] .avatar-editor-actions button {
+  border-color: #41434b;
+  color: #b2b5bd;
+  background: #303139;
+}
+
+:root[data-theme="dark"] .avatar-editor-actions button:hover:not(:disabled) {
+  border-color: rgba(135, 120, 242, 0.42);
+  color: #c4bcff;
+  background: rgba(135, 120, 242, 0.13);
 }
 
 :root[data-theme="dark"] .color-picker button.is-selected {
@@ -5337,6 +5889,16 @@ body,
 }
 
 @media (prefers-reduced-transparency: reduce) {
+  .login-network-visual {
+    --network-frame-bg: #f0f1f3;
+    --network-node-bg: #fff;
+  }
+
+  :root[data-theme="dark"] .login-network-visual {
+    --network-frame-bg: #202127;
+    --network-node-bg: #2d2e35;
+  }
+
   :root[data-theme="dark"] .sidebar,
   :root[data-theme="dark"] .chat-header,
   :root[data-theme="dark"] .system-popover,
@@ -5360,6 +5922,11 @@ body,
 }
 
 @media (prefers-contrast: more) {
+  .login-network-visual {
+    --network-frame-line: #777b84;
+    --network-node-line: #777b84;
+  }
+
   :root[data-theme="dark"] .sidebar,
   :root[data-theme="dark"] .chat-surface,
   :root[data-theme="dark"] .composer,
@@ -5374,5 +5941,18 @@ body,
   :root[data-theme="dark"] small,
   :root[data-theme="dark"] .muted {
     color: #b8bbc2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .network-packets {
+    display: none;
+  }
+
+  .network-portrait,
+  .portrait-eyes,
+  .portrait-light,
+  .portrait-sparkle {
+    animation: none;
   }
 }

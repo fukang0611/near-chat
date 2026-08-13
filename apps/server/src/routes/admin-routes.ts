@@ -4,6 +4,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../audit-service.js";
 import { authenticate, requireAdmin } from "../auth.js";
+import { publicAvatarUrl } from "../avatar-service.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { RealtimeHub } from "../realtime.js";
@@ -15,6 +16,8 @@ interface AdminUserRow {
   role: "ADMIN" | "USER";
   enabled: boolean;
   avatar_color: string;
+  avatar_object_key: string | null;
+  avatar_version: number;
   created_at?: Date;
 }
 
@@ -64,6 +67,7 @@ function toAdminUser(row: AdminUserRow, realtime: RealtimeHub) {
     enabled: row.enabled,
     online: row.enabled && realtime.isOnline(row.id),
     avatarColor: row.avatar_color,
+    avatarUrl: publicAvatarUrl(row.id, row.avatar_object_key, row.avatar_version),
     createdAt: row.created_at?.toISOString(),
   };
 }
@@ -74,7 +78,8 @@ export function createAdminRouter(realtime: RealtimeHub) {
 
   router.get("/admin/users", authenticate, requireAdmin, async (_request, response) => {
     const result = await query<AdminUserRow>(
-      `SELECT id, username, display_name, role, enabled, avatar_color, created_at
+      `SELECT id, username, display_name, role, enabled, avatar_color,
+              avatar_object_key, avatar_version, created_at
            FROM users
           ORDER BY created_at`,
     );
@@ -124,7 +129,8 @@ export function createAdminRouter(realtime: RealtimeHub) {
           `INSERT INTO users
                (id, username, display_name, password_hash, role, avatar_color)
              VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, username, display_name, role, enabled, avatar_color`,
+             RETURNING id, username, display_name, role, enabled, avatar_color,
+                       avatar_object_key, avatar_version`,
           [
             randomUUID(),
             input.username.toLowerCase(),
@@ -178,7 +184,8 @@ export function createAdminRouter(realtime: RealtimeHub) {
                     WHEN $3::boolean = FALSE THEN 1 ELSE 0 END,
                   updated_at = NOW()
             WHERE id = $1
-            RETURNING id, username, display_name, role, enabled, avatar_color`,
+            RETURNING id, username, display_name, role, enabled, avatar_color,
+                      avatar_object_key, avatar_version`,
         [userId, input.displayName ?? null, input.enabled ?? null],
       );
       if (updated.rows[0]) {

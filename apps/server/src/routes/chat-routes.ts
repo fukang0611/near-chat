@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { recordAudit } from "../audit-service.js";
+import { publicAvatarUrl } from "../avatar-service.js";
 import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
@@ -30,6 +31,8 @@ interface ConversationMember {
   username: string;
   displayName: string;
   avatarColor: string;
+  avatarObjectKey: string | null;
+  avatarVersion: number;
 }
 
 interface ConversationRow {
@@ -152,8 +155,9 @@ async function conversationMemberIds(conversationId: string): Promise<string[]> 
 }
 
 function serializeConversation(row: ConversationRow, currentUserId: string, realtime: RealtimeHub) {
-  const members = row.members.map((member) => ({
+  const members = row.members.map(({ avatarObjectKey, avatarVersion, ...member }) => ({
     ...member,
+    avatarUrl: publicAvatarUrl(member.id, avatarObjectKey, avatarVersion),
     online: realtime.isOnline(member.id),
   }));
   const peer = row.type === "DIRECT" ? members.find((member) => member.id !== currentUserId) : null;
@@ -165,6 +169,7 @@ function serializeConversation(row: ConversationRow, currentUserId: string, real
     type: row.type,
     title,
     avatarColor: row.type === "GROUP" ? row.avatar_color : (peer?.avatarColor ?? row.avatar_color),
+    avatarUrl: row.type === "DIRECT" ? (peer?.avatarUrl ?? null) : null,
     ownerId: row.type === "GROUP" ? row.owner_id : null,
     peer: peer ?? null,
     members,
@@ -195,8 +200,10 @@ export function createChatRouter(realtime: RealtimeHub) {
       username: string;
       display_name: string;
       avatar_color: string;
+      avatar_object_key: string | null;
+      avatar_version: number;
     }>(
-      `SELECT id, username, display_name, avatar_color
+      `SELECT id, username, display_name, avatar_color, avatar_object_key, avatar_version
          FROM users
         WHERE enabled = TRUE AND id <> $1
         ORDER BY display_name, username`,
@@ -208,6 +215,7 @@ export function createChatRouter(realtime: RealtimeHub) {
         username: row.username,
         displayName: row.display_name,
         avatarColor: row.avatar_color,
+        avatarUrl: publicAvatarUrl(row.id, row.avatar_object_key, row.avatar_version),
         online: realtime.isOnline(row.id),
       })),
     });
@@ -227,7 +235,9 @@ export function createChatRouter(realtime: RealtimeHub) {
                             'id', member_user.id,
                             'username', member_user.username,
                             'displayName', member_user.display_name,
-                            'avatarColor', member_user.avatar_color
+                            'avatarColor', member_user.avatar_color,
+                            'avatarObjectKey', member_user.avatar_object_key,
+                            'avatarVersion', member_user.avatar_version
                           )
                           ORDER BY member_user.display_name, member_user.username
                         )

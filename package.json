@@ -14,7 +14,7 @@
     "desktop:make": "npm run make -w @near-chat/desktop",
     "desktop:make:win": "npm run make:win -w @near-chat/desktop",
     "typecheck": "npm run typecheck -w @near-chat/server && npm run typecheck -w @near-chat/web && npm run typecheck -w @near-chat/desktop",
-    "test": "npm run test -w @near-chat/web && npm run test -w @near-chat/desktop",
+    "test": "npm run test -w @near-chat/server && npm run test -w @near-chat/web && npm run test -w @near-chat/desktop",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm run test && npm run build && npm run build:desktop",

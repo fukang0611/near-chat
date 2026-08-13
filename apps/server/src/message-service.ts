@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { publicAvatarUrl } from "./avatar-service.js";
 import { config } from "./config.js";
 import { query } from "./database.js";
 
@@ -31,6 +32,7 @@ export interface MessageDto {
   senderId: string;
   senderName: string;
   senderAvatarColor: string;
+  senderAvatarUrl: string | null;
   clientMessageId: string;
   type: "TEXT" | "IMAGE" | "FILE";
   textContent: string | null;
@@ -59,6 +61,8 @@ interface MessageRow {
   sender_id: string;
   sender_name: string;
   sender_avatar_color: string;
+  sender_avatar_object_key: string | null;
+  sender_avatar_version: number;
   client_message_id: string;
   type: "TEXT" | "IMAGE" | "FILE";
   text_content: string | null;
@@ -92,6 +96,8 @@ const messageSelect = `
          m.sender_id,
          u.display_name AS sender_name,
          u.avatar_color AS sender_avatar_color,
+         u.avatar_object_key AS sender_avatar_object_key,
+         u.avatar_version AS sender_avatar_version,
          m.client_message_id,
          m.type,
          CASE WHEN m.recalled_at IS NULL THEN m.text_content ELSE NULL END AS text_content,
@@ -150,6 +156,11 @@ function toDto(row: MessageRow): MessageDto {
     senderId: row.sender_id,
     senderName: row.sender_name,
     senderAvatarColor: row.sender_avatar_color,
+    senderAvatarUrl: publicAvatarUrl(
+      row.sender_id,
+      row.sender_avatar_object_key,
+      row.sender_avatar_version,
+    ),
     clientMessageId: row.client_message_id,
     type: row.type,
     textContent: row.text_content,

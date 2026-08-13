@@ -6,6 +6,7 @@ import { apiErrorHandler } from "./http.js";
 import { minio } from "./minio.js";
 import { RealtimeHub } from "./realtime.js";
 import { createAdminRouter } from "./routes/admin-routes.js";
+import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
 import { createFileRouter } from "./routes/file-routes.js";
@@ -41,6 +42,7 @@ export function createApp(realtime: RealtimeHub) {
   app.get("/api/health", readiness);
 
   app.use("/api", createAuthRouter(realtime));
+  app.use("/api", createAvatarRouter(realtime));
   app.use("/api", createChatRouter(realtime));
   app.use("/api", createFileRouter());
   app.use("/api", createAdminRouter(realtime));

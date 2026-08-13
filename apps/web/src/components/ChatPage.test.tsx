@@ -14,6 +14,7 @@ const currentUser: User = {
   username: "admin",
   displayName: "管理员",
   avatarColor: "#6757E8",
+  avatarUrl: null,
   role: "ADMIN",
 };
 const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
@@ -24,6 +25,7 @@ function conversation(id: string, title: string): Conversation {
     type: "GROUP",
     title,
     avatarColor: "#D27B5A",
+    avatarUrl: null,
     ownerId: currentUser.id,
     peer: null,
     members: [currentUser],
@@ -41,6 +43,7 @@ function message(conversationId: string, textContent: string): Message {
     senderId: currentUser.id,
     senderName: currentUser.displayName,
     senderAvatarColor: currentUser.avatarColor,
+    senderAvatarUrl: null,
     clientMessageId: `client-${conversationId}`,
     type: "TEXT",
     textContent,

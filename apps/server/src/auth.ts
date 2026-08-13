@@ -9,26 +9,32 @@ export interface AuthUser {
   displayName: string;
   role: "ADMIN" | "USER";
   avatarColor: string;
+  avatarObjectKey: string | null;
+  avatarVersion: number;
   tokenVersion: number;
 }
 
-interface UserRow {
+export interface AuthUserRow {
   id: string;
   username: string;
   display_name: string;
   role: "ADMIN" | "USER";
   avatar_color: string;
+  avatar_object_key: string | null;
+  avatar_version: number;
   token_version: number;
   enabled: boolean;
 }
 
-function toAuthUser(row: UserRow): AuthUser {
+export function toAuthUser(row: AuthUserRow): AuthUser {
   return {
     id: row.id,
     username: row.username,
     displayName: row.display_name,
     role: row.role,
     avatarColor: row.avatar_color,
+    avatarObjectKey: row.avatar_object_key,
+    avatarVersion: row.avatar_version,
     tokenVersion: row.token_version,
   };
 }
@@ -53,8 +59,9 @@ export async function userFromToken(token: string): Promise<AuthUser | null> {
     };
     if (!payload.sub || typeof payload.version !== "number") return null;
 
-    const result = await query<UserRow>(
-      `SELECT id, username, display_name, role, avatar_color, token_version, enabled
+    const result = await query<AuthUserRow>(
+      `SELECT id, username, display_name, role, avatar_color, avatar_object_key,
+              avatar_version, token_version, enabled
          FROM users
         WHERE id = $1`,
       [payload.sub],

@@ -338,6 +338,7 @@ export function ChatSidebar({
                   <Avatar
                     name={conversation.title}
                     color={conversation.avatarColor}
+                    src={conversation.avatarUrl}
                     online={conversation.type === "DIRECT" ? conversation.peer?.online : undefined}
                   />
                   <span className="conversation-copy">
@@ -395,7 +396,12 @@ export function ChatSidebar({
                 key={peer.id}
                 onClick={() => onOpenDirect(peer.id)}
               >
-                <Avatar name={peer.displayName} color={peer.avatarColor} online={peer.online} />
+                <Avatar
+                  name={peer.displayName}
+                  color={peer.avatarColor}
+                  src={peer.avatarUrl}
+                  online={peer.online}
+                />
                 <span className="conversation-copy">
                   <span>
                     <strong>{peer.displayName}</strong>
@@ -427,6 +433,7 @@ export function ChatSidebar({
         <Avatar
           name={currentUser.displayName}
           color={currentUser.avatarColor}
+          src={currentUser.avatarUrl}
           size="small"
           online={connection === "connected"}
         />

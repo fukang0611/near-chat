@@ -38,6 +38,7 @@ export const config = {
     bucket: process.env.MINIO_BUCKET ?? "near-chat-files",
   },
   fileMaxBytes: positiveInteger("FILE_MAX_BYTES", 50 * 1024 * 1024),
+  avatarMaxBytes: positiveInteger("AVATAR_MAX_BYTES", 8 * 1024 * 1024),
   // 配额统计包含已发送附件和仍在等待发送的附件，避免上传后再校验导致超额。
   fileUserQuotaBytes: positiveInteger("FILE_USER_QUOTA_BYTES", 1024 * 1024 * 1024),
   fileOrphanTtlHours: positiveInteger("FILE_ORPHAN_TTL_HOURS", 24),

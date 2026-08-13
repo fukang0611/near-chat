@@ -3,6 +3,7 @@ export interface User {
   username: string;
   displayName: string;
   avatarColor: string;
+  avatarUrl: string | null;
   online?: boolean;
   role?: "ADMIN" | "USER";
 }
@@ -12,6 +13,7 @@ export interface Conversation {
   type: "DIRECT" | "GROUP";
   title: string;
   avatarColor: string;
+  avatarUrl: string | null;
   ownerId: string | null;
   peer: User | null;
   members: User[];
@@ -51,6 +53,7 @@ export interface Message {
   senderId: string;
   senderName: string;
   senderAvatarColor: string;
+  senderAvatarUrl: string | null;
   clientMessageId: string;
   type: "TEXT" | "IMAGE" | "FILE";
   textContent: string | null;

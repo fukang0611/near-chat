@@ -9,6 +9,7 @@ const currentUser: User = {
   username: "admin",
   displayName: "管理员",
   avatarColor: "#6f63ee",
+  avatarUrl: null,
   online: true,
   role: "ADMIN",
 };

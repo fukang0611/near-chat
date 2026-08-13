@@ -224,6 +224,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const refreshUsers = useCallback(async () => {
     const result = await api.users();
     setUsers(result.users);
+    return result.users;
   }, []);
 
   const refreshConversations = useCallback(async () => {
@@ -423,13 +424,32 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     onUsersChanged: (changedUserId) => {
       const refreshCurrentUser =
         changedUserId === user.id
-          ? api.me().then((result) => onUserUpdated(result.user))
-          : Promise.resolve();
-      void Promise.all([refreshUsers(), refreshConversations(), refreshCurrentUser]).catch(
-        (error) => {
+          ? api.me().then((result) => {
+              onUserUpdated(result.user);
+              return result.user;
+            })
+          : Promise.resolve(null);
+      void Promise.all([refreshUsers(), refreshConversations(), refreshCurrentUser])
+        .then(([refreshedUsers, , refreshedCurrentUser]) => {
+          const changedUser =
+            refreshedCurrentUser ?? refreshedUsers.find((item) => item.id === changedUserId);
+          if (!changedUser) return;
+          setMessages((current) =>
+            current.map((message) =>
+              message.senderId === changedUserId
+                ? {
+                    ...message,
+                    senderName: changedUser.displayName,
+                    senderAvatarColor: changedUser.avatarColor,
+                    senderAvatarUrl: changedUser.avatarUrl,
+                  }
+                : message,
+            ),
+          );
+        })
+        .catch((error) => {
           notify(errorMessage(error, "用户资料同步失败"), "error");
-        },
-      );
+        });
     },
     onMessageCreated: (incoming) => {
       if (incoming.senderId === user.id) {
@@ -725,6 +745,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       senderId: user.id,
       senderName: user.displayName,
       senderAvatarColor: user.avatarColor,
+      senderAvatarUrl: user.avatarUrl,
       clientMessageId,
       type,
       textContent: text.trim() || null,
@@ -902,6 +923,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               <Avatar
                 name={selectedConversation.title}
                 color={selectedConversation.avatarColor}
+                src={selectedConversation.avatarUrl}
                 size="small"
                 online={
                   selectedConversation.type === "DIRECT"

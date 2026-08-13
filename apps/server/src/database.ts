@@ -45,10 +45,24 @@ CREATE TABLE IF NOT EXISTS users (
   role VARCHAR(20) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   avatar_color VARCHAR(20) NOT NULL DEFAULT '#6C5CE7',
+  avatar_bucket TEXT,
+  avatar_object_key TEXT,
+  avatar_content_type VARCHAR(50),
+  avatar_size_bytes BIGINT,
+  avatar_version INTEGER NOT NULL DEFAULT 0,
   token_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- 自定义头像独立于聊天附件；增量字段兼容已有第一阶段数据库。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_bucket TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_object_key TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_content_type VARCHAR(50);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_size_bytes BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_version INTEGER NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_avatar_object_key
+  ON users(avatar_object_key) WHERE avatar_object_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY,

@@ -2,20 +2,13 @@ import bcrypt from "bcryptjs";
 import { Router } from "express";
 import { z } from "zod";
 import { recordAudit } from "../audit-service.js";
-import { authenticate, signToken, type AuthUser } from "../auth.js";
+import { authenticate, signToken, toAuthUser, type AuthUserRow } from "../auth.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser, publicUser } from "../http.js";
 import { RealtimeHub } from "../realtime.js";
 
-interface LoginUserRow {
-  id: string;
-  username: string;
-  display_name: string;
+interface LoginUserRow extends AuthUserRow {
   password_hash: string;
-  role: "ADMIN" | "USER";
-  enabled: boolean;
-  avatar_color: string;
-  token_version: number;
 }
 
 const loginSchema = z.object({
@@ -42,17 +35,6 @@ const changePasswordSchema = z
     path: ["newPassword"],
   });
 
-function toAuthUser(row: LoginUserRow): AuthUser {
-  return {
-    id: row.id,
-    username: row.username,
-    displayName: row.display_name,
-    role: row.role,
-    avatarColor: row.avatar_color,
-    tokenVersion: row.token_version,
-  };
-}
-
 /** 登录态路由模块：签发令牌，恢复当前用户，并提供客户端退出语义。 */
 export function createAuthRouter(realtime: RealtimeHub) {
   const router = Router();
@@ -61,7 +43,7 @@ export function createAuthRouter(realtime: RealtimeHub) {
     const input = loginSchema.parse(request.body);
     const result = await query<LoginUserRow>(
       `SELECT id, username, display_name, password_hash, role, enabled,
-              avatar_color, token_version
+              avatar_color, avatar_object_key, avatar_version, token_version
          FROM users
         WHERE username = $1`,
       [input.username.toLowerCase()],
@@ -91,7 +73,7 @@ export function createAuthRouter(realtime: RealtimeHub) {
                 updated_at = NOW()
           WHERE id = $1
           RETURNING id, username, display_name, password_hash, role, enabled,
-                    avatar_color, token_version`,
+                    avatar_color, avatar_object_key, avatar_version, token_version`,
         [user.id, input.displayName ?? null, input.avatarColor ?? null],
       );
       const row = result.rows[0];

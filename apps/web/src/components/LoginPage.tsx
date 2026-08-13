@@ -14,6 +14,7 @@ import { api } from "../api";
 import type { User } from "../types";
 import { errorMessage } from "../utils/errors";
 import type { ThemeMode } from "../utils/theme";
+import { LoginNetworkVisual } from "./LoginNetworkVisual";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface LoginPageProps {
@@ -75,13 +76,8 @@ export function LoginPage({ theme, onThemeChange, onLogin }: LoginPageProps) {
               近聊 <small>NearChat</small>
             </span>
           </div>
-          <div className="intro-copy">
-            <span className="eyebrow">LOCAL · SIMPLE · PRIVATE</span>
-            <h1>
-              <span>让局域网里的沟通，</span>
-              <span>回到简单。</span>
-            </h1>
-            <p>在线即相见，消息和文件都留在自己的网络里。</p>
+          <div className="login-story">
+            <LoginNetworkVisual />
           </div>
           <div className="intro-status">
             <span className="status-pulse" />

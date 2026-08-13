@@ -98,7 +98,14 @@ function MessageBubble({
       id={`message-${message.id}`}
       className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""} ${failed ? "is-failed" : ""}`}
     >
-      {!mine && <Avatar name={message.senderName} color={message.senderAvatarColor} size="small" />}
+      {!mine && (
+        <Avatar
+          name={message.senderName}
+          color={message.senderAvatarColor}
+          src={message.senderAvatarUrl}
+          size="small"
+        />
+      )}
       <div className="message-stack">
         {!mine && <span className="sender-name">{message.senderName}</span>}
         <div className="message-content">
@@ -252,7 +259,12 @@ export function MessageTimeline({
   return (
     <div className="message-canvas">
       <div className="conversation-intro">
-        <Avatar name={conversation.title} color={conversation.avatarColor} size="large" />
+        <Avatar
+          name={conversation.title}
+          color={conversation.avatarColor}
+          src={conversation.avatarUrl}
+          size="large"
+        />
         <strong>{conversation.title}</strong>
         <span>
           {conversation.type === "GROUP"

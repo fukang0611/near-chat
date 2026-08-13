@@ -278,6 +278,7 @@ export function GroupManagementDialog({
                     <Avatar
                       name={member.displayName}
                       color={member.avatarColor}
+                      src={member.avatarUrl}
                       size="small"
                       online={member.online}
                     />
@@ -353,6 +354,7 @@ export function GroupManagementDialog({
                         <Avatar
                           name={candidate.displayName}
                           color={candidate.avatarColor}
+                          src={candidate.avatarUrl}
                           size="small"
                           online={candidate.online}
                         />

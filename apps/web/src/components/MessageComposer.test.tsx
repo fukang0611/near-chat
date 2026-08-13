@@ -12,6 +12,7 @@ const replyTarget: Message = {
   senderId: "e30fbfff-5e32-49af-bb9e-582c7c51a1d0",
   senderName: "林小满",
   senderAvatarColor: "#E76F88",
+  senderAvatarUrl: null,
   clientMessageId: "ca19022f-1766-4baf-a5e1-c3b28eea5dcc",
   type: "TEXT",
   textContent: "这是需要引用的原消息",

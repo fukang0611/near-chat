@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { ZodError } from "zod";
 import type { AuthUser } from "./auth.js";
+import { publicAvatarUrl } from "./avatar-service.js";
 import { config } from "./config.js";
 
 /** 可安全暴露给客户端的业务错误。未识别错误统一按 500 处理。 */
@@ -31,6 +32,7 @@ export function publicUser(user: AuthUser) {
     displayName: user.displayName,
     role: user.role,
     avatarColor: user.avatarColor,
+    avatarUrl: publicAvatarUrl(user.id, user.avatarObjectKey, user.avatarVersion),
   };
 }
 
@@ -54,7 +56,9 @@ export function apiErrorHandler(
   if (error instanceof multer.MulterError) {
     const message =
       error.code === "LIMIT_FILE_SIZE"
-        ? `文件不能超过 ${Math.round(config.fileMaxBytes / 1024 / 1024)} MB`
+        ? error.field === "avatar"
+          ? `头像不能超过 ${Math.round(config.avatarMaxBytes / 1024 / 1024)} MB`
+          : `文件不能超过 ${Math.round(config.fileMaxBytes / 1024 / 1024)} MB`
         : "文件上传失败";
     response.status(400).json({ message });
     return;
