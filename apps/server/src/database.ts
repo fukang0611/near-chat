@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS messages (
   type VARCHAR(20) NOT NULL CHECK (type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE')),
   text_content TEXT,
   reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+  forwarded_from JSONB,
   recalled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (sender_id, client_message_id)
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS messages (
 ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS recalled_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS forwarded_from JSONB;
 ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_type_check;
 ALTER TABLE messages
   ADD CONSTRAINT messages_type_check CHECK (type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE'));
@@ -180,6 +182,7 @@ CREATE TABLE IF NOT EXISTS message_favorites (
   source_sender_avatar_color VARCHAR(20) NOT NULL,
   source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE')),
   text_content TEXT,
+  forwarded_from JSONB,
   message_created_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -193,6 +196,15 @@ CREATE TABLE IF NOT EXISTS favorite_attachments (
   attachment_id UUID NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
   PRIMARY KEY (favorite_id, attachment_id)
 );
+
+-- 转发消息复用原附件对象，只新增目标消息到附件的引用关系。
+CREATE TABLE IF NOT EXISTS message_attachment_links (
+  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  attachment_id UUID NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, attachment_id)
+);
+
+ALTER TABLE message_favorites ADD COLUMN IF NOT EXISTS forwarded_from JSONB;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
@@ -250,6 +262,8 @@ CREATE INDEX IF NOT EXISTS idx_message_favorites_user_created
   ON message_favorites(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_favorite_attachments_attachment
   ON favorite_attachments(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_message_attachment_links_attachment
+  ON message_attachment_links(attachment_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);

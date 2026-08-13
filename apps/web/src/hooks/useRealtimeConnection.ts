@@ -50,10 +50,22 @@ function isMessage(value: unknown): value is Message {
     (value.recalledAt === null || typeof value.recalledAt === "string") &&
     typeof value.recallableUntil === "string" &&
     (value.replyTo === null || isMessageReply(value.replyTo)) &&
+    (value.forwardedFrom === undefined ||
+      value.forwardedFrom === null ||
+      isForwardedMessageSource(value.forwardedFrom)) &&
     Array.isArray(value.attachments) &&
     (value.reactions === undefined ||
       (Array.isArray(value.reactions) && value.reactions.every(isMessageReaction))) &&
     isReceiptSummary(value.receipt)
+  );
+}
+
+function isForwardedMessageSource(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.senderName === "string" &&
+    typeof value.conversationTitle === "string" &&
+    typeof value.createdAt === "string"
   );
 }
 

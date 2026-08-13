@@ -22,6 +22,11 @@ export interface SendMessageInput {
   replyToMessageId?: string;
 }
 
+export interface ForwardMessageInput {
+  sourceMessageId: string;
+  clientMessageId: string;
+}
+
 export interface CreateUserInput {
   username: string;
   displayName: string;
@@ -147,6 +152,11 @@ export const api = {
     request<{ message: Message }>(`/api/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify(input),
+    }),
+  forwardMessages: (conversationId: string, items: ForwardMessageInput[]) =>
+    request<{ messages: Message[] }>(`/api/conversations/${conversationId}/messages/forward`, {
+      method: "POST",
+      body: JSON.stringify({ items }),
     }),
   recallMessage: (conversationId: string, messageId: string) =>
     request<{ message: Message }>(

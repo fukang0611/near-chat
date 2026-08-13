@@ -33,6 +33,12 @@ export interface MessageReplyDto {
   recalled: boolean;
 }
 
+export interface ForwardedMessageSourceDto {
+  senderName: string;
+  conversationTitle: string;
+  createdAt: string;
+}
+
 export interface MessageDto {
   id: string;
   conversationId: string;
@@ -47,6 +53,7 @@ export interface MessageDto {
   recalledAt: string | null;
   recallableUntil: string;
   replyTo: MessageReplyDto | null;
+  forwardedFrom: ForwardedMessageSourceDto | null;
   attachments: AttachmentDto[];
   reactions: MessageReactionDto[];
   receipt: ReceiptSummaryDto;
@@ -85,6 +92,7 @@ interface MessageRow {
     attachmentName: string | null;
     recalled: boolean;
   } | null;
+  forwarded_from: ForwardedMessageSourceDto | null;
   attachments: Array<{
     id: string;
     originalName: string;
@@ -116,6 +124,7 @@ const messageSelect = `
          CASE WHEN m.recalled_at IS NULL THEN m.text_content ELSE NULL END AS text_content,
          m.created_at,
          m.recalled_at,
+         m.forwarded_from,
          CASE
            WHEN reply.id IS NULL THEN NULL
            ELSE json_build_object(
@@ -126,8 +135,17 @@ const messageSelect = `
              'textContent', CASE WHEN reply.recalled_at IS NULL THEN reply.text_content ELSE NULL END,
              'attachmentName', CASE WHEN reply.recalled_at IS NULL THEN (
                SELECT reply_attachment.original_name
-                 FROM attachments reply_attachment
-                WHERE reply_attachment.message_id = reply.id
+                 FROM (
+                   SELECT owned_attachment.original_name, owned_attachment.created_at
+                     FROM attachments owned_attachment
+                    WHERE owned_attachment.message_id = reply.id
+                   UNION
+                   SELECT linked_attachment.original_name, linked_attachment.created_at
+                     FROM message_attachment_links reply_link
+                     JOIN attachments linked_attachment
+                       ON linked_attachment.id = reply_link.attachment_id
+                    WHERE reply_link.message_id = reply.id
+                 ) reply_attachment
                 ORDER BY reply_attachment.created_at
                 LIMIT 1
              ) ELSE NULL END,
@@ -143,8 +161,25 @@ const messageSelect = `
                 'sizeBytes', a.size_bytes
               ) ORDER BY a.created_at
             )
-              FROM attachments a
-             WHERE a.message_id = m.id),
+              FROM (
+                SELECT owned_attachment.id,
+                       owned_attachment.original_name,
+                       owned_attachment.content_type,
+                       owned_attachment.size_bytes,
+                       owned_attachment.created_at
+                  FROM attachments owned_attachment
+                 WHERE owned_attachment.message_id = m.id
+                UNION
+                SELECT linked_attachment.id,
+                       linked_attachment.original_name,
+                       linked_attachment.content_type,
+                       linked_attachment.size_bytes,
+                       linked_attachment.created_at
+                  FROM message_attachment_links message_link
+                  JOIN attachments linked_attachment
+                    ON linked_attachment.id = message_link.attachment_id
+                 WHERE message_link.message_id = m.id
+              ) a),
            '[]'::json
          ) AS attachments,
          COALESCE(
@@ -208,6 +243,7 @@ function toDto(row: MessageRow): MessageDto {
       row.created_at.getTime() + config.messageRecallWindowSeconds * 1_000,
     ).toISOString(),
     replyTo: row.reply_to,
+    forwardedFrom: row.forwarded_from,
     attachments: row.attachments.map((attachment) => ({
       ...attachment,
       sizeBytes: Number(attachment.sizeBytes),
@@ -372,9 +408,18 @@ export async function searchMessages(
           m.text_content ILIKE $3 ESCAPE '\\'
           OR EXISTS (
             SELECT 1
-              FROM attachments matched_attachment
-             WHERE matched_attachment.message_id = m.id
-               AND matched_attachment.original_name ILIKE $3 ESCAPE '\\'
+              FROM (
+                SELECT owned_attachment.original_name
+                  FROM attachments owned_attachment
+                 WHERE owned_attachment.message_id = m.id
+                UNION
+                SELECT linked_attachment.original_name
+                  FROM message_attachment_links message_link
+                  JOIN attachments linked_attachment
+                    ON linked_attachment.id = message_link.attachment_id
+                 WHERE message_link.message_id = m.id
+              ) matched_attachment
+             WHERE matched_attachment.original_name ILIKE $3 ESCAPE '\\'
           )
         )
       ORDER BY m.created_at DESC

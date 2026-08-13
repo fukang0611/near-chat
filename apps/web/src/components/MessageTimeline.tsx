@@ -2,6 +2,8 @@ import {
   Check,
   CheckCheck,
   Copy,
+  Forward,
+  ListChecks,
   LoaderCircle,
   MessageCircleMore,
   RefreshCw,
@@ -38,11 +40,15 @@ interface MessageTimelineProps {
   highlightedMessageId?: string | null;
   favoriteMessageIds: ReadonlySet<string>;
   favoriteBusyMessageIds: ReadonlySet<string>;
+  selectionMode: boolean;
+  selectedMessageIds: ReadonlySet<string>;
   onLoadOlder: () => void;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onToggleFavorite: (message: Message) => void;
+  onBeginSelection: (message: Message) => void;
+  onToggleSelection: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecall: (message: Message) => void;
   onRetry: (message: Message) => void;
@@ -77,10 +83,14 @@ interface MessageBubbleProps {
   reactionsDisabled: boolean;
   favorited: boolean;
   favoriteBusy: boolean;
+  selectionMode: boolean;
+  selected: boolean;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onToggleFavorite: (message: Message) => void;
+  onBeginSelection: (message: Message) => void;
+  onToggleSelection: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecallIntent: (messageId: string | null) => void;
   onRecall: (message: Message) => void;
@@ -99,10 +109,14 @@ function MessageBubble({
   reactionsDisabled,
   favorited,
   favoriteBusy,
+  selectionMode,
+  selected,
   onReply,
   onAnnotateImage,
   onCopy,
   onToggleFavorite,
+  onBeginSelection,
+  onToggleSelection,
   onReact,
   onRecallIntent,
   onRecall,
@@ -123,6 +137,7 @@ function MessageBubble({
   const recalled = Boolean(message.recalledAt);
   const failed = message.deliveryState === "FAILED";
   const sending = message.deliveryState === "SENDING";
+  const selectable = !recalled && !message.deliveryState;
   const receipt = mine && !message.deliveryState && !recalled ? receiptText(message) : null;
   const canRecall =
     mine &&
@@ -169,8 +184,26 @@ function MessageBubble({
   return (
     <div
       id={`message-${message.id}`}
-      className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""} ${failed ? "is-failed" : ""}`}
+      className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""} ${failed ? "is-failed" : ""} ${selectionMode ? "is-selection-mode" : ""} ${selectable ? "is-selectable" : ""} ${selected ? "is-selected" : ""}`}
+      onClickCapture={(event) => {
+        if (!selectionMode || !selectable) return;
+        if ((event.target as HTMLElement).closest(".message-select-toggle")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onToggleSelection(message);
+      }}
     >
+      {selectionMode && selectable && (
+        <button
+          type="button"
+          className={`message-select-toggle ${selected ? "is-selected" : ""}`}
+          onClick={() => onToggleSelection(message)}
+          aria-label={selected ? "取消选择此消息" : "选择此消息"}
+          aria-pressed={selected}
+        >
+          {selected && <Check size={14} />}
+        </button>
+      )}
       {!mine && (
         <Avatar
           name={message.senderName}
@@ -182,6 +215,15 @@ function MessageBubble({
       <div className="message-stack">
         {!mine && <span className="sender-name">{message.senderName}</span>}
         <div className="message-content">
+          {message.forwardedFrom && !recalled && (
+            <div className="message-forwarded-origin">
+              <Forward size={12} />
+              <span>
+                转发自 {message.forwardedFrom.senderName} ·{" "}
+                {message.forwardedFrom.conversationTitle}
+              </span>
+            </div>
+          )}
           {message.replyTo && !recalled && (
             <button
               className="message-quote"
@@ -277,7 +319,7 @@ function MessageBubble({
         )}
 
         <div className="message-footer">
-          {!recalled && !failed && !sending && (
+          {!selectionMode && !recalled && !failed && !sending && (
             <div
               className={`message-actions ${reactionPickerOpen ? "is-open" : ""}`}
               aria-label="消息操作"
@@ -341,6 +383,14 @@ function MessageBubble({
                   <Copy size={15} />
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onBeginSelection(message)}
+                title="多选"
+                aria-label="多选消息"
+              >
+                <ListChecks size={15} />
+              </button>
               {canRecall &&
                 (confirmRecall ? (
                   <span className="recall-confirm">
@@ -413,11 +463,15 @@ export function MessageTimeline({
   highlightedMessageId,
   favoriteMessageIds,
   favoriteBusyMessageIds,
+  selectionMode,
+  selectedMessageIds,
   onLoadOlder,
   onReply,
   onAnnotateImage,
   onCopy,
   onToggleFavorite,
+  onBeginSelection,
+  onToggleSelection,
   onReact,
   onRecall,
   onRetry,
@@ -492,10 +546,14 @@ export function MessageTimeline({
               reactionsDisabled={isFlashRoomExpired(conversation.expiresAt, now)}
               favorited={favoriteMessageIds.has(message.id)}
               favoriteBusy={favoriteBusyMessageIds.has(message.id)}
+              selectionMode={selectionMode}
+              selected={selectedMessageIds.has(message.id)}
               onReply={onReply}
               onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
               onToggleFavorite={onToggleFavorite}
+              onBeginSelection={onBeginSelection}
+              onToggleSelection={onToggleSelection}
               onReact={onReact}
               onRecallIntent={setRecallCandidateId}
               onRecall={onRecall}

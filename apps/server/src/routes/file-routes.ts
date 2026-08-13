@@ -169,9 +169,11 @@ export function createFileRouter() {
     const file = await findAttachment(fileId);
     if (!file || file.state !== "READY") throw new ApiError(404, "文件不存在或尚未就绪");
 
+    // 所有身份参数都显式声明为 UUID。这里既有列比较也有参数互比，若省略转换，
+    // PostgreSQL 可能把仅参与参数比较的一侧推断为 text，导致合法图片读取返回 500。
     const access = await query(
       `SELECT 1
-         WHERE ($1::uuid IS NULL AND $3 = $2)
+         WHERE ($1::uuid IS NULL AND $3::uuid = $2::uuid)
             OR EXISTS (
               SELECT 1
                 FROM messages message
@@ -185,6 +187,15 @@ export function createFileRouter() {
                 JOIN message_favorites favorite
                   ON favorite.id = favorite_link.favorite_id
                WHERE favorite_link.attachment_id = $4 AND favorite.user_id = $2
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM message_attachment_links message_link
+                JOIN messages linked_message ON linked_message.id = message_link.message_id
+                JOIN conversation_members linked_member
+                  ON linked_member.conversation_id = linked_message.conversation_id
+                 AND linked_member.user_id = $2
+               WHERE message_link.attachment_id = $4
             )`,
       [file.message_id, user.id, file.uploader_id, file.id],
     );
@@ -225,9 +236,9 @@ export function createFileRouter() {
         throw new ApiError(409, "已发送的附件不能移除");
       }
       const referenced = await client.query(
-        `SELECT 1
-           FROM favorite_attachments
-          WHERE attachment_id = $1
+        `SELECT 1 FROM favorite_attachments WHERE attachment_id = $1
+         UNION ALL
+         SELECT 1 FROM message_attachment_links WHERE attachment_id = $1
           LIMIT 1`,
         [fileId],
       );

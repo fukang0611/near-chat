@@ -58,10 +58,12 @@ import {
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { GroupManagementDialog } from "./GroupManagementDialog";
 import { FlashRoomBadge } from "./FlashRoomBadge";
+import { ForwardMessagesDialog } from "./ForwardMessagesDialog";
 import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageAssetsDialog } from "./MessageAssetsDialog";
 import { MessageTimeline } from "./MessageTimeline";
+import { MessageSelectionToolbar } from "./MessageSelectionToolbar";
 import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
 import { NudgeNotice } from "./NudgeNotice";
 import { ProfileDialog } from "./ProfileDialog";
@@ -92,6 +94,7 @@ interface UploadState {
 }
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FORWARD_MESSAGES = 20;
 
 async function clipboardImageFile(payload: DesktopClipboardRelayPayload): Promise<File> {
   if (!payload.imageDataUrl) throw new Error("剪贴板图片不可用");
@@ -151,6 +154,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("recent");
   const [favoriteByMessageId, setFavoriteByMessageId] = useState<Record<string, string>>({});
   const [favoriteBusyMessageIds, setFavoriteBusyMessageIds] = useState<Set<string>>(new Set());
+  const [messageSelectionMode, setMessageSelectionMode] = useState(false);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [showForwardDialog, setShowForwardDialog] = useState(false);
 
   // 草稿与待发送附件按会话隔离，切换会话时保留各自上下文。
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -224,6 +230,14 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     () => new Set(Object.keys(favoriteByMessageId)),
     [favoriteByMessageId],
   );
+  const selectableMessages = useMemo(
+    () => displayMessages.filter((message) => !message.deliveryState && !message.recalledAt),
+    [displayMessages],
+  );
+  const selectedMessages = useMemo(
+    () => selectableMessages.filter((message) => selectedMessageIds.has(message.id)),
+    [selectableMessages, selectedMessageIds],
+  );
   const clipboardRelayUsers = useMemo(() => {
     const currentUsers = new Map(users.map((candidate) => [candidate.id, candidate]));
     const recentPeerIds = conversations
@@ -242,6 +256,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       setShowGroupManagement(false);
     }
   }, [selectedConversation?.type, showGroupManagement]);
+
+  useEffect(() => {
+    setMessageSelectionMode(false);
+    setSelectedMessageIds(new Set());
+    setShowForwardDialog(false);
+  }, [selectedId]);
 
   useEffect(() => {
     if (!selectedConversation?.expiresAt || selectedFlashExpired) return;
@@ -1267,6 +1287,64 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     });
   };
 
+  const beginMessageSelection = (message: Message) => {
+    if (message.deliveryState || message.recalledAt) return;
+    setMessageSelectionMode(true);
+    setSelectedMessageIds(new Set([message.id]));
+  };
+
+  const toggleMessageSelection = (message: Message) => {
+    if (message.deliveryState || message.recalledAt) return;
+    setSelectedMessageIds((current) => {
+      const next = new Set(current);
+      if (next.has(message.id)) {
+        next.delete(message.id);
+      } else if (next.size < MAX_FORWARD_MESSAGES) {
+        next.add(message.id);
+      } else {
+        notify(`一次最多选择 ${MAX_FORWARD_MESSAGES} 条消息`, "info");
+      }
+      return next;
+    });
+  };
+
+  const cancelMessageSelection = () => {
+    setShowForwardDialog(false);
+    setMessageSelectionMode(false);
+    setSelectedMessageIds(new Set());
+  };
+
+  const selectAllVisibleMessages = () => {
+    setSelectedMessageIds(
+      new Set(selectableMessages.slice(-MAX_FORWARD_MESSAGES).map((message) => message.id)),
+    );
+  };
+
+  const forwardSelectedMessages = async (targetConversationId: string): Promise<boolean> => {
+    const selected = selectedMessages;
+    if (selected.length === 0) return false;
+    try {
+      const result = await api.forwardMessages(
+        targetConversationId,
+        selected.map((message) => ({
+          sourceMessageId: message.id,
+          clientMessageId: createClientMessageId(),
+        })),
+      );
+      if (selectedIdRef.current === targetConversationId) {
+        scrollActionRef.current = { type: "bottom" };
+        setMessages((current) => result.messages.reduce(upsertServerMessage, current));
+      }
+      refreshConversationsInBackground();
+      notify(`已转发 ${selected.length} 条消息`, "success");
+      cancelMessageSelection();
+      return true;
+    } catch (error) {
+      notify(errorMessage(error, "批量转发失败"), "error");
+      return false;
+    }
+  };
+
   const recallMessage = async (message: Message) => {
     try {
       const result = await api.recallMessage(message.conversationId, message.id);
@@ -1314,7 +1392,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   };
 
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
-    if (selectedFlashExpired || !event.dataTransfer.types.includes("Files")) return;
+    if (messageSelectionMode || selectedFlashExpired || !event.dataTransfer.types.includes("Files"))
+      return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setDraggingFile(true);
@@ -1329,6 +1408,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const handleDrop = (event: DragEvent<HTMLElement>) => {
     event.preventDefault();
     setDraggingFile(false);
+    if (messageSelectionMode) return;
     void chooseFile(event.dataTransfer.files[0]);
   };
 
@@ -1526,6 +1606,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 highlightedMessageId={highlightedMessageId}
                 favoriteMessageIds={favoriteMessageIds}
                 favoriteBusyMessageIds={favoriteBusyMessageIds}
+                selectionMode={messageSelectionMode}
+                selectedMessageIds={selectedMessageIds}
                 onLoadOlder={() => void loadOlderMessages()}
                 onReply={(message) => {
                   if (!selectedId) return;
@@ -1534,6 +1616,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 onAnnotateImage={(message, _attachment, file) => sendAnnotatedImage(message, file)}
                 onCopy={(message) => void copyMessage(message)}
                 onToggleFavorite={(message) => void toggleMessageFavorite(message)}
+                onBeginSelection={beginMessageSelection}
+                onToggleSelection={toggleMessageSelection}
                 onReact={toggleMessageReaction}
                 onRecall={(message) => void recallMessage(message)}
                 onRetry={retryMessage}
@@ -1542,31 +1626,42 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               />
             </div>
 
-            <MessageComposer
-              key={selectedConversation.id}
-              peerName={selectedConversation.title}
-              text={text}
-              pendingAttachment={pendingAttachment}
-              upload={activeUpload}
-              uploadBlocked={Boolean(uploadState)}
-              sending={sending}
-              disabled={selectedFlashExpired}
-              disabledReason="房间已转为只读，历史消息和附件仍可查看。"
-              replyingTo={replyingTo}
-              onTextChange={updateDraft}
-              onChooseFile={(file) => void chooseFile(file)}
-              onRemoveAttachment={() => void removePendingAttachment()}
-              onSendVoice={sendVoicePostcard}
-              onSend={send}
-              onCancelReply={() => {
-                if (!selectedId) return;
-                setReplyTargets((current) => {
-                  const next = { ...current };
-                  delete next[selectedId];
-                  return next;
-                });
-              }}
-            />
+            {messageSelectionMode ? (
+              <MessageSelectionToolbar
+                selectedCount={selectedMessages.length}
+                selectableCount={selectableMessages.length}
+                maxSelection={MAX_FORWARD_MESSAGES}
+                onSelectAll={selectAllVisibleMessages}
+                onForward={() => setShowForwardDialog(true)}
+                onCancel={cancelMessageSelection}
+              />
+            ) : (
+              <MessageComposer
+                key={selectedConversation.id}
+                peerName={selectedConversation.title}
+                text={text}
+                pendingAttachment={pendingAttachment}
+                upload={activeUpload}
+                uploadBlocked={Boolean(uploadState)}
+                sending={sending}
+                disabled={selectedFlashExpired}
+                disabledReason="房间已转为只读，历史消息和附件仍可查看。"
+                replyingTo={replyingTo}
+                onTextChange={updateDraft}
+                onChooseFile={(file) => void chooseFile(file)}
+                onRemoveAttachment={() => void removePendingAttachment()}
+                onSendVoice={sendVoicePostcard}
+                onSend={send}
+                onCancelReply={() => {
+                  if (!selectedId) return;
+                  setReplyTargets((current) => {
+                    const next = { ...current };
+                    delete next[selectedId];
+                    return next;
+                  });
+                }}
+              />
+            )}
           </>
         ) : (
           <div className="welcome-empty">
@@ -1651,6 +1746,14 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setShowMessageAssets(false);
           }}
           onFavoriteRemoved={forgetFavorite}
+        />
+      )}
+      {showForwardDialog && selectedMessages.length > 0 && (
+        <ForwardMessagesDialog
+          conversations={conversations}
+          messages={selectedMessages}
+          onClose={() => setShowForwardDialog(false)}
+          onForward={forwardSelectedMessages}
         />
       )}
       {showTeamRadar && (

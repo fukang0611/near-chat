@@ -59,11 +59,15 @@ function renderTimeline(messages: Message[]) {
     endRef: createRef<HTMLDivElement>(),
     favoriteMessageIds: new Set(),
     favoriteBusyMessageIds: new Set(),
+    selectionMode: false,
+    selectedMessageIds: new Set(),
     onLoadOlder: vi.fn(),
     onReply: vi.fn(),
     onAnnotateImage: vi.fn(),
     onCopy: vi.fn(),
     onToggleFavorite: vi.fn(),
+    onBeginSelection: vi.fn(),
+    onToggleSelection: vi.fn(),
     onReact: vi.fn().mockResolvedValue(true),
     onRecall: vi.fn(),
     onRetry: vi.fn(),
@@ -139,6 +143,25 @@ describe("MessageTimeline", () => {
     await rendered.user.click(button);
 
     expect(props.onToggleFavorite).toHaveBeenCalledWith(favorite);
+  });
+
+  it("从操作栏进入多选后点击消息区域可切换选择", async () => {
+    const target = message({ id: "7278b0e5-4a5b-4922-9938-45fffdde42d0" });
+    const rendered = renderTimeline([target]);
+
+    await rendered.user.click(screen.getByRole("button", { name: "多选消息" }));
+    expect(rendered.props.onBeginSelection).toHaveBeenCalledWith(target);
+
+    const selectedProps = {
+      ...rendered.props,
+      selectionMode: true,
+      selectedMessageIds: new Set([target.id]),
+    };
+    rendered.rerender(<MessageTimeline {...selectedProps} />);
+    expect(screen.getByRole("button", { name: "取消选择此消息" })).toBeTruthy();
+
+    await rendered.user.click(screen.getByText("一条普通消息"));
+    expect(rendered.props.onToggleSelection).toHaveBeenCalledWith(target);
   });
 
   it("可从操作栏添加反应，也可点击聚合标签移除自己的反应", async () => {

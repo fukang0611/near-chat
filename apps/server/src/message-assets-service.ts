@@ -5,7 +5,7 @@ import { publicAvatarUrl } from "./avatar-service.js";
 import { query, transaction } from "./database.js";
 import { ApiError } from "./http.js";
 import type { MessageKind } from "./message-kind.js";
-import type { AttachmentDto } from "./message-service.js";
+import type { AttachmentDto, ForwardedMessageSourceDto } from "./message-service.js";
 
 export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
 
@@ -39,6 +39,7 @@ export interface MessageFavoriteDto {
   sourceSenderAvatarUrl: string | null;
   type: MessageKind;
   textContent: string | null;
+  forwardedFrom: ForwardedMessageSourceDto | null;
   messageCreatedAt: string;
   createdAt: string;
   attachments: AttachmentDto[];
@@ -73,6 +74,7 @@ interface FavoriteRow {
   source_sender_avatar_version: number;
   source_type: MessageKind;
   text_content: string | null;
+  forwarded_from: ForwardedMessageSourceDto | null;
   message_created_at: Date;
   created_at: Date;
   attachments: Array<{
@@ -93,6 +95,7 @@ interface FavoriteSourceRow {
   sender_avatar_color: string;
   type: MessageKind;
   text_content: string | null;
+  forwarded_from: ForwardedMessageSourceDto | null;
   created_at: Date;
   recalled_at: Date | null;
 }
@@ -133,8 +136,16 @@ export async function listChatFiles(
               sender.display_name AS sender_name,
               message.text_content AS message_text,
               message.created_at
-         FROM attachments attachment
-         JOIN messages message ON message.id = attachment.message_id
+         FROM (
+           SELECT owned_attachment.message_id, owned_attachment.id AS attachment_id
+             FROM attachments owned_attachment
+            WHERE owned_attachment.message_id IS NOT NULL
+           UNION
+           SELECT message_link.message_id, message_link.attachment_id
+             FROM message_attachment_links message_link
+         ) message_asset
+         JOIN attachments attachment ON attachment.id = message_asset.attachment_id
+         JOIN messages message ON message.id = message_asset.message_id
          JOIN users sender ON sender.id = message.sender_id
          JOIN conversation_members mine
            ON mine.conversation_id = message.conversation_id AND mine.user_id = $1
@@ -190,6 +201,7 @@ const favoriteSelect = `
          COALESCE(source_sender.avatar_version, 0)::int AS source_sender_avatar_version,
          favorite.source_type,
          favorite.text_content,
+         favorite.forwarded_from,
          favorite.message_created_at,
          favorite.created_at,
          COALESCE(
@@ -238,6 +250,7 @@ function toFavoriteDto(row: FavoriteRow): MessageFavoriteDto {
       : null,
     type: row.source_type,
     textContent: row.text_content,
+    forwardedFrom: row.forwarded_from,
     messageCreatedAt: row.message_created_at.toISOString(),
     createdAt: row.created_at.toISOString(),
     attachments: row.attachments.map((attachment) => ({
@@ -319,6 +332,7 @@ export async function createMessageFavorite(
               sender.avatar_color AS sender_avatar_color,
               message.type,
               message.text_content,
+              message.forwarded_from,
               message.created_at,
               message.recalled_at
          FROM messages message
@@ -339,8 +353,9 @@ export async function createMessageFavorite(
       `INSERT INTO message_favorites
          (id, user_id, source_message_id, source_conversation_id,
           source_conversation_title, source_sender_id, source_sender_name,
-          source_sender_avatar_color, source_type, text_content, message_created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          source_sender_avatar_color, source_type, text_content, forwarded_from,
+          message_created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
       [
         favoriteId,
         userId,
@@ -352,14 +367,24 @@ export async function createMessageFavorite(
         source.sender_avatar_color,
         source.type,
         source.text_content,
+        source.forwarded_from,
         source.created_at,
       ],
     );
     await client.query(
       `INSERT INTO favorite_attachments (favorite_id, attachment_id)
-       SELECT $1, attachment.id
-         FROM attachments attachment
-        WHERE attachment.message_id = $2 AND attachment.state = 'READY'
+       SELECT $1, message_asset.attachment_id
+         FROM (
+           SELECT attachment.id AS attachment_id
+             FROM attachments attachment
+            WHERE attachment.message_id = $2 AND attachment.state = 'READY'
+           UNION
+           SELECT message_link.attachment_id
+             FROM message_attachment_links message_link
+             JOIN attachments linked_attachment
+               ON linked_attachment.id = message_link.attachment_id
+            WHERE message_link.message_id = $2 AND linked_attachment.state = 'READY'
+         ) message_asset
        ON CONFLICT DO NOTHING`,
       [favoriteId, source.id],
     );

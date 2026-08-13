@@ -13,6 +13,7 @@ import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { isAllowedFlashRoomExpiry, isFlashRoomExpired } from "../flash-room-service.js";
+import { forwardMessages } from "../message-forward-service.js";
 import { messageKindFromContentType, type MessageKind } from "../message-kind.js";
 import {
   decodeMessageCursor,
@@ -115,6 +116,27 @@ const searchSchema = z.object({
 });
 
 const reactionSchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJIS) });
+
+const forwardMessagesSchema = z
+  .object({
+    items: z
+      .array(
+        z.object({
+          sourceMessageId: z.string().uuid(),
+          clientMessageId: z.string().uuid(),
+        }),
+      )
+      .min(1, "请至少选择一条消息")
+      .max(20, "一次最多转发 20 条消息"),
+  })
+  .superRefine((value, context) => {
+    if (new Set(value.items.map((item) => item.sourceMessageId)).size !== value.items.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "转发消息不能重复" });
+    }
+    if (new Set(value.items.map((item) => item.clientMessageId)).size !== value.items.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "转发幂等键不能重复" });
+    }
+  });
 
 async function ensureMember(conversationId: string, userId: string): Promise<void> {
   const result = await query(
@@ -900,6 +922,37 @@ export function createChatRouter(realtime: RealtimeHub) {
       }
 
       response.status(201).json({ message: responseMessage });
+    },
+  );
+
+  router.post(
+    "/conversations/:conversationId/messages/forward",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const conversationId = z.string().uuid().parse(request.params.conversationId);
+      const input = forwardMessagesSchema.parse(request.body);
+      const forwarded = await forwardMessages(user.id, conversationId, input.items);
+      const members = await conversationMemberIds(conversationId);
+      const responseMessages = [];
+
+      for (const result of forwarded) {
+        let message = result.message;
+        if (result.created) {
+          const deliveredUsers = realtime
+            .sendToUsers(members, {
+              type: "message.created",
+              payload: { message },
+            })
+            .filter((memberId) => memberId !== user.id);
+          const receiptChanges = await markMessageDelivered(message.id, deliveredUsers);
+          await broadcastReceiptChanges(realtime, receiptChanges);
+          if (receiptChanges[0]) message = { ...message, receipt: receiptChanges[0].receipt };
+        }
+        responseMessages.push(message);
+      }
+
+      response.status(201).json({ messages: responseMessages });
     },
   );
 

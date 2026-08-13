@@ -58,6 +58,12 @@ export interface MessageReply {
   recalled: boolean;
 }
 
+export interface ForwardedMessageSource {
+  senderName: string;
+  conversationTitle: string;
+  createdAt: string;
+}
+
 export interface MessageReaction {
   emoji: string;
   count: number;
@@ -78,6 +84,8 @@ export interface Message {
   recalledAt: string | null;
   recallableUntil: string;
   replyTo: MessageReply | null;
+  /** 旧消息没有该字段；非空时展示转发来源，不影响正文与附件类型。 */
+  forwardedFrom?: ForwardedMessageSource | null;
   attachments: Attachment[];
   /** 旧版本缓存可能没有该字段，展示层按空数组兼容。 */
   reactions?: MessageReaction[];
@@ -198,6 +206,7 @@ export interface MessageFavorite {
   sourceSenderAvatarUrl: string | null;
   type: MessageKind;
   textContent: string | null;
+  forwardedFrom?: ForwardedMessageSource | null;
   messageCreatedAt: string;
   createdAt: string;
   attachments: Attachment[];
