@@ -57,3 +57,34 @@ describe("AttachmentView 图片预览", () => {
     expect(api.fileBlob).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("AttachmentView 语音明信片", () => {
+  const audioAttachment: Attachment = {
+    id: "audio-attachment",
+    originalName: "语音明信片-8秒.webm",
+    contentType: "audio/webm",
+    sizeBytes: 16_384,
+  };
+
+  beforeEach(() => {
+    vi.spyOn(api, "fileBlob").mockResolvedValue(new Blob(["voice"], { type: "audio/webm" }));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:near-chat-audio");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("通过鉴权 Blob 加载播放器，下载仍需显式点击", async () => {
+    const user = userEvent.setup();
+    render(<AttachmentView attachment={audioAttachment} />);
+
+    expect(await screen.findByText("语音明信片")).toBeTruthy();
+    await waitFor(() => expect(api.fileBlob).toHaveBeenCalledWith(audioAttachment.id));
+    expect(document.querySelector("audio")?.getAttribute("src")).toBe("blob:near-chat-audio");
+    expect(api.fileBlob).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: /下载语音/ }));
+    await waitFor(() => expect(api.fileBlob).toHaveBeenCalledWith(audioAttachment.id, true));
+  });
+});

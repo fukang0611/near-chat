@@ -26,6 +26,7 @@ import type { Attachment, Conversation, Message, NudgeEvent, User } from "../typ
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
+import { messageKindFromContentType } from "../utils/message-kind";
 import { isFlashRoomExpired } from "../utils/flash-room";
 import {
   loadNotificationPreferences,
@@ -905,11 +906,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     const createdAt = new Date().toISOString();
     const normalizedText = input.text?.trim() ?? "";
     const attachment = input.attachment ?? null;
-    const type = attachment
-      ? attachment.contentType.startsWith("image/")
-        ? "IMAGE"
-        : "FILE"
-      : "TEXT";
+    const type = messageKindFromContentType(attachment?.contentType ?? null);
     const optimisticMessage: Message = {
       id: `local-${clientMessageId}`,
       conversationId,
@@ -964,6 +961,40 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       delete next[conversationId];
       return next;
     });
+  };
+
+  const sendVoicePostcard = async (file: File, _durationSeconds: number): Promise<boolean> => {
+    const conversationId = selectedIdRef.current;
+    if (!conversationId || selectedFlashExpired || uploadState) {
+      notify(
+        selectedFlashExpired ? "闪聊已经结束，只能查看历史消息" : "当前已有文件正在上传",
+        "info",
+      );
+      return false;
+    }
+
+    let attachment: Attachment | null = null;
+    let queued = false;
+    setUploadState({ conversationId, name: file.name, progress: 0 });
+    try {
+      attachment = await api.upload(file, (progress) =>
+        setUploadState((current) =>
+          current?.conversationId === conversationId ? { ...current, progress } : current,
+        ),
+      );
+      queued = true;
+      const delivered = await enqueueOutgoingMessage(conversationId, { attachment });
+      if (delivered) notify("语音明信片已送出", "success");
+      // 已进入统一待发送队列后即关闭录音弹窗；弱网失败由消息卡片负责重试，
+      // 避免用户再次点击发送而生成两条相同语音。
+      return true;
+    } catch (error) {
+      if (attachment && !queued) await api.deleteFile(attachment.id).catch(() => undefined);
+      notify(errorMessage(error, "语音发送失败"), "error");
+      return false;
+    } finally {
+      setUploadState((current) => (current?.conversationId === conversationId ? null : current));
+    }
   };
 
   /**
@@ -1405,6 +1436,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             </div>
 
             <MessageComposer
+              key={selectedConversation.id}
               peerName={selectedConversation.title}
               text={text}
               pendingAttachment={pendingAttachment}
@@ -1417,6 +1449,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               onTextChange={updateDraft}
               onChooseFile={(file) => void chooseFile(file)}
               onRemoveAttachment={() => void removePendingAttachment()}
+              onSendVoice={sendVoicePostcard}
               onSend={send}
               onCancelReply={() => {
                 if (!selectedId) return;

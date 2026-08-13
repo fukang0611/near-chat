@@ -9,6 +9,7 @@ import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { isAllowedFlashRoomExpiry, isFlashRoomExpired } from "../flash-room-service.js";
+import { messageKindFromContentType, type MessageKind } from "../message-kind.js";
 import {
   decodeMessageCursor,
   findMessage,
@@ -53,7 +54,7 @@ interface ConversationRow {
   owner_id: string | null;
   expires_at: Date | null;
   members: ConversationMember[];
-  last_message_type: "TEXT" | "IMAGE" | "FILE" | null;
+  last_message_type: MessageKind | null;
   last_message_text: string | null;
   last_message_at: Date | null;
   last_message_sender_id: string | null;
@@ -832,11 +833,7 @@ export function createChatRouter(realtime: RealtimeHub) {
           attachmentContentType = attachments.rows[0]?.content_type ?? null;
         }
 
-        const type = attachmentContentType
-          ? attachmentContentType.startsWith("image/")
-            ? "IMAGE"
-            : "FILE"
-          : "TEXT";
+        const type = messageKindFromContentType(attachmentContentType);
         const messageId = randomUUID();
         const inserted = await client.query<{ id: string }>(
           `INSERT INTO messages

@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { publicAvatarUrl } from "./avatar-service.js";
 import { config } from "./config.js";
 import { query } from "./database.js";
+import type { MessageKind } from "./message-kind.js";
 
 export interface AttachmentDto {
   id: string;
@@ -20,7 +21,7 @@ export interface MessageReplyDto {
   id: string;
   senderId: string;
   senderName: string;
-  type: "TEXT" | "IMAGE" | "FILE";
+  type: MessageKind;
   textContent: string | null;
   attachmentName: string | null;
   recalled: boolean;
@@ -34,7 +35,7 @@ export interface MessageDto {
   senderAvatarColor: string;
   senderAvatarUrl: string | null;
   clientMessageId: string;
-  type: "TEXT" | "IMAGE" | "FILE";
+  type: MessageKind;
   textContent: string | null;
   createdAt: string;
   recalledAt: string | null;
@@ -64,7 +65,7 @@ interface MessageRow {
   sender_avatar_object_key: string | null;
   sender_avatar_version: number;
   client_message_id: string;
-  type: "TEXT" | "IMAGE" | "FILE";
+  type: MessageKind;
   text_content: string | null;
   created_at: Date;
   recalled_at: Date | null;
@@ -72,7 +73,7 @@ interface MessageRow {
     id: string;
     senderId: string;
     senderName: string;
-    type: "TEXT" | "IMAGE" | "FILE";
+    type: MessageKind;
     textContent: string | null;
     attachmentName: string | null;
     recalled: boolean;

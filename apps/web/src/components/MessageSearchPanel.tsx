@@ -1,4 +1,4 @@
-import { FileText, Image, LoaderCircle, MessageSquareText, Search, X } from "lucide-react";
+import { FileText, Image, LoaderCircle, MessageSquareText, Mic2, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
@@ -15,6 +15,7 @@ interface MessageSearchPanelProps {
 
 function resultPreview(message: Message): string {
   if (message.textContent) return message.textContent;
+  if (message.type === "AUDIO") return "语音明信片";
   return (
     message.attachments[0]?.originalName ?? (message.type === "IMAGE" ? "图片消息" : "附件消息")
   );
@@ -166,6 +167,8 @@ export function MessageSearchPanel({
                     <span className="search-result-icon">
                       {message.type === "IMAGE" ? (
                         <Image size={16} />
+                      ) : message.type === "AUDIO" ? (
+                        <Mic2 size={16} />
                       ) : message.type === "FILE" ? (
                         <FileText size={16} />
                       ) : (

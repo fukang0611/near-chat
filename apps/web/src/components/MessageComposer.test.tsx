@@ -36,6 +36,7 @@ function renderComposer(overrides: Partial<React.ComponentProps<typeof MessageCo
     onTextChange: vi.fn(),
     onChooseFile: vi.fn(),
     onRemoveAttachment: vi.fn(),
+    onSendVoice: vi.fn().mockResolvedValue(true),
     onSend: vi.fn(),
     onCancelReply: vi.fn(),
     ...overrides,
@@ -84,6 +85,13 @@ describe("MessageComposer", () => {
     await user.click(screen.getByRole("button", { name: "发送消息" }));
 
     expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("从独立入口打开语音明信片录制器", async () => {
+    const { user } = renderComposer({ replyingTo: null });
+    await user.click(screen.getByRole("button", { name: "录制语音明信片" }));
+    expect(screen.getByRole("dialog", { name: "语音明信片" })).toBeTruthy();
+    expect(screen.getByText(/录一段不超过 60 秒/)).toBeTruthy();
   });
 
   it("闪聊到期后保留内容但锁定全部发送入口", async () => {

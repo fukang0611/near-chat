@@ -63,6 +63,7 @@ export function formatConversationPreview(conversation: Conversation): string {
     conversation.type === "GROUP" && message.senderName ? `${message.senderName}: ` : "";
   if (message.text) return `${prefix}${message.text}`;
   if (message.type === "IMAGE") return `${prefix}[图片]`;
+  if (message.type === "AUDIO") return `${prefix}[语音明信片]`;
   if (message.type === "FILE") return `${prefix}[附件]`;
   return `${prefix}新消息`;
 }

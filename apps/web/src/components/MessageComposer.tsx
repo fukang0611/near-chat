@@ -1,4 +1,14 @@
-import { FileText, Laugh, LoaderCircle, Paperclip, Reply, Send, TimerOff, X } from "lucide-react";
+import {
+  FileText,
+  Laugh,
+  LoaderCircle,
+  Mic2,
+  Paperclip,
+  Reply,
+  Send,
+  TimerOff,
+  X,
+} from "lucide-react";
 import {
   type ClipboardEvent,
   type FormEvent,
@@ -13,6 +23,7 @@ import type { Attachment, Message } from "../types";
 import { formatBytes } from "../utils/format";
 import { messageSummary } from "../utils/message";
 import { EmojiPicker } from "./EmojiPicker";
+import { VoicePostcardRecorder } from "./VoicePostcardRecorder";
 
 const EMOJI_PICKER_WIDTH = 354;
 const EMOJI_PICKER_GAP = 10;
@@ -36,6 +47,7 @@ interface MessageComposerProps {
   onTextChange: (value: string) => void;
   onChooseFile: (file: File | undefined) => void;
   onRemoveAttachment: () => void;
+  onSendVoice: (file: File, durationSeconds: number) => Promise<boolean>;
   onSend: () => void;
   onCancelReply: () => void;
 }
@@ -57,6 +69,7 @@ export function MessageComposer({
   onTextChange,
   onChooseFile,
   onRemoveAttachment,
+  onSendVoice,
   onSend,
   onCancelReply,
 }: MessageComposerProps) {
@@ -65,6 +78,7 @@ export function MessageComposer({
   const composerRef = useRef<HTMLDivElement>(null);
   const emojiAnchorRef = useRef<HTMLDivElement>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const selectionRef = useRef({ start: text.length, end: text.length });
 
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), []);
@@ -205,145 +219,163 @@ export function MessageComposer({
   };
 
   return (
-    <form className="composer-wrap" onSubmit={submit}>
-      <div className={`composer ${disabled ? "is-locked" : ""}`} ref={composerRef}>
-        {replyingTo && (
-          <div className="composer-reply">
-            <span className="composer-reply-icon">
-              <Reply size={15} />
-            </span>
-            <span>
-              <small>回复 {replyingTo.senderName}</small>
-              <strong>{messageSummary(replyingTo)}</strong>
-            </span>
-            <button type="button" onClick={onCancelReply} aria-label="取消回复">
-              <X size={15} />
-            </button>
-          </div>
-        )}
-        {pendingAttachment && (
-          <div className="pending-file">
-            <span className="pending-file-icon">
-              <FileText size={17} />
-            </span>
-            <span>
-              <strong>{pendingAttachment.originalName}</strong>
-              <small>{formatBytes(pendingAttachment.sizeBytes)} · 已准备发送</small>
-            </span>
-            <button type="button" onClick={onRemoveAttachment} aria-label="移除附件">
-              <X size={15} />
-            </button>
-          </div>
-        )}
+    <>
+      <form className="composer-wrap" onSubmit={submit}>
+        <div className={`composer ${disabled ? "is-locked" : ""}`} ref={composerRef}>
+          {replyingTo && (
+            <div className="composer-reply">
+              <span className="composer-reply-icon">
+                <Reply size={15} />
+              </span>
+              <span>
+                <small>回复 {replyingTo.senderName}</small>
+                <strong>{messageSummary(replyingTo)}</strong>
+              </span>
+              <button type="button" onClick={onCancelReply} aria-label="取消回复">
+                <X size={15} />
+              </button>
+            </div>
+          )}
+          {pendingAttachment && (
+            <div className="pending-file">
+              <span className="pending-file-icon">
+                <FileText size={17} />
+              </span>
+              <span>
+                <strong>{pendingAttachment.originalName}</strong>
+                <small>{formatBytes(pendingAttachment.sizeBytes)} · 已准备发送</small>
+              </span>
+              <button type="button" onClick={onRemoveAttachment} aria-label="移除附件">
+                <X size={15} />
+              </button>
+            </div>
+          )}
 
-        {upload && (
-          <div
-            className="pending-file is-uploading"
-            role="progressbar"
-            aria-label={`正在上传 ${upload.name}`}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={upload.progress}
-          >
-            <span className="pending-file-icon">
-              <LoaderCircle className="spin" size={17} />
-            </span>
-            <span>
-              <strong>{upload.name}</strong>
-              <small>正在上传 · {upload.progress}%</small>
-              <i>
-                <b style={{ width: `${upload.progress}%` }} />
-              </i>
-            </span>
-          </div>
-        )}
-
-        {disabled && (
-          <div className="composer-lock-note" role="status">
-            <TimerOff size={16} />
-            <span>
-              <strong>闪聊已经结束</strong>
-              <small>{disabledReason}</small>
-            </span>
-          </div>
-        )}
-
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(event) => onTextChange(event.target.value)}
-          onSelect={rememberSelection}
-          onClick={rememberSelection}
-          onKeyUp={rememberSelection}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          placeholder={`发消息给 ${peerName}`}
-          rows={1}
-          maxLength={5_000}
-          disabled={disabled}
-        />
-
-        <div className="composer-actions">
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              hidden
-              onChange={(event) => {
-                onChooseFile(event.target.files?.[0]);
-                event.currentTarget.value = "";
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploadBlocked || disabled}
-              aria-label="添加图片或附件"
-              title="添加图片或附件"
+          {upload && (
+            <div
+              className="pending-file is-uploading"
+              role="progressbar"
+              aria-label={`正在上传 ${upload.name}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={upload.progress}
             >
-              <Paperclip size={19} />
-            </button>
-            <div className="emoji-picker-anchor" ref={emojiAnchorRef}>
+              <span className="pending-file-icon">
+                <LoaderCircle className="spin" size={17} />
+              </span>
+              <span>
+                <strong>{upload.name}</strong>
+                <small>正在上传 · {upload.progress}%</small>
+                <i>
+                  <b style={{ width: `${upload.progress}%` }} />
+                </i>
+              </span>
+            </div>
+          )}
+
+          {disabled && (
+            <div className="composer-lock-note" role="status">
+              <TimerOff size={16} />
+              <span>
+                <strong>闪聊已经结束</strong>
+                <small>{disabledReason}</small>
+              </span>
+            </div>
+          )}
+
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(event) => onTextChange(event.target.value)}
+            onSelect={rememberSelection}
+            onClick={rememberSelection}
+            onKeyUp={rememberSelection}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={`发消息给 ${peerName}`}
+            rows={1}
+            maxLength={5_000}
+            disabled={disabled}
+          />
+
+          <div className="composer-actions">
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                hidden
+                onChange={(event) => {
+                  onChooseFile(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                }}
+              />
               <button
                 type="button"
-                onClick={toggleEmojiPicker}
-                aria-label="选择表情"
-                title="选择表情"
-                aria-expanded={showEmojiPicker}
-                aria-haspopup="dialog"
-                disabled={disabled}
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadBlocked || disabled}
+                aria-label="添加图片或附件"
+                title="添加图片或附件"
               >
-                <Laugh size={19} />
+                <Paperclip size={19} />
               </button>
-              {showEmojiPicker && (
-                <>
-                  <button
-                    className="emoji-mobile-scrim"
-                    type="button"
-                    onClick={closeEmojiPicker}
-                    aria-label="关闭表情面板"
-                  />
-                  <EmojiPicker onSelect={insertEmoji} onClose={closeEmojiPicker} />
-                </>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowVoiceRecorder(true)}
+                disabled={uploadBlocked || disabled}
+                aria-label="录制语音明信片"
+                title="语音明信片"
+              >
+                <Mic2 size={18} />
+              </button>
+              <div className="emoji-picker-anchor" ref={emojiAnchorRef}>
+                <button
+                  type="button"
+                  onClick={toggleEmojiPicker}
+                  aria-label="选择表情"
+                  title="选择表情"
+                  aria-expanded={showEmojiPicker}
+                  aria-haspopup="dialog"
+                  disabled={disabled}
+                >
+                  <Laugh size={19} />
+                </button>
+                {showEmojiPicker && (
+                  <>
+                    <button
+                      className="emoji-mobile-scrim"
+                      type="button"
+                      onClick={closeEmojiPicker}
+                      aria-label="关闭表情面板"
+                    />
+                    <EmojiPicker onSelect={insertEmoji} onClose={closeEmojiPicker} />
+                  </>
+                )}
+              </div>
+              <span>支持粘贴或拖入文件 · 最大 50 MB</span>
             </div>
-            <span>支持粘贴或拖入文件 · 最大 50 MB</span>
-          </div>
-          <div className="send-group">
-            {text.length > 4_500 && <small>{text.length}/5000</small>}
-            <span className="keyboard-hint">Enter 发送</span>
-            <button
-              className="send-button"
-              type="submit"
-              disabled={!canSend}
-              aria-label="发送消息"
-              title="发送消息"
-            >
-              {sending ? <LoaderCircle className="spin" size={19} /> : <Send size={19} />}
-            </button>
+            <div className="send-group">
+              {text.length > 4_500 && <small>{text.length}/5000</small>}
+              <span className="keyboard-hint">Enter 发送</span>
+              <button
+                className="send-button"
+                type="submit"
+                disabled={!canSend}
+                aria-label="发送消息"
+                title="发送消息"
+              >
+                {sending ? <LoaderCircle className="spin" size={19} /> : <Send size={19} />}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </form>
+      </form>
+      {showVoiceRecorder && (
+        <VoicePostcardRecorder
+          peerName={peerName}
+          onDismiss={() => setShowVoiceRecorder(false)}
+          onSend={onSendVoice}
+        />
+      )}
+    </>
   );
 }

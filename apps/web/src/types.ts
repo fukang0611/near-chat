@@ -29,7 +29,7 @@ export interface Conversation {
   memberCount: number;
   onlineMemberCount: number;
   lastMessage: {
-    type: "TEXT" | "IMAGE" | "FILE";
+    type: MessageKind;
     text: string | null;
     createdAt: string | null;
     senderId: string | null;
@@ -46,11 +46,13 @@ export interface Attachment {
   sizeBytes: number;
 }
 
+export type MessageKind = "TEXT" | "IMAGE" | "AUDIO" | "FILE";
+
 export interface MessageReply {
   id: string;
   senderId: string;
   senderName: string;
-  type: "TEXT" | "IMAGE" | "FILE";
+  type: MessageKind;
   textContent: string | null;
   attachmentName: string | null;
   recalled: boolean;
@@ -64,7 +66,7 @@ export interface Message {
   senderAvatarColor: string;
   senderAvatarUrl: string | null;
   clientMessageId: string;
-  type: "TEXT" | "IMAGE" | "FILE";
+  type: MessageKind;
   textContent: string | null;
   createdAt: string;
   recalledAt: string | null;

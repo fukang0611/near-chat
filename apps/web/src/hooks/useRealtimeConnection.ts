@@ -41,7 +41,10 @@ function isMessage(value: unknown): value is Message {
     typeof value.senderName === "string" &&
     typeof value.senderAvatarColor === "string" &&
     typeof value.clientMessageId === "string" &&
-    (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
+    (value.type === "TEXT" ||
+      value.type === "IMAGE" ||
+      value.type === "AUDIO" ||
+      value.type === "FILE") &&
     (value.textContent === null || typeof value.textContent === "string") &&
     typeof value.createdAt === "string" &&
     (value.recalledAt === null || typeof value.recalledAt === "string") &&
@@ -58,7 +61,10 @@ function isMessageReply(value: unknown): boolean {
     typeof value.id === "string" &&
     typeof value.senderId === "string" &&
     typeof value.senderName === "string" &&
-    (value.type === "TEXT" || value.type === "IMAGE" || value.type === "FILE") &&
+    (value.type === "TEXT" ||
+      value.type === "IMAGE" ||
+      value.type === "AUDIO" ||
+      value.type === "FILE") &&
     (value.textContent === null || typeof value.textContent === "string") &&
     (value.attachmentName === null || typeof value.attachmentName === "string") &&
     typeof value.recalled === "boolean"

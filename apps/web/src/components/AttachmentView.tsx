@@ -4,7 +4,10 @@ import {
   FileText,
   LoaderCircle,
   Maximize2,
+  Mic2,
+  Pause,
   PenLine,
+  Play,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -311,10 +314,134 @@ function FileAttachment({ attachment }: AttachmentViewProps) {
   );
 }
 
+function formatAudioTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "0:00";
+  const rounded = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+function AudioAttachment({ attachment }: AttachmentViewProps) {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [loadKey, setLoadKey] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const { downloading, downloadError, download } = useAttachmentDownload(attachment);
+
+  useEffect(() => {
+    let active = true;
+    let url: string | null = null;
+    setLoading(true);
+    setLoadError("");
+    setPlaying(false);
+    setCurrentTime(0);
+    void api
+      .fileBlob(attachment.id)
+      .then((blob) => {
+        if (!active) return;
+        url = URL.createObjectURL(blob);
+        setAudioUrl(url);
+      })
+      .catch(() => active && setLoadError("语音加载失败"))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [attachment.id, loadKey]);
+
+  const togglePlayback = async () => {
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) return;
+    if (audio.paused) {
+      await audio.play().catch(() => setLoadError("无法播放这段语音"));
+    } else {
+      audio.pause();
+    }
+  };
+
+  return (
+    <div className={`audio-attachment ${loadError ? "has-error" : ""}`}>
+      <audio
+        ref={audioRef}
+        src={audioUrl ?? undefined}
+        preload="metadata"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+      <button
+        type="button"
+        className="audio-play-button"
+        onClick={() => (loadError ? setLoadKey((current) => current + 1) : void togglePlayback())}
+        disabled={loading}
+        aria-label={loadError ? "重新加载语音" : playing ? "暂停语音" : "播放语音"}
+      >
+        {loading ? (
+          <LoaderCircle className="spin" size={18} />
+        ) : loadError ? (
+          <RotateCcw size={18} />
+        ) : playing ? (
+          <Pause size={17} />
+        ) : (
+          <Play size={17} />
+        )}
+      </button>
+      <span className="audio-postcard-mark" aria-hidden="true">
+        <Mic2 size={13} />
+      </span>
+      <span className="audio-attachment-body">
+        <strong>{loadError || "语音明信片"}</strong>
+        <span className={`audio-waveform ${playing ? "is-playing" : ""}`} aria-hidden="true">
+          {[4, 8, 12, 7, 14, 10, 5, 11, 15, 8, 13, 6, 10, 14, 7, 4].map((height, index) => (
+            <i key={`${height}-${index}`} style={{ height }} />
+          ))}
+        </span>
+        <span className="audio-progress-row">
+          <input
+            type="range"
+            min={0}
+            max={duration || 1}
+            step={0.1}
+            value={Math.min(currentTime, duration || 1)}
+            disabled={!audioUrl || !duration}
+            aria-label="语音播放进度"
+            onChange={(event) => {
+              const nextTime = Number(event.target.value);
+              if (audioRef.current) audioRef.current.currentTime = nextTime;
+              setCurrentTime(nextTime);
+            }}
+          />
+          <small>
+            {formatAudioTime(currentTime)} / {formatAudioTime(duration)}
+          </small>
+        </span>
+      </span>
+      <button
+        type="button"
+        className="audio-download-button"
+        onClick={() => void download()}
+        disabled={downloading}
+        aria-label={`下载语音 ${attachment.originalName}`}
+        title={downloadError || "下载语音"}
+      >
+        {downloading ? <LoaderCircle className="spin" size={15} /> : <Download size={15} />}
+      </button>
+    </div>
+  );
+}
+
 /** 根据媒体类型选择展示模块，调用方无需了解预览或下载状态。 */
 export function AttachmentView({ attachment, onAnnotate }: AttachmentViewProps) {
   return attachment.contentType.startsWith("image/") ? (
     <ImageAttachment attachment={attachment} onAnnotate={onAnnotate} />
+  ) : attachment.contentType.startsWith("audio/") ? (
+    <AudioAttachment attachment={attachment} />
   ) : (
     <FileAttachment attachment={attachment} />
   );

@@ -34,6 +34,7 @@ import {
   resolveIslandBounds,
   type DesktopIslandPreferences,
 } from "./island-state";
+import { canGrantDesktopPermission, type DesktopMediaType } from "./permission-policy";
 import { DEFAULT_SERVER_URL, normalizeServerUrl, serverHealthUrl } from "./server-url";
 
 const APP_NAME = "近聊";
@@ -808,22 +809,31 @@ function registerIpcHandlers(): void {
 }
 
 function configurePermissions(): void {
-  const isConfiguredOrigin = (requestingUrl: string) => {
-    if (!configuredServerUrl) return false;
-    try {
-      return new URL(requestingUrl).origin === new URL(configuredServerUrl).origin;
-    } catch {
-      return false;
-    }
-  };
-
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin) =>
-      permission === "notifications" && isConfiguredOrigin(requestingOrigin),
+    (_webContents, permission, requestingOrigin, details) =>
+      canGrantDesktopPermission({
+        permission,
+        requestingUrl: requestingOrigin,
+        configuredServerUrl,
+        mediaTypes: details.mediaType ? [details.mediaType] : undefined,
+      }),
   );
-  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    callback(permission === "notifications" && isConfiguredOrigin(webContents.getURL()));
-  });
+  session.defaultSession.setPermissionRequestHandler(
+    (webContents, permission, callback, details) => {
+      const mediaTypes =
+        "mediaTypes" in details
+          ? (details.mediaTypes as DesktopMediaType[] | undefined)
+          : undefined;
+      callback(
+        canGrantDesktopPermission({
+          permission,
+          requestingUrl: details.requestingUrl || webContents.getURL(),
+          configuredServerUrl,
+          mediaTypes,
+        }),
+      );
+    },
+  );
 }
 
 async function startApplication(): Promise<void> {

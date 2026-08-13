@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS messages (
   conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   sender_id UUID NOT NULL REFERENCES users(id),
   client_message_id UUID NOT NULL,
-  type VARCHAR(20) NOT NULL CHECK (type IN ('TEXT', 'IMAGE', 'FILE')),
+  type VARCHAR(20) NOT NULL CHECK (type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE')),
   text_content TEXT,
   reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
   recalled_at TIMESTAMPTZ,
@@ -126,6 +126,9 @@ CREATE TABLE IF NOT EXISTS messages (
 ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS reply_to_message_id UUID REFERENCES messages(id) ON DELETE SET NULL;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS recalled_at TIMESTAMPTZ;
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_type_check;
+ALTER TABLE messages
+  ADD CONSTRAINT messages_type_check CHECK (type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE'));
 
 CREATE TABLE IF NOT EXISTS attachments (
   id UUID PRIMARY KEY,
