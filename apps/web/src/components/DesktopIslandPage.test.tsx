@@ -121,4 +121,26 @@ describe("DesktopIslandPage", () => {
     expect(sendMessage.mock.calls[0]?.[1].text).toBe("浮岛快速回复");
     expect(await screen.findByText("浮岛快速回复")).not.toBeNull();
   });
+
+  it("闪聊到期后浮岛也进入只读状态", async () => {
+    vi.mocked(api.conversations).mockResolvedValue({
+      conversations: [
+        {
+          ...directConversation,
+          id: "flash-one",
+          type: "GROUP",
+          title: "临时评审",
+          peer: null,
+          ownerId: currentUser.id,
+          expiresAt: "2020-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    render(<DesktopIslandPage user={currentUser} onSessionInvalid={vi.fn()} />);
+
+    const input = await screen.findByRole("textbox", { name: "浮岛消息" });
+    expect((input as HTMLInputElement).disabled).toBe(true);
+    expect(input.getAttribute("placeholder")).toBe("闪聊已结束，只能查看历史消息");
+    expect(screen.getAllByText(/闪聊已结束/).length).toBeGreaterThan(0);
+  });
 });

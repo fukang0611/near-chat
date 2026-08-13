@@ -26,6 +26,7 @@ import type { Attachment, Conversation, Message, NudgeEvent, User } from "../typ
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
+import { isFlashRoomExpired } from "../utils/flash-room";
 import {
   loadNotificationPreferences,
   markNotificationPromptHandled,
@@ -47,6 +48,7 @@ import {
 } from "./ChatSidebar";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { GroupManagementDialog } from "./GroupManagementDialog";
+import { FlashRoomBadge } from "./FlashRoomBadge";
 import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
@@ -161,6 +163,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
   const [incomingNudge, setIncomingNudge] = useState<NudgeEvent | null>(null);
   const [nudgingConversationId, setNudgingConversationId] = useState<string | null>(null);
+  const [conversationClock, setConversationClock] = useState(Date.now);
   const [clipboardRelayPayload, setClipboardRelayPayload] =
     useState<DesktopClipboardRelayPayload | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
@@ -181,6 +184,10 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const selectedConversation = useMemo(
     () => conversations.find((item) => item.id === selectedId) ?? null,
     [conversations, selectedId],
+  );
+  const selectedFlashExpired = isFlashRoomExpired(
+    selectedConversation?.expiresAt,
+    conversationClock,
   );
   const text = selectedId ? (drafts[selectedId] ?? "") : "";
   const pendingAttachment = selectedId ? (pendingAttachments[selectedId] ?? null) : null;
@@ -216,6 +223,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       setShowGroupManagement(false);
     }
   }, [selectedConversation?.type, showGroupManagement]);
+
+  useEffect(() => {
+    if (!selectedConversation?.expiresAt || selectedFlashExpired) return;
+    const timer = window.setInterval(() => setConversationClock(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, [selectedConversation?.expiresAt, selectedFlashExpired]);
 
   const notify = useCallback((message: string, tone: NoticeTone = "error") => {
     setToast({ id: Date.now(), message, tone });
@@ -752,20 +765,24 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     }
   };
 
-  const createGroup = async (name: string, memberIds: string[]) => {
-    const result = await api.createGroup(name, memberIds);
+  const createGroup = async (name: string, memberIds: string[], expiresAt?: string) => {
+    const result = await api.createGroup(name, memberIds, expiresAt);
     await refreshConversations();
     messageTargetRef.current = null;
     setHighlightedMessageId(null);
     setSelectedId(result.conversationId);
     setSidebarMode("recent");
     setShowCreateGroup(false);
-    notify(`群聊“${name}”已创建`, "success");
+    notify(expiresAt ? `闪聊“${name}”已开启` : `群聊“${name}”已创建`, "success");
   };
 
   const chooseFile = async (file: File | undefined) => {
     const targetConversationId = selectedId;
     if (!file || !targetConversationId) return;
+    if (selectedFlashExpired) {
+      notify("闪聊已经结束，只能查看历史消息", "info");
+      return;
+    }
     if (contactDeliveryInFlightRef.current) {
       notify("头像投递完成后即可继续选择附件", "info");
       return;
@@ -922,6 +939,10 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
 
   const send = () => {
     if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
+    if (selectedFlashExpired) {
+      notify("闪聊已经结束，只能查看历史消息", "info");
+      return;
+    }
     const conversationId = selectedId;
     void enqueueOutgoingMessage(conversationId, {
       text,
@@ -1161,7 +1182,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   };
 
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
+    if (selectedFlashExpired || !event.dataTransfer.types.includes("Files")) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setDraggingFile(true);
@@ -1286,7 +1307,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               />
               <div className="chat-title">
                 <strong>{selectedConversation.title}</strong>
-                {selectedConversation.type === "DIRECT" && selectedConversation.peer?.status ? (
+                {selectedConversation.expiresAt ? (
+                  <FlashRoomBadge expiresAt={selectedConversation.expiresAt} />
+                ) : selectedConversation.type === "DIRECT" && selectedConversation.peer?.status ? (
                   <UserStatusBubble status={selectedConversation.peer.status} />
                 ) : (
                   <span>
@@ -1388,6 +1411,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               upload={activeUpload}
               uploadBlocked={Boolean(uploadState)}
               sending={sending}
+              disabled={selectedFlashExpired}
+              disabledReason="房间已转为只读，历史消息和附件仍可查看。"
               replyingTo={replyingTo}
               onTextChange={updateDraft}
               onChooseFile={(file) => void chooseFile(file)}

@@ -90,10 +90,10 @@ export const api = {
     }),
   nudgeConversation: (conversationId: string) =>
     request<void>(`/api/conversations/${conversationId}/nudge`, { method: "POST" }),
-  createGroup: (name: string, memberIds: string[]) =>
+  createGroup: (name: string, memberIds: string[], expiresAt?: string) =>
     request<{ conversationId: string }>("/api/conversations/groups", {
       method: "POST",
-      body: JSON.stringify({ name, memberIds }),
+      body: JSON.stringify({ name, memberIds, expiresAt }),
     }),
   updateGroup: (conversationId: string, input: { name?: string; avatarColor?: string }) =>
     request<void>(`/api/conversations/${conversationId}/group`, {

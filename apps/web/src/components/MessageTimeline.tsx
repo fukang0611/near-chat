@@ -16,6 +16,7 @@ import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/forma
 import { replySummary } from "../utils/message";
 import { AttachmentView } from "./AttachmentView";
 import { Avatar } from "./Avatar";
+import { FlashRoomBadge } from "./FlashRoomBadge";
 
 interface MessageTimelineProps {
   conversation: Conversation;
@@ -278,9 +279,10 @@ export function MessageTimeline({
           size="large"
         />
         <strong>{conversation.title}</strong>
+        <FlashRoomBadge expiresAt={conversation.expiresAt} />
         <span>
           {conversation.type === "GROUP"
-            ? `${conversation.memberCount} 位成员 · 局域网群聊`
+            ? `${conversation.memberCount} 位成员 · ${conversation.expiresAt ? "临时闪聊" : "局域网群聊"}`
             : `@${conversation.peer?.username ?? "unknown"} · 你们的局域网私聊`}
         </span>
       </div>

@@ -1,4 +1,4 @@
-import { FileText, Laugh, LoaderCircle, Paperclip, Reply, Send, X } from "lucide-react";
+import { FileText, Laugh, LoaderCircle, Paperclip, Reply, Send, TimerOff, X } from "lucide-react";
 import {
   type ClipboardEvent,
   type FormEvent,
@@ -30,6 +30,8 @@ interface MessageComposerProps {
   upload: UploadProgress | null;
   uploadBlocked: boolean;
   sending: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   replyingTo: Message | null;
   onTextChange: (value: string) => void;
   onChooseFile: (file: File | undefined) => void;
@@ -49,6 +51,8 @@ export function MessageComposer({
   upload,
   uploadBlocked,
   sending,
+  disabled = false,
+  disabledReason = "当前会话暂时无法发送消息",
   replyingTo,
   onTextChange,
   onChooseFile,
@@ -144,10 +148,12 @@ export function MessageComposer({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (disabled) return;
     onSend();
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (disabled) return;
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       onSend();
@@ -161,7 +167,7 @@ export function MessageComposer({
     onChooseFile(file);
   };
 
-  const canSend = !sending && !upload && Boolean(text.trim() || pendingAttachment);
+  const canSend = !disabled && !sending && !upload && Boolean(text.trim() || pendingAttachment);
 
   const rememberSelection = () => {
     const textarea = textareaRef.current;
@@ -174,7 +180,7 @@ export function MessageComposer({
 
   const toggleEmojiPicker = () => {
     if (!showEmojiPicker) rememberSelection();
-    setShowEmojiPicker((current) => !current);
+    if (!disabled) setShowEmojiPicker((current) => !current);
   };
 
   const insertEmoji = (emoji: string) => {
@@ -200,7 +206,7 @@ export function MessageComposer({
 
   return (
     <form className="composer-wrap" onSubmit={submit}>
-      <div className="composer" ref={composerRef}>
+      <div className={`composer ${disabled ? "is-locked" : ""}`} ref={composerRef}>
         {replyingTo && (
           <div className="composer-reply">
             <span className="composer-reply-icon">
@@ -252,6 +258,16 @@ export function MessageComposer({
           </div>
         )}
 
+        {disabled && (
+          <div className="composer-lock-note" role="status">
+            <TimerOff size={16} />
+            <span>
+              <strong>闪聊已经结束</strong>
+              <small>{disabledReason}</small>
+            </span>
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -264,6 +280,7 @@ export function MessageComposer({
           placeholder={`发消息给 ${peerName}`}
           rows={1}
           maxLength={5_000}
+          disabled={disabled}
         />
 
         <div className="composer-actions">
@@ -280,7 +297,7 @@ export function MessageComposer({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploadBlocked}
+              disabled={uploadBlocked || disabled}
               aria-label="添加图片或附件"
               title="添加图片或附件"
             >
@@ -294,6 +311,7 @@ export function MessageComposer({
                 title="选择表情"
                 aria-expanded={showEmojiPicker}
                 aria-haspopup="dialog"
+                disabled={disabled}
               >
                 <Laugh size={19} />
               </button>

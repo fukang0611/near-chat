@@ -29,6 +29,7 @@ import type { Attachment, Conversation, User } from "../types";
 import { formatConversationPreview, formatSidebarTime } from "../utils/format";
 import type { ThemeMode } from "../utils/theme";
 import { Avatar } from "./Avatar";
+import { FlashRoomBadge } from "./FlashRoomBadge";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserStatusBubble } from "./UserStatusBubble";
 
@@ -514,6 +515,7 @@ export function ChatSidebar({
                     <span className="conversation-copy">
                       <span>
                         <strong>{conversation.title}</strong>
+                        <FlashRoomBadge expiresAt={conversation.expiresAt} compact />
                         <time>{formatSidebarTime(conversation.lastMessage?.createdAt)}</time>
                       </span>
                       <span>

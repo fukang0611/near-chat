@@ -7398,6 +7398,281 @@ body,
   }
 }
 
+/* 第七阶段：闪聊房间 */
+.flash-room-badge {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 4px 7px;
+  border: 1px solid rgba(226, 143, 52, 0.2);
+  border-radius: 999px;
+  color: #ad641d;
+  background: linear-gradient(135deg, #fff4df, #fff9ee);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.flash-room-badge > strong {
+  overflow: hidden;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 680;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flash-room-badge.is-compact {
+  flex: none;
+  margin: 0 auto 0 5px;
+  padding: 3px 5px;
+}
+
+.flash-room-badge.is-expired {
+  border-color: #e0e1e5;
+  color: #8a8d95;
+  background: #f3f3f5;
+}
+
+.chat-title > .flash-room-badge {
+  margin-top: 4px;
+}
+
+.conversation-intro > .flash-room-badge {
+  margin-top: 9px;
+}
+
+.group-kind-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 20px 12px;
+}
+
+.group-kind-switch > button {
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid #e4e5e8;
+  border-radius: 12px;
+  color: #83868e;
+  text-align: left;
+  background: #f7f7f8;
+  transition: 150ms ease;
+}
+
+.group-kind-switch > button > svg {
+  flex: none;
+}
+
+.group-kind-switch > button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-kind-switch strong {
+  color: #4b4d54;
+  font-size: 10px;
+}
+
+.group-kind-switch small {
+  margin-top: 4px;
+  color: #979aa2;
+  font-size: 8px;
+}
+
+.group-kind-switch > button:hover,
+.group-kind-switch > button.is-selected {
+  border-color: rgba(103, 87, 232, 0.3);
+  color: var(--accent);
+  background: #f2f0ff;
+  box-shadow: inset 0 0 0 1px rgba(103, 87, 232, 0.06);
+}
+
+.group-kind-switch > button.is-flash:hover,
+.group-kind-switch > button.is-flash.is-selected {
+  border-color: rgba(226, 143, 52, 0.35);
+  color: #c1762c;
+  background: #fff7e9;
+  box-shadow: inset 0 0 0 1px rgba(226, 143, 52, 0.07);
+}
+
+.flash-duration-picker {
+  margin: -2px 20px 12px;
+  padding: 11px;
+  border: 1px solid #eee3d4;
+  border-radius: 12px;
+  background: #fffaf1;
+  animation: flash-duration-reveal 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.flash-duration-picker > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9d642d;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.flash-duration-picker > div {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.flash-duration-picker button {
+  height: 29px;
+  padding: 0 4px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  color: #8d755d;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 8px;
+}
+
+.flash-duration-picker button:hover,
+.flash-duration-picker button.is-selected {
+  border-color: rgba(215, 133, 48, 0.42);
+  color: #a7611e;
+  background: #ffefd4;
+}
+
+.flash-duration-picker > small {
+  display: block;
+  margin-top: 8px;
+  color: #a49788;
+  font-size: 8px;
+}
+
+@keyframes flash-duration-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.composer.is-locked {
+  border-color: rgba(226, 143, 52, 0.18);
+}
+
+.composer-lock-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 2px 9px;
+  padding: 9px 10px;
+  border: 1px solid #eee1cf;
+  border-radius: 11px;
+  color: #a76a2d;
+  background: #fff8ed;
+}
+
+.composer-lock-note > svg {
+  flex: none;
+}
+
+.composer-lock-note > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.composer-lock-note strong {
+  font-size: 10px;
+}
+
+.composer-lock-note small {
+  margin-top: 3px;
+  color: #a09080;
+  font-size: 8px;
+}
+
+.composer.is-locked textarea:disabled {
+  color: #a0a2a8;
+  cursor: not-allowed;
+}
+
+:root[data-theme="dark"] .flash-room-badge {
+  border-color: rgba(230, 158, 76, 0.25);
+  color: #efb979;
+  background: linear-gradient(135deg, rgba(104, 67, 30, 0.58), rgba(63, 49, 36, 0.82));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.045);
+}
+
+:root[data-theme="dark"] .flash-room-badge.is-expired {
+  border-color: #3d3f47;
+  color: #9699a2;
+  background: #303139;
+}
+
+:root[data-theme="dark"] .group-kind-switch > button {
+  border-color: #3d3f47;
+  color: #9c9fa8;
+  background: #292a31;
+}
+
+:root[data-theme="dark"] .group-kind-switch strong {
+  color: #d3d5da;
+}
+
+:root[data-theme="dark"] .group-kind-switch small {
+  color: #888c95;
+}
+
+:root[data-theme="dark"] .group-kind-switch > button:hover,
+:root[data-theme="dark"] .group-kind-switch > button.is-selected {
+  border-color: rgba(147, 132, 245, 0.38);
+  color: #bcb2ff;
+  background: #343044;
+}
+
+:root[data-theme="dark"] .group-kind-switch > button.is-flash:hover,
+:root[data-theme="dark"] .group-kind-switch > button.is-flash.is-selected,
+:root[data-theme="dark"] .flash-duration-picker,
+:root[data-theme="dark"] .composer-lock-note {
+  border-color: rgba(230, 158, 76, 0.25);
+  color: #e3aa67;
+  background: #3b3026;
+}
+
+:root[data-theme="dark"] .flash-duration-picker button {
+  border-color: #5d4935;
+  color: #bd9c77;
+  background: #302a24;
+}
+
+:root[data-theme="dark"] .flash-duration-picker button:hover,
+:root[data-theme="dark"] .flash-duration-picker button.is-selected {
+  border-color: rgba(230, 158, 76, 0.45);
+  color: #efbd83;
+  background: #4b3826;
+}
+
+:root[data-theme="dark"] .flash-duration-picker > small,
+:root[data-theme="dark"] .composer-lock-note small {
+  color: #ae9a84;
+}
+
+@media (max-width: 520px) {
+  .flash-duration-picker > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flash-duration-picker {
+    animation: none;
+  }
+}
+
 /* Electron 剪贴板接力：确认内容与目标后才发送，避免全局快捷键造成误投。 */
 .clipboard-relay-row.has-warning {
   color: #b07931;

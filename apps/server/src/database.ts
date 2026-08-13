@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS conversations (
   avatar_color VARCHAR(20) NOT NULL DEFAULT '#5B6EE1',
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -94,6 +95,7 @@ ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES users(id) ON DELETE SET NULL;
 ALTER TABLE conversations
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE conversations ALTER COLUMN direct_key DROP NOT NULL;
 ALTER TABLE conversations DROP CONSTRAINT IF EXISTS conversations_type_check;
 ALTER TABLE conversations

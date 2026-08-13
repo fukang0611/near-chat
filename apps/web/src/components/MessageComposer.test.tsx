@@ -86,6 +86,26 @@ describe("MessageComposer", () => {
     expect(onSend).toHaveBeenCalledOnce();
   });
 
+  it("闪聊到期后保留内容但锁定全部发送入口", async () => {
+    const onSend = vi.fn();
+    renderComposer({ replyingTo: null, disabled: true, onSend });
+
+    expect(screen.getByText("闪聊已经结束")).toBeTruthy();
+    expect((screen.getByPlaceholderText("发消息给 林小满") as HTMLTextAreaElement).disabled).toBe(
+      true,
+    );
+    expect(
+      (screen.getByRole("button", { name: "添加图片或附件" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect((screen.getByRole("button", { name: "选择表情" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "发送消息" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("把表情插入当前光标位置并恢复输入焦点", async () => {
     const onTextChange = vi.fn();
     const { user } = renderComposer({

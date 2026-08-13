@@ -1,4 +1,4 @@
-import { Check, LoaderCircle, Search, UsersRound, X } from "lucide-react";
+import { Check, Clock3, LoaderCircle, Search, UsersRound, X, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { User } from "../types";
@@ -8,7 +8,7 @@ import { Avatar } from "./Avatar";
 interface CreateGroupDialogProps {
   users: User[];
   onClose: () => void;
-  onCreate: (name: string, memberIds: string[]) => Promise<void>;
+  onCreate: (name: string, memberIds: string[], expiresAt?: string) => Promise<void>;
 }
 
 /** 创建群聊采用独立对话框，避免把临时选择状态混入聊天页的数据编排。 */
@@ -18,6 +18,8 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [kind, setKind] = useState<"regular" | "flash">("regular");
+  const [flashDuration, setFlashDuration] = useState(120);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -67,7 +69,9 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
     setSubmitting(true);
     setError("");
     try {
-      await onCreate(name.trim(), selectedIds);
+      const expiresAt =
+        kind === "flash" ? new Date(Date.now() + flashDuration * 60_000).toISOString() : undefined;
+      await onCreate(name.trim(), selectedIds, expiresAt);
     } catch (submitError) {
       setError(errorMessage(submitError, "群聊创建失败"));
       setSubmitting(false);
@@ -93,8 +97,8 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
             <UsersRound size={20} />
           </span>
           <div>
-            <strong id="group-title">创建群聊</strong>
-            <small>选择成员并给群聊起一个清晰的名字</small>
+            <strong id="group-title">创建团队会话</strong>
+            <small>建立常驻群聊，或发起到期自动只读的闪聊</small>
           </div>
           <button type="button" onClick={onClose} disabled={submitting} aria-label="关闭">
             <X size={18} />
@@ -115,6 +119,58 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
           />
           <small>{name.length}/80</small>
         </label>
+
+        <div className="group-kind-switch" role="group" aria-label="会话类型">
+          <button
+            type="button"
+            className={kind === "regular" ? "is-selected" : ""}
+            onClick={() => setKind("regular")}
+          >
+            <UsersRound size={17} />
+            <span>
+              <strong>常驻群聊</strong>
+              <small>长期保留，持续协作</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            className={kind === "flash" ? "is-selected is-flash" : "is-flash"}
+            onClick={() => setKind("flash")}
+          >
+            <Zap size={17} />
+            <span>
+              <strong>闪聊房间</strong>
+              <small>到期只读，不删历史</small>
+            </span>
+          </button>
+        </div>
+
+        {kind === "flash" && (
+          <div className="flash-duration-picker">
+            <span>
+              <Clock3 size={14} />
+              房间有效时间
+            </span>
+            <div role="group" aria-label="闪聊有效时间">
+              {[
+                [30, "30 分钟"],
+                [120, "2 小时"],
+                [480, "8 小时"],
+                [1440, "24 小时"],
+              ].map(([minutes, label]) => (
+                <button
+                  key={minutes}
+                  type="button"
+                  className={flashDuration === minutes ? "is-selected" : ""}
+                  onClick={() => setFlashDuration(minutes as number)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <small>到期后禁止发送新消息；历史消息与附件继续保留。</small>
+          </div>
+        )}
 
         <label className="group-member-search">
           <Search size={15} />
@@ -166,7 +222,7 @@ export function CreateGroupDialog({ users, onClose, onCreate }: CreateGroupDialo
             disabled={submitting || name.trim().length < 2 || selectedIds.length < 2}
           >
             {submitting && <LoaderCircle className="spin" size={15} />}
-            创建群聊
+            {kind === "flash" ? "发起闪聊" : "创建群聊"}
           </button>
         </footer>
       </section>

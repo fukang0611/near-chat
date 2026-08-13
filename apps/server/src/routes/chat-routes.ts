@@ -8,6 +8,7 @@ import { publicAvatarUrl } from "../avatar-service.js";
 import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
+import { isAllowedFlashRoomExpiry, isFlashRoomExpired } from "../flash-room-service.js";
 import {
   decodeMessageCursor,
   findMessage,
@@ -50,6 +51,7 @@ interface ConversationRow {
   name: string | null;
   avatar_color: string;
   owner_id: string | null;
+  expires_at: Date | null;
   members: ConversationMember[];
   last_message_type: "TEXT" | "IMAGE" | "FILE" | null;
   last_message_text: string | null;
@@ -69,10 +71,21 @@ const sendMessageSchema = z
   })
   .refine((value) => Boolean(value.text) || value.attachmentIds.length > 0, "消息内容不能为空");
 
-const createGroupSchema = z.object({
-  name: z.string().trim().min(2, "群聊名称至少 2 个字符").max(80),
-  memberIds: z.array(z.string().uuid()).min(2, "请至少选择 2 位联系人").max(49),
-});
+const createGroupSchema = z
+  .object({
+    name: z.string().trim().min(2, "群聊名称至少 2 个字符").max(80),
+    memberIds: z.array(z.string().uuid()).min(2, "请至少选择 2 位联系人").max(49),
+    expiresAt: z.string().datetime({ offset: true }).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.expiresAt && !isAllowedFlashRoomExpiry(new Date(value.expiresAt))) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["expiresAt"],
+        message: "闪聊有效期需在 5 分钟至 7 天之间",
+      });
+    }
+  });
 
 const groupColors = ["#5B6EE1", "#6C5CE7", "#2F9E83", "#D97757", "#B65B7A", "#4477B8"] as const;
 
@@ -183,6 +196,7 @@ function serializeConversation(row: ConversationRow, currentUserId: string, real
     avatarColor: row.type === "GROUP" ? row.avatar_color : (peer?.avatarColor ?? row.avatar_color),
     avatarUrl: row.type === "DIRECT" ? (peer?.avatarUrl ?? null) : null,
     ownerId: row.type === "GROUP" ? row.owner_id : null,
+    expiresAt: row.expires_at?.toISOString() ?? null,
     peer: peer ?? null,
     members,
     memberCount: members.length,
@@ -248,6 +262,7 @@ export function createChatRouter(realtime: RealtimeHub) {
               c.name,
               c.avatar_color,
               c.owner_id,
+              c.expires_at,
               COALESCE(
                 (SELECT json_agg(
                           json_build_object(
@@ -406,9 +421,10 @@ export function createChatRouter(realtime: RealtimeHub) {
     const colorIndex = Number.parseInt(conversationId.slice(0, 2), 16) % groupColors.length;
     await transaction(async (client) => {
       await client.query(
-        `INSERT INTO conversations (id, type, name, avatar_color, created_by, owner_id)
-         VALUES ($1, 'GROUP', $2, $3, $4, $4)`,
-        [conversationId, input.name, groupColors[colorIndex], user.id],
+        `INSERT INTO conversations
+           (id, type, name, avatar_color, created_by, owner_id, expires_at)
+         VALUES ($1, 'GROUP', $2, $3, $4, $4, $5)`,
+        [conversationId, input.name, groupColors[colorIndex], user.id, input.expiresAt ?? null],
       );
       await client.query(
         `INSERT INTO conversation_members (conversation_id, user_id)
@@ -418,10 +434,10 @@ export function createChatRouter(realtime: RealtimeHub) {
       await recordAudit(
         {
           actorId: user.id,
-          action: "GROUP_CREATE",
+          action: input.expiresAt ? "FLASH_ROOM_CREATE" : "GROUP_CREATE",
           targetType: "CONVERSATION",
           targetId: conversationId,
-          details: { name: input.name, memberIds },
+          details: { name: input.name, memberIds, expiresAt: input.expiresAt ?? null },
         },
         client,
       );
@@ -752,9 +768,11 @@ export function createChatRouter(realtime: RealtimeHub) {
       const input = sendMessageSchema.parse(request.body);
 
       const saved = await transaction(async (client) => {
-        const membership = await client.query(
-          `SELECT 1 FROM conversation_members
-            WHERE conversation_id = $1 AND user_id = $2`,
+        const membership = await client.query<{ expires_at: Date | null }>(
+          `SELECT conversation.expires_at
+             FROM conversation_members member
+             JOIN conversations conversation ON conversation.id = member.conversation_id
+            WHERE member.conversation_id = $1 AND member.user_id = $2`,
           [conversationId, user.id],
         );
         if (membership.rowCount === 0) throw new ApiError(403, "无权访问该会话");
@@ -776,6 +794,10 @@ export function createChatRouter(realtime: RealtimeHub) {
             message: await findMessage(existingMessage.rows[0].id, client),
             created: false,
           };
+        }
+
+        if (isFlashRoomExpired(membership.rows[0].expires_at)) {
+          throw new ApiError(409, "闪聊房间已结束，现在只能查看历史消息");
         }
 
         if (input.replyToMessageId) {

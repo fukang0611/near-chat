@@ -13,6 +13,7 @@ import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type { Conversation, Message, User } from "../types";
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
+import { formatFlashRoomRemaining, isFlashRoomExpired } from "../utils/flash-room";
 import { formatClock, formatConversationPreview } from "../utils/format";
 import { messageSummary } from "../utils/message";
 import { Avatar } from "./Avatar";
@@ -43,6 +44,7 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conversationClock, setConversationClock] = useState(Date.now);
   const selectedIdRef = useRef<string | null>(null);
 
   const selectedConversation = useMemo(
@@ -50,6 +52,16 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
     [conversations, selectedId],
   );
   const recentConversations = conversations.slice(0, 4);
+  const selectedFlashExpired = isFlashRoomExpired(
+    selectedConversation?.expiresAt,
+    conversationClock,
+  );
+
+  useEffect(() => {
+    if (!selectedConversation?.expiresAt || selectedFlashExpired) return;
+    const timer = window.setInterval(() => setConversationClock(Date.now()), 10_000);
+    return () => window.clearInterval(timer);
+  }, [selectedConversation?.expiresAt, selectedFlashExpired]);
 
   useEffect(() => {
     document.body.classList.add("desktop-island-body");
@@ -162,7 +174,7 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
   const send = async (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
-    if (!selectedId || !text || sending) return;
+    if (!selectedId || !text || sending || selectedFlashExpired) return;
     setSending(true);
     setError(null);
     try {
@@ -244,7 +256,13 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
                 />
                 <span>
                   <strong>{conversation.title}</strong>
-                  <small>{formatConversationPreview(conversation)}</small>
+                  <small>
+                    {conversation.expiresAt
+                      ? formatFlashRoomRemaining(conversation.expiresAt).expired
+                        ? "闪聊已结束"
+                        : `闪聊 · ${formatFlashRoomRemaining(conversation.expiresAt).label}`
+                      : formatConversationPreview(conversation)}
+                  </small>
                 </span>
                 {conversation.unreadCount > 0 && (
                   <b>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</b>
@@ -260,13 +278,18 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
           <span>
             <strong>{selectedConversation?.title ?? "选择会话"}</strong>
             <small>
-              {selectedConversation?.type === "DIRECT"
-                ? selectedConversation.peer?.online
-                  ? "在线"
-                  : "离线，可留言"
-                : selectedConversation
-                  ? `${selectedConversation.memberCount} 位成员`
-                  : ""}
+              {selectedConversation?.expiresAt
+                ? formatFlashRoomRemaining(selectedConversation.expiresAt, conversationClock)
+                    .expired
+                  ? "闪聊已结束 · 只读"
+                  : `闪聊剩余 ${formatFlashRoomRemaining(selectedConversation.expiresAt, conversationClock).label}`
+                : selectedConversation?.type === "DIRECT"
+                  ? selectedConversation.peer?.online
+                    ? "在线"
+                    : "离线，可留言"
+                  : selectedConversation
+                    ? `${selectedConversation.memberCount} 位成员`
+                    : ""}
             </small>
           </span>
           {selectedConversation && (
@@ -306,16 +329,20 @@ export function DesktopIslandPage({ user, onSessionInvalid }: DesktopIslandPageP
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder={
-              selectedConversation ? `发消息给 ${selectedConversation.title}` : "选择会话"
+              selectedFlashExpired
+                ? "闪聊已结束，只能查看历史消息"
+                : selectedConversation
+                  ? `发消息给 ${selectedConversation.title}`
+                  : "选择会话"
             }
             maxLength={5000}
-            disabled={!selectedConversation || sending}
+            disabled={!selectedConversation || sending || selectedFlashExpired}
             aria-label="浮岛消息"
           />
           <button
             type="submit"
             aria-label="发送浮岛消息"
-            disabled={!selectedConversation || !draft.trim() || sending}
+            disabled={!selectedConversation || !draft.trim() || sending || selectedFlashExpired}
           >
             {sending ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}
           </button>

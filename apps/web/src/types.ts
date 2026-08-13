@@ -22,6 +22,8 @@ export interface Conversation {
   avatarColor: string;
   avatarUrl: string | null;
   ownerId: string | null;
+  /** 非空表示限时闪聊；到达该时间后会话保留但只读。 */
+  expiresAt?: string | null;
   peer: User | null;
   members: User[];
   memberCount: number;
