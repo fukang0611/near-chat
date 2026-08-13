@@ -2,6 +2,7 @@ import {
   AppWindow,
   ClipboardPaste,
   HardDrive,
+  FolderHeart,
   LogOut,
   MessageCircleMore,
   MoreHorizontal,
@@ -106,6 +107,7 @@ interface ChatSidebarProps {
   onOpenDirect: (userId: string) => void;
   onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
+  onOpenMessageAssets: () => void;
   onOpenTeamRadar: () => void;
   onOpenProfile: () => void;
   onOpenAdmin: () => void;
@@ -148,6 +150,7 @@ export function ChatSidebar({
   onOpenDirect,
   onDropToContact,
   onCreateGroup,
+  onOpenMessageAssets,
   onOpenTeamRadar,
   onOpenProfile,
   onOpenAdmin,
@@ -318,6 +321,15 @@ export function ChatSidebar({
         </div>
         <div className="sidebar-top-actions">
           <ThemeToggle compact theme={theme} onChange={onThemeChange} />
+          <button
+            className="icon-button message-assets-trigger"
+            type="button"
+            onClick={onOpenMessageAssets}
+            aria-label="打开消息资产"
+            title="聊天文件与收藏"
+          >
+            <FolderHeart size={18} />
+          </button>
           <button
             className="icon-button team-radar-trigger"
             type="button"

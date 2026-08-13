@@ -164,6 +164,28 @@ export interface FileQuota {
   remainingBytes: number;
 }
 
+export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
+
+/** 消息资产中心中的附件记录，同时携带原消息定位信息。 */
+export interface ChatFileItem {
+  attachment: Attachment;
+  category: Exclude<ChatFileCategory, "ALL">;
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  messageText: string | null;
+  createdAt: string;
+}
+
+export interface ChatFilePage {
+  files: ChatFileItem[];
+  total: number;
+  totalBytes: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface AuditLog {
   id: string;
   action: string;

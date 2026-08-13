@@ -53,6 +53,7 @@ import { GroupManagementDialog } from "./GroupManagementDialog";
 import { FlashRoomBadge } from "./FlashRoomBadge";
 import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
+import { MessageAssetsDialog } from "./MessageAssetsDialog";
 import { MessageTimeline } from "./MessageTimeline";
 import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
 import { NudgeNotice } from "./NudgeNotice";
@@ -162,6 +163,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [showTeamRadar, setShowTeamRadar] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
@@ -1291,6 +1293,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onOpenDirect={(peerId) => void openDirect(peerId)}
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
+        onOpenMessageAssets={() => setShowMessageAssets(true)}
         onOpenTeamRadar={() => setShowTeamRadar(true)}
         onOpenProfile={() => setShowProfile(true)}
         onOpenAdmin={() => setShowAdmin(true)}
@@ -1549,6 +1552,20 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setMessageLoadVersion((current) => current + 1);
             setSidebarMode("recent");
             setShowMessageSearch(false);
+          }}
+        />
+      )}
+      {showMessageAssets && (
+        <MessageAssetsDialog
+          conversations={conversations}
+          onClose={() => setShowMessageAssets(false)}
+          onOpenMessage={(conversationId, messageId) => {
+            messageTargetRef.current = { conversationId, messageId };
+            setHighlightedMessageId(null);
+            setSelectedId(conversationId);
+            setMessageLoadVersion((current) => current + 1);
+            setSidebarMode("recent");
+            setShowMessageAssets(false);
           }}
         />
       )}

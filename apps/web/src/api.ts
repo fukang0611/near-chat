@@ -2,6 +2,8 @@ import type {
   AdminUser,
   Attachment,
   AuditLog,
+  ChatFileCategory,
+  ChatFilePage,
   Conversation,
   FileQuota,
   Message,
@@ -196,6 +198,24 @@ export const api = {
     }),
   deleteFile: (fileId: string) => request<void>(`/api/files/${fileId}`, { method: "DELETE" }),
   fileQuota: () => request<FileQuota>("/api/files/quota"),
+  chatFiles: (
+    options: {
+      keyword?: string;
+      category?: ChatFileCategory;
+      conversationId?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => {
+    const query = new URLSearchParams({
+      category: options.category ?? "ALL",
+      limit: String(options.limit ?? 100),
+      offset: String(options.offset ?? 0),
+    });
+    if (options.keyword) query.set("q", options.keyword);
+    if (options.conversationId) query.set("conversationId", options.conversationId);
+    return request<ChatFilePage>(`/api/message-assets/files?${query}`);
+  },
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(`/api/files/${fileId}/content${download ? "?download=1" : ""}`, {

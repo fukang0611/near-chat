@@ -60,6 +60,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ChatSidebar>> = 
       onOpenDirect={vi.fn()}
       onDropToContact={vi.fn()}
       onCreateGroup={vi.fn()}
+      onOpenMessageAssets={vi.fn()}
       onOpenTeamRadar={vi.fn()}
       onOpenProfile={vi.fn()}
       onOpenAdmin={vi.fn()}
@@ -113,6 +114,15 @@ describe("ChatSidebar", () => {
     await userEvent.click(screen.getByRole("button", { name: "打开今日团队雷达" }));
 
     expect(onOpenTeamRadar).toHaveBeenCalledOnce();
+  });
+
+  it("顶部资产入口可直接打开聊天文件管理", async () => {
+    const onOpenMessageAssets = vi.fn();
+    renderSidebar({ onOpenMessageAssets });
+
+    await userEvent.click(screen.getByRole("button", { name: "打开消息资产" }));
+
+    expect(onOpenMessageAssets).toHaveBeenCalledOnce();
   });
 
   it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
