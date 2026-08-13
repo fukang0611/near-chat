@@ -59,6 +59,7 @@ function message(conversationId: string, textContent: string): Message {
 describe("ChatPage message scrolling", () => {
   beforeEach(() => {
     const values = new Map<string, string>();
+    values.set("near-chat-notification-prompt:current-user", "handled");
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: {

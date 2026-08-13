@@ -27,9 +27,12 @@ import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
 import {
   loadNotificationPreferences,
+  markNotificationPromptHandled,
   type NotificationPreferences,
   playMessageSound,
+  requestNotificationPermission,
   saveNotificationPreferences,
+  shouldShowNotificationPrompt,
 } from "../utils/notifications";
 import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
@@ -40,6 +43,7 @@ import { GroupManagementDialog } from "./GroupManagementDialog";
 import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
+import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
 import { ProfileDialog } from "./ProfileDialog";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -122,6 +126,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
     () => loadNotificationPreferences(user.id),
+  );
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [requestingNotificationPermission, setRequestingNotificationPermission] = useState(false);
+  const [notificationPermissionMessage, setNotificationPermissionMessage] = useState<string | null>(
+    null,
   );
 
   const [showAdmin, setShowAdmin] = useState(false);
@@ -208,6 +217,34 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     notificationPreferencesRef.current = notificationPreferences;
     saveNotificationPreferences(user.id, notificationPreferences);
   }, [notificationPreferences, user.id]);
+
+  useEffect(() => {
+    if (notificationPreferences.desktop || !shouldShowNotificationPrompt(user.id)) return;
+    // 先让聊天界面稳定呈现，再显示一次性的权限说明，避免登录完成瞬间争抢注意力。
+    const timer = window.setTimeout(() => setShowNotificationPrompt(true), 1_200);
+    return () => window.clearTimeout(timer);
+  }, [notificationPreferences.desktop, user.id]);
+
+  const dismissNotificationPrompt = useCallback(() => {
+    markNotificationPromptHandled(user.id);
+    setShowNotificationPrompt(false);
+    setNotificationPermissionMessage(null);
+  }, [user.id]);
+
+  const enableDesktopNotifications = useCallback(async () => {
+    setRequestingNotificationPermission(true);
+    setNotificationPermissionMessage(null);
+    const result = await requestNotificationPermission();
+    setRequestingNotificationPermission(false);
+    markNotificationPromptHandled(user.id);
+    if (result.granted) {
+      setNotificationPreferences((current) => ({ ...current, desktop: true }));
+      setShowNotificationPrompt(false);
+      notify(result.message, "success");
+      return;
+    }
+    setNotificationPermissionMessage(result.message);
+  }, [notify, user.id]);
 
   useEffect(() => {
     const markVisibleConversationRead = () => {
@@ -1113,6 +1150,14 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setMessages([]);
             refreshConversationsInBackground();
           }}
+        />
+      )}
+      {showNotificationPrompt && (
+        <NotificationPermissionPrompt
+          busy={requestingNotificationPermission}
+          message={notificationPermissionMessage}
+          onEnable={() => void enableDesktopNotifications()}
+          onDismiss={dismissNotificationPrompt}
         />
       )}
       {toast && (

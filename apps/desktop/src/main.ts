@@ -14,7 +14,12 @@ import {
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from "electron";
-import type { DesktopNotificationInput, ServerConnectionResult, SetupState } from "./contracts";
+import type {
+  DesktopNotificationInput,
+  DesktopNotificationPermissionResult,
+  ServerConnectionResult,
+  SetupState,
+} from "./contracts";
 import { DEFAULT_SERVER_URL, normalizeServerUrl, serverHealthUrl } from "./server-url";
 
 const APP_NAME = "近聊";
@@ -457,6 +462,57 @@ function registerIpcHandlers(): void {
     if (!isConfiguredServerSender(event)) return;
     showSetupWindow();
   });
+
+  ipcMain.handle(
+    "desktop:request-notification-permission",
+    async (event): Promise<DesktopNotificationPermissionResult> => {
+      if (!isConfiguredServerSender(event)) {
+        return { granted: false, status: "failed", message: "不允许的通知授权请求" };
+      }
+      if (!Notification.isSupported()) {
+        return { granted: false, status: "unsupported", message: "当前系统不支持通知" };
+      }
+
+      // Electron 没有独立的通知授权 API。由用户点击触发一条确认通知，既向系统发起
+      // 首次授权请求，也能在授权成功后立即给出可见反馈。
+      return new Promise((resolve) => {
+        const notification = new Notification({
+          title: "近聊通知已开启",
+          body: "有新消息时，近聊会通过系统通知及时提醒你。",
+          icon: createProductIcon(64),
+        });
+        let settled = false;
+        let fallbackTimer: NodeJS.Timeout | null = null;
+        const finish = (result: DesktopNotificationPermissionResult) => {
+          if (settled) return;
+          settled = true;
+          if (fallbackTimer) clearTimeout(fallbackTimer);
+          resolve(result);
+        };
+        notification.once("show", () =>
+          finish({ granted: true, status: "granted", message: "系统通知已开启" }),
+        );
+        notification.once("failed", (_event, error) =>
+          finish({
+            granted: false,
+            status: "failed",
+            message: error || "系统未能显示通知，请检查系统通知设置",
+          }),
+        );
+        // 部分 Linux 通知服务不回传 show 事件；请求已交给系统时允许业务继续启用。
+        fallbackTimer = setTimeout(
+          () =>
+            finish({
+              granted: true,
+              status: "requested",
+              message: "已向系统请求通知权限",
+            }),
+          2_000,
+        );
+        notification.show();
+      });
+    },
+  );
 
   ipcMain.handle("desktop:show-notification", (event, input: DesktopNotificationInput) => {
     if (!isConfiguredServerSender(event) || !Notification.isSupported()) return false;

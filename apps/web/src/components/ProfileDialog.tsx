@@ -14,11 +14,18 @@ import {
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../api";
+import type { AvatarPreset } from "../avatar-presets";
 import type { FileQuota, User } from "../types";
 import { errorMessage } from "../utils/errors";
 import { formatBytes } from "../utils/format";
-import { type NotificationPreferences, playMessageSound } from "../utils/notifications";
+import {
+  getNotificationCapability,
+  type NotificationPreferences,
+  playMessageSound,
+  requestNotificationPermission,
+} from "../utils/notifications";
 import { Avatar } from "./Avatar";
+import { AvatarPresetPicker } from "./AvatarPresetPicker";
 
 interface ProfileDialogProps {
   user: User;
@@ -46,6 +53,7 @@ export function ProfileDialog({
   const [avatarColor, setAvatarColor] = useState(user.avatarColor);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
   const [updatingAvatar, setUpdatingAvatar] = useState(false);
+  const [selectingPresetId, setSelectingPresetId] = useState<string | null>(null);
   const [quota, setQuota] = useState<FileQuota | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -53,9 +61,8 @@ export function ProfileDialog({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
-  const [notificationPermission, setNotificationPermission] = useState<
-    NotificationPermission | "unsupported"
-  >(() => ("Notification" in window ? Notification.permission : "unsupported"));
+  const [notificationCapability, setNotificationCapability] = useState(getNotificationCapability);
+  const [requestingNotifications, setRequestingNotifications] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -67,13 +74,19 @@ export function ProfileDialog({
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !savingProfile && !changingPassword && !updatingAvatar) {
+      if (
+        event.key === "Escape" &&
+        !savingProfile &&
+        !changingPassword &&
+        !updatingAvatar &&
+        !requestingNotifications
+      ) {
         onClose();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [changingPassword, onClose, savingProfile, updatingAvatar]);
+  }, [changingPassword, onClose, requestingNotifications, savingProfile, updatingAvatar]);
 
   useEffect(
     () => () => {
@@ -82,7 +95,7 @@ export function ProfileDialog({
     [avatarPreviewUrl],
   );
 
-  const uploadAvatar = async (file: File | undefined) => {
+  const uploadAvatar = async (file: File | undefined, successText?: string) => {
     if (!file) return;
     if (!avatarContentTypes.has(file.type)) {
       setNotice({ tone: "error", text: "头像仅支持 GIF、PNG、JPG 和 WebP 图片" });
@@ -102,13 +115,31 @@ export function ProfileDialog({
       onUpdated(result.user);
       setNotice({
         tone: "success",
-        text: file.type === "image/gif" ? "GIF 动态头像已更新" : "头像已更新",
+        text: successText ?? (file.type === "image/gif" ? "GIF 动态头像已更新" : "头像已更新"),
       });
     } catch (error) {
       setNotice({ tone: "error", text: errorMessage(error, "头像上传失败") });
     } finally {
       setAvatarPreviewUrl(null);
       setUpdatingAvatar(false);
+    }
+  };
+
+  const selectPresetAvatar = async (preset: AvatarPreset) => {
+    setSelectingPresetId(preset.id);
+    setUpdatingAvatar(true);
+    setNotice(null);
+    try {
+      const response = await fetch(preset.src);
+      if (!response.ok) throw new Error("预设头像读取失败");
+      const blob = await response.blob();
+      const file = new File([blob], `${preset.id}.gif`, { type: "image/gif" });
+      await uploadAvatar(file, `已应用“${preset.label}”动态头像`);
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "预设头像应用失败") });
+    } finally {
+      setUpdatingAvatar(false);
+      setSelectingPresetId(null);
     }
   };
 
@@ -165,21 +196,19 @@ export function ProfileDialog({
       onNotificationPreferencesChanged({ ...notificationPreferences, desktop: false });
       return;
     }
-    if (!("Notification" in window)) {
-      setNotice({ tone: "error", text: "当前浏览器不支持桌面通知" });
-      return;
+    setRequestingNotifications(true);
+    try {
+      const result = await requestNotificationPermission();
+      setNotificationCapability(getNotificationCapability());
+      if (!result.granted) {
+        setNotice({ tone: "error", text: result.message });
+        return;
+      }
+      onNotificationPreferencesChanged({ ...notificationPreferences, desktop: true });
+      setNotice({ tone: "success", text: result.message });
+    } finally {
+      setRequestingNotifications(false);
     }
-    const permission =
-      Notification.permission === "default"
-        ? await Notification.requestPermission()
-        : Notification.permission;
-    setNotificationPermission(permission);
-    if (permission !== "granted") {
-      setNotice({ tone: "error", text: "浏览器未授予通知权限，请在站点设置中开启" });
-      return;
-    }
-    onNotificationPreferencesChanged({ ...notificationPreferences, desktop: true });
-    setNotice({ tone: "success", text: "桌面通知已开启" });
   };
 
   const toggleSound = () => {
@@ -197,7 +226,8 @@ export function ProfileDialog({
           event.target === event.currentTarget &&
           !savingProfile &&
           !changingPassword &&
-          !updatingAvatar
+          !updatingAvatar &&
+          !requestingNotifications
         ) {
           onClose();
         }
@@ -220,7 +250,9 @@ export function ProfileDialog({
           <button
             type="button"
             onClick={onClose}
-            disabled={savingProfile || changingPassword || updatingAvatar}
+            disabled={
+              savingProfile || changingPassword || updatingAvatar || requestingNotifications
+            }
             aria-label="关闭个人设置"
           >
             <X size={18} />
@@ -295,6 +327,11 @@ export function ProfileDialog({
                 }}
               />
             </div>
+            <AvatarPresetPicker
+              disabled={updatingAvatar}
+              selectingId={selectingPresetId}
+              onSelect={(preset) => void selectPresetAvatar(preset)}
+            />
             <label className="settings-field">
               <span>显示名称</span>
               <input
@@ -371,7 +408,7 @@ export function ProfileDialog({
               className="preference-row"
               type="button"
               onClick={() => void toggleDesktopNotifications()}
-              disabled={notificationPermission === "unsupported"}
+              disabled={notificationCapability === "unsupported" || requestingNotifications}
               aria-pressed={notificationPreferences.desktop}
             >
               <span className="preference-icon">
@@ -380,9 +417,13 @@ export function ProfileDialog({
               <span>
                 <strong>桌面通知</strong>
                 <small>
-                  {notificationPermission === "denied"
-                    ? "已被浏览器阻止"
-                    : "应用不在前台时显示新消息"}
+                  {requestingNotifications
+                    ? "正在请求系统授权"
+                    : notificationCapability === "denied"
+                      ? "已被浏览器阻止"
+                      : notificationCapability === "insecure"
+                        ? "局域网 HTTP 页面不可申请，请使用 HTTPS 或桌面客户端"
+                        : "应用不在前台时显示新消息"}
                 </small>
               </span>
               <i className={notificationPreferences.desktop ? "is-on" : ""} aria-hidden="true">

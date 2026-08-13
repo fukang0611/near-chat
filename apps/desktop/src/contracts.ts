@@ -16,3 +16,9 @@ export interface DesktopNotificationInput {
   body: string;
   conversationId: string;
 }
+
+export interface DesktopNotificationPermissionResult {
+  granted: boolean;
+  status: "granted" | "requested" | "unsupported" | "failed";
+  message: string;
+}
