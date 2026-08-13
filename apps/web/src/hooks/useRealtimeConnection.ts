@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { websocketUrl } from "../api";
-import type { Message, ReceiptChange } from "../types";
+import type { Message, NudgeEvent, ReceiptChange } from "../types";
 
 export type ConnectionState = "connected" | "connecting" | "offline";
 
@@ -14,6 +14,7 @@ interface RealtimeHandlers {
   onUnreadChanged: (conversationId: string, unreadCount: number) => void;
   onConversationChanged: (conversationId: string) => void;
   onReceiptChanged: (receipts: ReceiptChange[]) => void;
+  onNudgeReceived: (nudge: NudgeEvent) => void;
 }
 
 type RealtimeEvent =
@@ -24,7 +25,8 @@ type RealtimeEvent =
   | { type: "message.updated"; payload: { message: Message } }
   | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } }
   | { type: "conversation.changed"; payload: { conversationId: string } }
-  | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } };
+  | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } }
+  | { type: "nudge.received"; payload: { nudge: NudgeEvent } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -81,7 +83,20 @@ function isReceiptChange(value: unknown): value is ReceiptChange {
   );
 }
 
-function parseRealtimeEvent(raw: string): RealtimeEvent | null {
+function isNudgeEvent(value: unknown): value is NudgeEvent {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.conversationId === "string" &&
+    typeof value.senderId === "string" &&
+    typeof value.senderName === "string" &&
+    typeof value.senderAvatarColor === "string" &&
+    (value.senderAvatarUrl === null || typeof value.senderAvatarUrl === "string") &&
+    typeof value.createdAt === "string"
+  );
+}
+
+export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
   try {
     const event = JSON.parse(raw) as { type?: unknown; payload?: unknown };
     if (typeof event.type !== "string" || !isRecord(event.payload)) return null;
@@ -127,6 +142,8 @@ function parseRealtimeEvent(raw: string): RealtimeEvent | null {
         return Array.isArray(payload.receipts) && payload.receipts.every(isReceiptChange)
           ? { type: event.type, payload: { receipts: payload.receipts } }
           : null;
+      case "nudge.received":
+        return isNudgeEvent(payload) ? { type: event.type, payload: { nudge: payload } } : null;
       default:
         return null;
     }
@@ -187,6 +204,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "receipt.changed":
             current.onReceiptChanged(event.payload.receipts);
+            break;
+          case "nudge.received":
+            current.onNudgeReceived(event.payload.nudge);
             break;
         }
       };

@@ -2,6 +2,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronLeft,
+  Hand,
   Info,
   MessageCircleMore,
   Paperclip,
@@ -21,7 +22,7 @@ import {
 } from "react";
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
-import type { Attachment, Conversation, Message, User } from "../types";
+import type { Attachment, Conversation, Message, NudgeEvent, User } from "../types";
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
@@ -49,6 +50,7 @@ import { MessageComposer } from "./MessageComposer";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageTimeline } from "./MessageTimeline";
 import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
+import { NudgeNotice } from "./NudgeNotice";
 import { ProfileDialog } from "./ProfileDialog";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -145,6 +147,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
+  const [incomingNudge, setIncomingNudge] = useState<NudgeEvent | null>(null);
+  const [nudgingConversationId, setNudgingConversationId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const messageScrollRef = useRef<HTMLDivElement>(null);
@@ -198,6 +202,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     const timer = window.setTimeout(() => setToast(null), 4_200);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!incomingNudge) return;
+    const timer = window.setTimeout(() => setIncomingNudge(null), 4_200);
+    return () => window.clearTimeout(timer);
+  }, [incomingNudge]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
@@ -630,6 +640,37 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         }),
       );
     },
+    onNudgeReceived: (nudge) => {
+      setIncomingNudge(nudge);
+      const preferences = notificationPreferencesRef.current;
+      if (preferences.sound) void playMessageSound().catch(() => undefined);
+      if (document.visibilityState === "visible" || !preferences.desktop) return;
+
+      const body = `${nudge.senderName} 敲了敲你`;
+      if (window.nearChatDesktop) {
+        void window.nearChatDesktop
+          .showNotification({
+            title: "近聊提醒",
+            body,
+            conversationId: nudge.conversationId,
+          })
+          .catch(() => undefined);
+      } else if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          const notification = new Notification("近聊提醒", {
+            body,
+            tag: `near-chat:nudge:${nudge.senderId}`,
+          });
+          notification.onclick = () => {
+            window.focus();
+            setSelectedId(nudge.conversationId);
+            notification.close();
+          };
+        } catch {
+          // 原生提醒失败时，页面内的敲一下提示仍然可见。
+        }
+      }
+    },
   });
 
   const updateDraft = (value: string) => {
@@ -652,6 +693,30 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       setSidebarMode("recent");
     } catch (error) {
       notify(errorMessage(error, "会话创建失败"), "error");
+    }
+  };
+
+  const nudgePeer = async () => {
+    const conversation = selectedConversation;
+    const peer = conversation?.type === "DIRECT" ? conversation.peer : null;
+    if (!conversation || !peer) return;
+    if (connection !== "connected") {
+      notify("实时连接恢复后才能敲一下", "info");
+      return;
+    }
+    if (!peer.online) {
+      notify(`${peer.displayName} 当前不在线，可以直接给他留言`, "info");
+      return;
+    }
+
+    setNudgingConversationId(conversation.id);
+    try {
+      await api.nudgeConversation(conversation.id);
+      notify(`已敲了敲 ${peer.displayName}`, "success");
+    } catch (error) {
+      notify(errorMessage(error, "敲一下失败，请稍后重试"), "error");
+    } finally {
+      setNudgingConversationId((current) => (current === conversation.id ? null : current));
     }
   };
 
@@ -1056,8 +1121,25 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onLogout={() => void logout()}
       />
 
+      {incomingNudge && (
+        <NudgeNotice
+          key={incomingNudge.id}
+          nudge={incomingNudge}
+          currentConversationId={selectedId}
+          onOpen={(conversationId) => {
+            messageTargetRef.current = null;
+            setHighlightedMessageId(null);
+            selectedIdRef.current = conversationId;
+            setSelectedId(conversationId);
+            setSidebarMode("recent");
+            setIncomingNudge(null);
+          }}
+          onDismiss={() => setIncomingNudge(null)}
+        />
+      )}
+
       <section
-        className={`chat-surface ${draggingFile ? "is-dragging-file" : ""}`}
+        className={`chat-surface ${draggingFile ? "is-dragging-file" : ""} ${incomingNudge ? "has-incoming-nudge" : ""}`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -1104,6 +1186,23 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 onChange={onThemeChange}
                 className="mobile-theme-toggle"
               />
+              {selectedConversation.type === "DIRECT" && selectedConversation.peer && (
+                <button
+                  type="button"
+                  className={`header-search-button nudge-trigger ${nudgingConversationId === selectedConversation.id ? "is-knocking" : ""} ${!selectedConversation.peer.online ? "is-unavailable" : ""}`}
+                  onClick={() => void nudgePeer()}
+                  disabled={nudgingConversationId === selectedConversation.id}
+                  aria-label={`敲一下 ${selectedConversation.peer.displayName}`}
+                  title={
+                    selectedConversation.peer.online
+                      ? `敲一下 ${selectedConversation.peer.displayName}`
+                      : `${selectedConversation.peer.displayName} 当前不在线`
+                  }
+                >
+                  <Hand size={16} />
+                  <span>敲一下</span>
+                </button>
+              )}
               <button
                 type="button"
                 className="header-search-button"

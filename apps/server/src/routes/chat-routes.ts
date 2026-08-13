@@ -26,6 +26,11 @@ interface MemberRow {
   user_id: string;
 }
 
+interface DirectPeerRow {
+  id: string;
+  display_name: string;
+}
+
 interface ConversationMember {
   id: string;
   username: string;
@@ -192,6 +197,8 @@ function serializeConversation(row: ConversationRow, currentUserId: string, real
 /** 会话路由模块：联系人、单聊与群聊、消息搜索、发送和精确回执。 */
 export function createChatRouter(realtime: RealtimeHub) {
   const router = Router();
+  // “敲一下”不落库，只保留进程内的短暂冷却，避免连续点击打扰对方。
+  const lastNudgeAt = new Map<string, number>();
 
   router.get("/users", authenticate, async (request, response) => {
     const user = currentUser(request);
@@ -323,6 +330,47 @@ export function createChatRouter(realtime: RealtimeHub) {
       payload: { conversationId },
     });
     response.status(201).json({ conversationId });
+  });
+
+  router.post("/conversations/:conversationId/nudge", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const conversationId = z.string().uuid().parse(request.params.conversationId);
+    const peerResult = await query<DirectPeerRow>(
+      `SELECT peer.id, peer.display_name
+         FROM conversations conversation
+         JOIN conversation_members mine
+           ON mine.conversation_id = conversation.id AND mine.user_id = $2
+         JOIN conversation_members peer_member
+           ON peer_member.conversation_id = conversation.id AND peer_member.user_id <> $2
+         JOIN users peer ON peer.id = peer_member.user_id AND peer.enabled = TRUE
+        WHERE conversation.id = $1 AND conversation.type = 'DIRECT'`,
+      [conversationId, user.id],
+    );
+    const peer = peerResult.rows[0];
+    if (!peer) throw new ApiError(404, "单聊不存在或联系人已不可用");
+    if (!realtime.isOnline(peer.id)) throw new ApiError(409, `${peer.display_name} 当前不在线`);
+
+    const cooldownKey = `${user.id}:${peer.id}`;
+    const now = Date.now();
+    if (now - (lastNudgeAt.get(cooldownKey) ?? 0) < 3_000) {
+      throw new ApiError(429, "刚刚已经敲过了，稍等一下吧");
+    }
+
+    const delivered = realtime.sendToUsers([peer.id], {
+      type: "nudge.received",
+      payload: {
+        id: randomUUID(),
+        conversationId,
+        senderId: user.id,
+        senderName: user.displayName,
+        senderAvatarColor: user.avatarColor,
+        senderAvatarUrl: publicAvatarUrl(user.id, user.avatarObjectKey, user.avatarVersion),
+        createdAt: new Date(now).toISOString(),
+      },
+    });
+    if (delivered.length === 0) throw new ApiError(409, `${peer.display_name} 刚刚离线了`);
+    lastNudgeAt.set(cooldownKey, now);
+    response.status(204).send();
   });
 
   router.post("/conversations/groups", authenticate, async (request, response) => {

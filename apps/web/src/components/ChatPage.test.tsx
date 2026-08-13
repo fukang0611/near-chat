@@ -203,4 +203,25 @@ describe("ChatPage message scrolling", () => {
     );
     expect(await screen.findByText("已投递给 周远")).toBeTruthy();
   });
+
+  it("从在线单聊头部发送不落库的敲一下提醒", async () => {
+    const user = userEvent.setup();
+    const nudgeConversation = vi.spyOn(api, "nudgeConversation").mockResolvedValue(undefined);
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("conversation-one 的最新消息");
+    await user.click(screen.getByRole("button", { name: /周远/ }));
+    await user.click(await screen.findByRole("button", { name: "敲一下 周远" }));
+
+    expect(nudgeConversation).toHaveBeenCalledWith("conversation-direct");
+    expect(await screen.findByText("已敲了敲 周远")).toBeTruthy();
+  });
 });

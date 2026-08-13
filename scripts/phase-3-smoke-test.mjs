@@ -165,6 +165,28 @@ try {
   );
 
   bobSocket = await connectRealtime(bob.token);
+  const direct = await request(`/api/conversations/direct/${bob.user.id}`, {
+    method: "POST",
+    headers: auth(alice.token, false),
+  });
+  const nudgeReceived = waitForRealtimeMessage(
+    bobSocket,
+    (event) =>
+      event.type === "nudge.received" &&
+      event.payload?.conversationId === direct.conversationId &&
+      event.payload?.senderId === alice.user.id,
+  );
+  await request(`/api/conversations/${direct.conversationId}/nudge`, {
+    method: "POST",
+    headers: auth(alice.token, false),
+  });
+  await nudgeReceived;
+  await request(
+    `/api/conversations/${direct.conversationId}/nudge`,
+    { method: "POST", headers: auth(alice.token, false) },
+    429,
+  );
+
   const realtimeUpdate = waitForRealtimeMessage(
     bobSocket,
     (event) => event.type === "message.updated" && event.payload?.message?.id === source.id,
@@ -285,7 +307,7 @@ try {
   recalledAttachmentId = null;
 
   console.log(
-    "NearChat phase-3 smoke passed: cursor, reply, recall, realtime and idempotent retry are healthy",
+    "NearChat phase-3 smoke passed: cursor, reply, recall, nudge, realtime and idempotent retry are healthy",
   );
 } finally {
   bobSocket?.close();

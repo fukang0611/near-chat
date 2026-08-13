@@ -86,6 +86,17 @@ export interface ReceiptChange {
   receipt: ReceiptSummary;
 }
 
+/** 不落库的实时轻提醒，只在接收方当前连接中短暂存在。 */
+export interface NudgeEvent {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  senderAvatarColor: string;
+  senderAvatarUrl: string | null;
+  createdAt: string;
+}
+
 export interface AdminUser extends User {
   role: "ADMIN" | "USER";
   enabled: boolean;

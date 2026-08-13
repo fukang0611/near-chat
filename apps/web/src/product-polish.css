@@ -6377,6 +6377,310 @@ body,
   }
 }
 
+/* 敲一下：非阻塞的近场提醒，动效只影响浮层与聊天表面，不打断输入。 */
+.app-frame {
+  position: relative;
+}
+
+.header-search-button.nudge-trigger {
+  width: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: #6658c9;
+  white-space: nowrap;
+}
+
+.nudge-trigger > span {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.nudge-trigger.is-unavailable {
+  color: #999ca4;
+}
+
+.nudge-trigger.is-knocking svg {
+  animation: nudge-hand-knock 420ms cubic-bezier(0.22, 0.76, 0.2, 1) infinite;
+  transform-origin: 18% 82%;
+}
+
+.nudge-notice {
+  position: fixed;
+  z-index: 70;
+  top: 22px;
+  left: 50%;
+  width: min(390px, calc(100vw - 32px));
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  padding: 11px 11px 11px 14px;
+  border: 1px solid rgba(218, 217, 232, 0.82);
+  border-radius: 19px;
+  color: #303137;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 18px 48px rgba(41, 38, 71, 0.16),
+    inset 0 1px rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(24px) saturate(150%);
+  pointer-events: auto;
+  animation: nudge-notice-in 320ms cubic-bezier(0.2, 0.78, 0.24, 1) both;
+}
+
+.nudge-notice::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #7567eb, #54bea4);
+  content: "";
+  transform-origin: left;
+  animation: nudge-notice-life 4.2s linear both;
+}
+
+.nudge-avatar {
+  position: relative;
+  width: 43px;
+  height: 43px;
+  display: grid;
+  flex: none;
+  place-items: center;
+}
+
+.nudge-avatar > i {
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(103, 87, 232, 0.34);
+  border-radius: 38%;
+  opacity: 0;
+  animation: nudge-avatar-ring 1.5s ease-out infinite;
+}
+
+.nudge-avatar > i:nth-child(2) {
+  animation-delay: 480ms;
+}
+
+.nudge-hand {
+  position: absolute;
+  right: -2px;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  color: white;
+  background: #6757e8;
+  box-shadow: 0 3px 8px rgba(67, 54, 171, 0.24);
+  animation: nudge-hand-knock 620ms cubic-bezier(0.22, 0.76, 0.2, 1) 2;
+  transform-origin: 18% 82%;
+}
+
+.nudge-copy {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nudge-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.nudge-copy small {
+  color: #8d9098;
+  font-size: 10px;
+}
+
+.nudge-open,
+.nudge-dismiss {
+  display: grid;
+  flex: none;
+  place-items: center;
+  border: 0;
+}
+
+.nudge-open {
+  grid-auto-flow: column;
+  gap: 4px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: #5c4ed1;
+  background: rgba(103, 87, 232, 0.09);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.nudge-open:hover {
+  background: rgba(103, 87, 232, 0.15);
+}
+
+.nudge-dismiss {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: #9699a1;
+  background: transparent;
+}
+
+.nudge-dismiss:hover {
+  color: #4e5057;
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.chat-surface.has-incoming-nudge {
+  animation: nudge-surface 380ms cubic-bezier(0.22, 0.78, 0.2, 1) both;
+}
+
+@keyframes nudge-notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -12px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@keyframes nudge-notice-life {
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes nudge-avatar-ring {
+  0% {
+    opacity: 0.48;
+    transform: scale(0.78);
+  }
+  78%,
+  100% {
+    opacity: 0;
+    transform: scale(1.42);
+  }
+}
+
+@keyframes nudge-hand-knock {
+  0%,
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+  45% {
+    transform: rotate(-18deg) translateY(-1px);
+  }
+}
+
+@keyframes nudge-surface {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  28% {
+    transform: translateX(-2px);
+  }
+  58% {
+    transform: translateX(2px);
+  }
+}
+
+:root[data-theme="dark"] .header-search-button.nudge-trigger {
+  color: #b8aff7;
+}
+
+:root[data-theme="dark"] .nudge-trigger.is-unavailable {
+  color: #777b85;
+}
+
+:root[data-theme="dark"] .nudge-notice {
+  border-color: rgba(255, 255, 255, 0.09);
+  color: #ececf0;
+  background: rgba(39, 40, 47, 0.92);
+  box-shadow:
+    0 20px 54px rgba(0, 0, 0, 0.36),
+    inset 0 1px rgba(255, 255, 255, 0.06);
+}
+
+:root[data-theme="dark"] .nudge-hand {
+  border-color: #292a31;
+  background: #8d7df2;
+}
+
+:root[data-theme="dark"] .nudge-copy small {
+  color: #999da7;
+}
+
+:root[data-theme="dark"] .nudge-open {
+  color: #c6bfff;
+  background: rgba(143, 126, 245, 0.13);
+}
+
+:root[data-theme="dark"] .nudge-open:hover {
+  background: rgba(143, 126, 245, 0.2);
+}
+
+:root[data-theme="dark"] .nudge-dismiss {
+  color: #9397a1;
+}
+
+:root[data-theme="dark"] .nudge-dismiss:hover {
+  color: #e2e3e7;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+@media (max-width: 720px) {
+  .header-search-button.nudge-trigger {
+    width: 38px;
+    padding: 0;
+  }
+
+  .nudge-trigger > span {
+    display: none;
+  }
+
+  .nudge-notice {
+    top: 12px;
+    width: calc(100vw - 24px);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .nudge-notice {
+    background: #fff;
+    backdrop-filter: none;
+  }
+
+  :root[data-theme="dark"] .nudge-notice {
+    background: #27282f;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nudge-notice {
+    animation: none;
+    transform: translateX(-50%);
+  }
+
+  .nudge-notice::after,
+  .nudge-avatar > i,
+  .nudge-hand,
+  .nudge-trigger.is-knocking svg,
+  .chat-surface.has-incoming-nudge {
+    animation: none;
+  }
+}
+
 /* 头像投递：拖拽内容进入单聊/联系人时，用目标行本身承接操作反馈。 */
 .conversation-item {
   position: relative;

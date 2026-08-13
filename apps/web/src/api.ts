@@ -88,6 +88,8 @@ export const api = {
     request<{ conversationId: string }>(`/api/conversations/direct/${userId}`, {
       method: "POST",
     }),
+  nudgeConversation: (conversationId: string) =>
+    request<void>(`/api/conversations/${conversationId}/nudge`, { method: "POST" }),
   createGroup: (name: string, memberIds: string[]) =>
     request<{ conversationId: string }>("/api/conversations/groups", {
       method: "POST",
