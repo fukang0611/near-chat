@@ -10,6 +10,7 @@ import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
 import { createFileRouter } from "./routes/file-routes.js";
+import { createTeamRadarRouter } from "./routes/team-radar-routes.js";
 
 /**
  * 组装 NearChat HTTP 应用。
@@ -44,6 +45,7 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createAuthRouter(realtime));
   app.use("/api", createAvatarRouter(realtime));
   app.use("/api", createChatRouter(realtime));
+  app.use("/api", createTeamRadarRouter(realtime));
   app.use("/api", createFileRouter());
   app.use("/api", createAdminRouter(realtime));
   app.use("/api", (_request, response) => {

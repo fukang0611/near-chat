@@ -5,6 +5,7 @@ import {
   LogOut,
   MessageCircleMore,
   MoreHorizontal,
+  Radar,
   Radio,
   Search,
   Send,
@@ -105,6 +106,7 @@ interface ChatSidebarProps {
   onOpenDirect: (userId: string) => void;
   onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
+  onOpenTeamRadar: () => void;
   onOpenProfile: () => void;
   onOpenAdmin: () => void;
   onLogout: () => void;
@@ -146,6 +148,7 @@ export function ChatSidebar({
   onOpenDirect,
   onDropToContact,
   onCreateGroup,
+  onOpenTeamRadar,
   onOpenProfile,
   onOpenAdmin,
   onLogout,
@@ -315,6 +318,18 @@ export function ChatSidebar({
         </div>
         <div className="sidebar-top-actions">
           <ThemeToggle compact theme={theme} onChange={onThemeChange} />
+          <button
+            className="icon-button team-radar-trigger"
+            type="button"
+            onClick={onOpenTeamRadar}
+            aria-label={
+              unreadTotal > 0 ? `打开今日团队雷达，${unreadTotal} 条待读` : "打开今日团队雷达"
+            }
+            title="今日团队雷达"
+          >
+            <Radar size={18} />
+            {unreadTotal > 0 && <i />}
+          </button>
           <div className="system-menu-anchor" ref={systemMenuRef}>
             <button
               className="icon-button"

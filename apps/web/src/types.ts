@@ -105,6 +105,41 @@ export interface ReceiptChange {
   receipt: ReceiptSummary;
 }
 
+export interface TeamRadarMember {
+  id: string;
+  username: string;
+  displayName: string;
+  avatarColor: string;
+  avatarUrl: string | null;
+  status: UserStatus | null;
+}
+
+export interface TeamRadarMessageSignal {
+  type: MessageKind;
+  text: string | null;
+  senderName: string;
+}
+
+export interface TeamRadar {
+  generatedAt: string;
+  dayStartedAt: string;
+  totalMemberCount: number;
+  onlineMembers: TeamRadarMember[];
+  todayMessageCount: number;
+  activeConversations: Array<{
+    conversationId: string;
+    messageCount: number;
+    lastActivityAt: string;
+    lastMessage: TeamRadarMessageSignal;
+  }>;
+  unreadConversations: Array<{
+    conversationId: string;
+    unreadCount: number;
+    latestUnreadAt: string;
+    lastMessage: TeamRadarMessageSignal;
+  }>;
+}
+
 /** 不落库的实时轻提醒，只在接收方当前连接中短暂存在。 */
 export interface NudgeEvent {
   id: string;

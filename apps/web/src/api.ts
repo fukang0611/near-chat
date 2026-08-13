@@ -6,6 +6,7 @@ import type {
   FileQuota,
   Message,
   MessagePage,
+  TeamRadar,
   User,
 } from "./types";
 
@@ -84,6 +85,10 @@ export const api = {
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
   users: () => request<{ users: User[] }>("/api/users"),
   conversations: () => request<{ conversations: Conversation[] }>("/api/conversations"),
+  teamRadar: (timezoneOffsetMinutes = new Date().getTimezoneOffset()) => {
+    const query = new URLSearchParams({ timezoneOffsetMinutes: String(timezoneOffsetMinutes) });
+    return request<TeamRadar>(`/api/team/radar?${query}`);
+  },
   directConversation: (userId: string) =>
     request<{ conversationId: string }>(`/api/conversations/direct/${userId}`, {
       method: "POST",

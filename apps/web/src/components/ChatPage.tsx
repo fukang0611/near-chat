@@ -58,6 +58,7 @@ import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
 import { NudgeNotice } from "./NudgeNotice";
 import { ProfileDialog } from "./ProfileDialog";
 import { ThemeToggle } from "./ThemeToggle";
+import { TeamRadarDialog } from "./TeamRadarDialog";
 import { UserStatusBubble } from "./UserStatusBubble";
 
 interface ChatPageProps {
@@ -161,6 +162,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
+  const [showTeamRadar, setShowTeamRadar] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
   const [incomingNudge, setIncomingNudge] = useState<NudgeEvent | null>(null);
@@ -1289,6 +1291,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onOpenDirect={(peerId) => void openDirect(peerId)}
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
+        onOpenTeamRadar={() => setShowTeamRadar(true)}
         onOpenProfile={() => setShowProfile(true)}
         onOpenAdmin={() => setShowAdmin(true)}
         onLogout={() => void logout()}
@@ -1546,6 +1549,19 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setMessageLoadVersion((current) => current + 1);
             setSidebarMode("recent");
             setShowMessageSearch(false);
+          }}
+        />
+      )}
+      {showTeamRadar && (
+        <TeamRadarDialog
+          conversations={conversations}
+          currentUserId={user.id}
+          onClose={() => setShowTeamRadar(false)}
+          onOpenConversation={(conversationId) => {
+            messageTargetRef.current = null;
+            setHighlightedMessageId(null);
+            setSelectedId(conversationId);
+            setSidebarMode("recent");
           }}
         />
       )}

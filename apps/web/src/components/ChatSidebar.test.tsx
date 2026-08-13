@@ -60,6 +60,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ChatSidebar>> = 
       onOpenDirect={vi.fn()}
       onDropToContact={vi.fn()}
       onCreateGroup={vi.fn()}
+      onOpenTeamRadar={vi.fn()}
       onOpenProfile={vi.fn()}
       onOpenAdmin={vi.fn()}
       onLogout={vi.fn()}
@@ -103,6 +104,15 @@ describe("ChatSidebar", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "系统信息" })).toBeNull();
+  });
+
+  it("全局雷达入口可直接打开今日团队概览", async () => {
+    const onOpenTeamRadar = vi.fn();
+    renderSidebar({ onOpenTeamRadar });
+
+    await userEvent.click(screen.getByRole("button", { name: "打开今日团队雷达" }));
+
+    expect(onOpenTeamRadar).toHaveBeenCalledOnce();
   });
 
   it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
