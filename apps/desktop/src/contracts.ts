@@ -37,3 +37,8 @@ export interface DesktopClipboardRelayStatus {
   accelerator: string;
   message: string;
 }
+
+export interface DesktopIslandStatus {
+  enabled: boolean;
+  visible: boolean;
+}

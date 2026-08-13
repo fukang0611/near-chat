@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   ClipboardPaste,
   HardDrive,
   LogOut,
@@ -151,19 +152,25 @@ export function ChatSidebar({
   const [showSystemMenu, setShowSystemMenu] = useState(false);
   const [clipboardRelayStatus, setClipboardRelayStatus] =
     useState<DesktopClipboardRelayStatus | null>(null);
+  const [desktopIslandStatus, setDesktopIslandStatus] = useState<DesktopIslandStatus | null>(null);
   const [contactDropTargetId, setContactDropTargetId] = useState<string | null>(null);
   const systemMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
-    void window.nearChatDesktop
-      ?.getClipboardRelayStatus()
-      .then((status) => {
-        if (active) setClipboardRelayStatus(status);
-      })
-      .catch(() => undefined);
+    const desktop = window.nearChatDesktop;
+    void desktop?.getClipboardRelayStatus().then((status) => {
+      if (active) setClipboardRelayStatus(status);
+    });
+    void desktop?.getDesktopIslandStatus?.().then((status) => {
+      if (active) setDesktopIslandStatus(status);
+    });
+    const unsubscribe = desktop?.onDesktopIslandStatusChanged?.((status) => {
+      if (active) setDesktopIslandStatus(status);
+    });
     return () => {
       active = false;
+      unsubscribe?.();
     };
   }, []);
 
@@ -363,6 +370,27 @@ export function ChatSidebar({
                         <strong>剪贴板接力</strong>
                         <small>{clipboardRelayStatus?.message ?? "正在读取快捷键状态"}</small>
                       </span>
+                    </button>
+                    <button
+                      className="system-settings-row desktop-island-row"
+                      type="button"
+                      aria-pressed={desktopIslandStatus?.enabled ?? false}
+                      onClick={() => {
+                        void window.nearChatDesktop
+                          ?.setDesktopIslandEnabled(!(desktopIslandStatus?.enabled ?? false))
+                          .then(setDesktopIslandStatus);
+                      }}
+                    >
+                      <AppWindow size={16} />
+                      <span>
+                        <strong>桌面浮岛</strong>
+                        <small>
+                          {desktopIslandStatus?.enabled
+                            ? "已置顶显示，可快速查看与回复"
+                            : "开启置顶的最近会话小窗"}
+                        </small>
+                      </span>
+                      <i className={desktopIslandStatus?.enabled ? "is-on" : ""} />
                     </button>
                     <button
                       className="system-settings-row"

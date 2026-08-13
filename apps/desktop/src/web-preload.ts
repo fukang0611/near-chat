@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   DesktopClipboardRelayPayload,
   DesktopClipboardRelayStatus,
+  DesktopIslandStatus,
   DesktopNotificationInput,
   DesktopNotificationPermissionResult,
 } from "./contracts";
@@ -20,6 +21,12 @@ contextBridge.exposeInMainWorld("nearChatDesktop", {
   getClipboardRelayStatus: (): Promise<DesktopClipboardRelayStatus> =>
     ipcRenderer.invoke("desktop:get-clipboard-relay-status"),
   requestClipboardRelay: (): Promise<void> => ipcRenderer.invoke("desktop:request-clipboard-relay"),
+  getDesktopIslandStatus: (): Promise<DesktopIslandStatus> =>
+    ipcRenderer.invoke("desktop:get-island-status"),
+  setDesktopIslandEnabled: (enabled: boolean): Promise<DesktopIslandStatus> =>
+    ipcRenderer.invoke("desktop:set-island-enabled", enabled),
+  openMainWindow: (conversationId?: string): Promise<void> =>
+    ipcRenderer.invoke("desktop:open-main-window", conversationId),
   onClipboardRelay: (listener: (payload: DesktopClipboardRelayPayload) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: DesktopClipboardRelayPayload) => {
       listener(payload);
@@ -33,5 +40,12 @@ contextBridge.exposeInMainWorld("nearChatDesktop", {
     };
     ipcRenderer.on("desktop:notification-clicked", handler);
     return () => ipcRenderer.removeListener("desktop:notification-clicked", handler);
+  },
+  onDesktopIslandStatusChanged: (listener: (status: DesktopIslandStatus) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, status: DesktopIslandStatus) => {
+      listener(status);
+    };
+    ipcRenderer.on("desktop:island-status-changed", handler);
+    return () => ipcRenderer.removeListener("desktop:island-status-changed", handler);
   },
 });

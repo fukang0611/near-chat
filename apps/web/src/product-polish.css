@@ -918,6 +918,443 @@ html[data-near-chat-desktop="true"] .window-dots {
   font-size: 10px;
 }
 
+.desktop-island-row > i {
+  width: 28px;
+  height: 17px;
+  position: relative;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.desktop-island-row > i::after {
+  content: "";
+  width: 11px;
+  height: 11px;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgba(28, 30, 37, 0.24);
+  transition: transform 180ms cubic-bezier(0.22, 0.8, 0.3, 1);
+}
+
+.desktop-island-row > i.is-on {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.desktop-island-row > i.is-on::after {
+  transform: translateX(11px);
+}
+
+/* Electron 桌面浮岛：高密度、可拖动、始终置顶的快速会话表面。 */
+body.desktop-island-body {
+  min-width: 0;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+
+.desktop-island {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #eef0f6;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% -8%, rgba(103, 87, 232, 0.28), transparent 33%),
+    linear-gradient(155deg, #23242b 0%, #18191e 62%);
+  box-shadow:
+    0 24px 70px rgba(5, 7, 12, 0.48),
+    inset 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.desktop-island-titlebar {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 9px;
+  padding: 0 12px 0 15px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(20, 21, 26, 0.7);
+  -webkit-app-region: drag;
+}
+
+.desktop-island-brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.desktop-island-brand svg {
+  color: #a99cff;
+}
+
+.desktop-island-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #8e919c;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 9px;
+}
+
+.desktop-island-connection.connected {
+  color: #6ed5ac;
+}
+
+.desktop-island-window-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-island-window-actions button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: #858894;
+  background: transparent;
+}
+
+.desktop-island-window-actions button:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.desktop-island-content {
+  min-height: 0;
+  display: grid;
+  flex: 1;
+  grid-template-rows: auto auto auto minmax(100px, 1fr) auto auto;
+  gap: 10px;
+  padding: 14px;
+}
+
+.desktop-island-overview > span,
+.desktop-island-chat-head > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.desktop-island-overview strong {
+  font-size: 11px;
+  font-weight: 660;
+}
+
+.desktop-island-overview small {
+  color: #777a85;
+  font-size: 9px;
+}
+
+.desktop-island-conversations {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.desktop-island-conversations > button {
+  min-width: 0;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 13px;
+  color: #b8bac4;
+  background: rgba(255, 255, 255, 0.035);
+  text-align: left;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.desktop-island-conversations > button:hover {
+  border-color: rgba(169, 156, 255, 0.26);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.desktop-island-conversations > button.is-selected {
+  border-color: rgba(169, 156, 255, 0.48);
+  background: rgba(103, 87, 232, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(169, 156, 255, 0.06);
+}
+
+.desktop-island-conversations > button > span:not(.avatar) {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.desktop-island-conversations strong,
+.desktop-island-conversations small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-island-conversations strong {
+  color: #e8e9ef;
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.desktop-island-conversations small {
+  color: #777a85;
+  font-size: 9px;
+}
+
+.desktop-island-conversations b {
+  min-width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 99px;
+  color: white;
+  background: #6656e8;
+  font-size: 8px;
+}
+
+.desktop-island-loading,
+.desktop-island-empty {
+  grid-column: 1 / -1;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #747782;
+  font-size: 10px;
+}
+
+.desktop-island-chat-head {
+  display: flex;
+  align-items: end;
+  padding-top: 2px;
+}
+
+.desktop-island-chat-head strong {
+  font-size: 12px;
+}
+
+.desktop-island-chat-head small {
+  color: #777a85;
+  font-size: 9px;
+}
+
+.desktop-island-chat-head button {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  color: #9286ef;
+  background: transparent;
+  font-size: 9px;
+}
+
+.desktop-island-chat-head button:hover {
+  color: #b3a9ff;
+}
+
+.desktop-island-messages {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 4px 5px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  scrollbar-width: none;
+  user-select: text;
+}
+
+.desktop-island-messages::-webkit-scrollbar {
+  display: none;
+}
+
+.desktop-island-message {
+  max-width: 84%;
+  align-self: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 6px;
+}
+
+.desktop-island-message.is-own {
+  align-self: flex-end;
+}
+
+.desktop-island-message > small {
+  grid-column: 1 / -1;
+  padding-left: 4px;
+  color: #777a85;
+  font-size: 8px;
+}
+
+.desktop-island-message > span {
+  overflow: hidden;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 11px 11px 11px 4px;
+  color: #d7d9e1;
+  background: rgba(255, 255, 255, 0.055);
+  font-size: 10px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.desktop-island-message.is-own > span {
+  border-color: rgba(145, 129, 246, 0.28);
+  border-radius: 11px 11px 4px;
+  background: rgba(103, 87, 232, 0.2);
+}
+
+.desktop-island-message time {
+  align-self: end;
+  padding-bottom: 2px;
+  color: #636670;
+  font-size: 8px;
+}
+
+.desktop-island-message-empty {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  color: #626570;
+  font-size: 9px;
+}
+
+.desktop-island-error {
+  overflow: hidden;
+  color: #e896a1;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-island-composer {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 5px 5px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.desktop-island-composer:focus-within {
+  border-color: rgba(169, 156, 255, 0.42);
+  box-shadow: 0 0 0 3px rgba(103, 87, 232, 0.09);
+}
+
+.desktop-island-composer input {
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: #e7e8ed;
+  background: transparent;
+  font-size: 10px;
+  user-select: text;
+}
+
+.desktop-island-composer input::placeholder {
+  color: #676a74;
+}
+
+.desktop-island-composer button {
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: white;
+  background: linear-gradient(145deg, #7767ef, #5d4bde);
+  box-shadow: 0 7px 16px rgba(76, 60, 199, 0.28);
+}
+
+.desktop-island-signed-out {
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 34px;
+  text-align: center;
+}
+
+.desktop-island-signed-out-mark {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 5px;
+  border-radius: 17px;
+  color: #b2a8ff;
+  background: rgba(103, 87, 232, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(169, 156, 255, 0.16);
+}
+
+.desktop-island-signed-out strong {
+  font-size: 15px;
+}
+
+.desktop-island-signed-out p {
+  max-width: 220px;
+  margin: 0 0 12px;
+  color: #777a85;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.desktop-island-signed-out button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 13px;
+  border: 0;
+  border-radius: 10px;
+  color: white;
+  background: #6757e8;
+  font-size: 10px;
+}
+
+.desktop-island-signed-out button.is-secondary {
+  color: #858894;
+  background: transparent;
+}
+
 .system-status-row > i {
   width: 8px;
   height: 8px;

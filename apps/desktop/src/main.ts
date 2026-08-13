@@ -11,33 +11,46 @@ import {
   Menu,
   nativeImage,
   Notification,
+  screen,
   session,
   shell,
   Tray,
   type IpcMainInvokeEvent,
+  type MenuItem,
   type MenuItemConstructorOptions,
 } from "electron";
 import type {
   DesktopClipboardRelayStatus,
+  DesktopIslandStatus,
   DesktopNotificationInput,
   DesktopNotificationPermissionResult,
   ServerConnectionResult,
   SetupState,
 } from "./contracts";
 import { buildClipboardRelayPayload, CLIPBOARD_RELAY_ACCELERATOR } from "./clipboard-relay";
+import {
+  DEFAULT_ISLAND_PREFERENCES,
+  normalizeIslandPreferences,
+  resolveIslandBounds,
+  type DesktopIslandPreferences,
+} from "./island-state";
 import { DEFAULT_SERVER_URL, normalizeServerUrl, serverHealthUrl } from "./server-url";
 
 const APP_NAME = "近聊";
 const CONNECTION_TIMEOUT_MS = 5_000;
 const CONFIG_FILE_NAME = "desktop-config.json";
+const ISLAND_CONFIG_FILE_NAME = "desktop-island.json";
 
 let mainWindow: BrowserWindow | null = null;
 let setupWindow: BrowserWindow | null = null;
+let desktopIslandWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let configuredServerUrl: string | null = null;
 let setupErrorMessage: string | null = null;
 let isQuitting = false;
 let clipboardRelayRegistered = false;
+let desktopIslandPreferences: DesktopIslandPreferences = { ...DEFAULT_ISLAND_PREFERENCES };
+let islandPositionSaveTimer: NodeJS.Timeout | null = null;
 
 const userDataOverride = process.env.NEAR_CHAT_DESKTOP_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", path.resolve(userDataOverride));
@@ -68,6 +81,29 @@ const squirrelEventHandled = handleSquirrelEvent();
 
 function configFilePath(): string {
   return path.join(app.getPath("userData"), CONFIG_FILE_NAME);
+}
+
+function islandConfigFilePath(): string {
+  return path.join(app.getPath("userData"), ISLAND_CONFIG_FILE_NAME);
+}
+
+async function readIslandPreferences(): Promise<DesktopIslandPreferences> {
+  try {
+    return normalizeIslandPreferences(
+      JSON.parse(await fs.readFile(islandConfigFilePath(), "utf8")),
+    );
+  } catch {
+    return { ...DEFAULT_ISLAND_PREFERENCES };
+  }
+}
+
+async function saveIslandPreferences(): Promise<void> {
+  await fs.mkdir(app.getPath("userData"), { recursive: true });
+  await fs.writeFile(
+    islandConfigFilePath(),
+    `${JSON.stringify(desktopIslandPreferences, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function readConfiguredServerUrl(): Promise<string | null> {
@@ -129,7 +165,9 @@ function isSetupSender(event: IpcMainInvokeEvent): boolean {
 }
 
 function isConfiguredServerSender(event: IpcMainInvokeEvent): boolean {
-  if (!configuredServerUrl || mainWindow?.webContents !== event.sender) return false;
+  const isKnownWindow =
+    mainWindow?.webContents === event.sender || desktopIslandWindow?.webContents === event.sender;
+  if (!configuredServerUrl || !isKnownWindow) return false;
   try {
     return new URL(event.sender.getURL()).origin === new URL(configuredServerUrl).origin;
   } catch {
@@ -188,6 +226,118 @@ function showMainWindow(): void {
   mainWindow?.focus();
 }
 
+function desktopIslandStatus(): DesktopIslandStatus {
+  return {
+    enabled: desktopIslandPreferences.enabled,
+    visible: Boolean(desktopIslandWindow?.isVisible()),
+  };
+}
+
+function broadcastDesktopIslandStatus(): void {
+  const status = desktopIslandStatus();
+  for (const window of [mainWindow, desktopIslandWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send("desktop:island-status-changed", status);
+    }
+  }
+}
+
+function desktopIslandUrl(): string {
+  if (!configuredServerUrl) throw new Error("尚未配置服务器");
+  const url = new URL(configuredServerUrl);
+  url.searchParams.set("desktopIsland", "1");
+  return url.toString();
+}
+
+function scheduleIslandPositionSave(): void {
+  if (!desktopIslandWindow || desktopIslandWindow.isDestroyed()) return;
+  if (islandPositionSaveTimer) clearTimeout(islandPositionSaveTimer);
+  islandPositionSaveTimer = setTimeout(() => {
+    islandPositionSaveTimer = null;
+    if (!desktopIslandWindow || desktopIslandWindow.isDestroyed()) return;
+    const bounds = desktopIslandWindow.getBounds();
+    desktopIslandPreferences = { ...desktopIslandPreferences, x: bounds.x, y: bounds.y };
+    void saveIslandPreferences();
+  }, 240);
+}
+
+function createDesktopIslandWindow(): BrowserWindow {
+  if (desktopIslandWindow && !desktopIslandWindow.isDestroyed()) return desktopIslandWindow;
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const displays = screen.getAllDisplays();
+  const bounds = resolveIslandBounds(
+    desktopIslandPreferences,
+    [primaryDisplay, ...displays.filter((display) => display.id !== primaryDisplay.id)].map(
+      (display) => display.workArea,
+    ),
+  );
+  desktopIslandWindow = new BrowserWindow({
+    ...bounds,
+    show: false,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    roundedCorners: true,
+    backgroundColor: "#17181d",
+    icon: createProductIcon(64),
+    title: "近聊浮岛",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, "web-preload.js"),
+    },
+  });
+  desktopIslandWindow.setAlwaysOnTop(true, "floating");
+  desktopIslandWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  protectRemoteNavigation(desktopIslandWindow);
+  desktopIslandWindow.on("move", scheduleIslandPositionSave);
+  desktopIslandWindow.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    void setDesktopIslandEnabled(false);
+  });
+  desktopIslandWindow.on("closed", () => {
+    desktopIslandWindow = null;
+  });
+  return desktopIslandWindow;
+}
+
+async function showDesktopIsland(): Promise<void> {
+  if (!configuredServerUrl) {
+    showSetupWindow("请先连接近聊服务器，再开启桌面浮岛");
+    return;
+  }
+  const window = createDesktopIslandWindow();
+  try {
+    const targetUrl = desktopIslandUrl();
+    if (window.webContents.getURL() !== targetUrl) await window.loadURL(targetUrl);
+    window.showInactive();
+    broadcastDesktopIslandStatus();
+  } catch {
+    window.hide();
+    desktopIslandPreferences = { ...desktopIslandPreferences, enabled: false };
+    await saveIslandPreferences();
+    refreshTrayMenu();
+    configureApplicationMenu();
+    broadcastDesktopIslandStatus();
+  }
+}
+
+async function setDesktopIslandEnabled(enabled: boolean): Promise<DesktopIslandStatus> {
+  desktopIslandPreferences = { ...desktopIslandPreferences, enabled };
+  await saveIslandPreferences();
+  if (enabled) await showDesktopIsland();
+  else desktopIslandWindow?.hide();
+  refreshTrayMenu();
+  configureApplicationMenu();
+  broadcastDesktopIslandStatus();
+  return desktopIslandStatus();
+}
+
 function clipboardRelayStatus(): DesktopClipboardRelayStatus {
   const shortcutLabel = process.platform === "darwin" ? "⌘⇧V" : "Ctrl+Shift+V";
   return clipboardRelayRegistered
@@ -244,6 +394,12 @@ function refreshTrayMenu(): void {
   if (!tray) return;
   const template: MenuItemConstructorOptions[] = [
     { label: "打开近聊", click: showMainWindow },
+    {
+      label: "桌面浮岛",
+      type: "checkbox",
+      checked: desktopIslandPreferences.enabled,
+      click: (item) => void setDesktopIslandEnabled(item.checked),
+    },
     {
       label: "剪贴板接力…",
       sublabel: clipboardRelayStatus().message,
@@ -305,6 +461,12 @@ function configureApplicationMenu(): void {
                 accelerator: "CmdOrCtrl+,",
                 click: () => showSetupWindow(),
               },
+              {
+                label: "桌面浮岛",
+                type: "checkbox" as const,
+                checked: desktopIslandPreferences.enabled,
+                click: (item: MenuItem) => void setDesktopIslandEnabled(item.checked),
+              },
               { type: "separator" as const },
               { role: "hide" as const },
               { role: "hideOthers" as const },
@@ -322,6 +484,12 @@ function configureApplicationMenu(): void {
                 label: "服务器设置…",
                 accelerator: "CmdOrCtrl+,",
                 click: () => showSetupWindow(),
+              },
+              {
+                label: "桌面浮岛",
+                type: "checkbox" as const,
+                checked: desktopIslandPreferences.enabled,
+                click: (item: MenuItem) => void setDesktopIslandEnabled(item.checked),
               },
               { type: "separator" as const },
               { role: "quit" as const },
@@ -441,6 +609,7 @@ async function loadConfiguredServer(): Promise<void> {
     setupWindow?.close();
     window.show();
     window.focus();
+    if (desktopIslandPreferences.enabled) await showDesktopIsland();
   } catch {
     window.hide();
     showSetupWindow("服务器页面加载失败，请检查服务地址");
@@ -542,6 +711,26 @@ function registerIpcHandlers(): void {
     requestClipboardRelay();
   });
 
+  ipcMain.handle("desktop:get-island-status", (event): DesktopIslandStatus => {
+    if (!isConfiguredServerSender(event)) return { enabled: false, visible: false };
+    return desktopIslandStatus();
+  });
+
+  ipcMain.handle("desktop:set-island-enabled", async (event, enabled: unknown) => {
+    if (!isConfiguredServerSender(event) || typeof enabled !== "boolean") {
+      return desktopIslandStatus();
+    }
+    return setDesktopIslandEnabled(enabled);
+  });
+
+  ipcMain.handle("desktop:open-main-window", (event, conversationId: unknown) => {
+    if (!isConfiguredServerSender(event)) return;
+    showMainWindow();
+    if (typeof conversationId === "string" && conversationId.length <= 100) {
+      mainWindow?.webContents.send("desktop:notification-clicked", conversationId);
+    }
+  });
+
   ipcMain.handle(
     "desktop:request-notification-permission",
     async (event): Promise<DesktopNotificationPermissionResult> => {
@@ -641,10 +830,10 @@ async function startApplication(): Promise<void> {
   app.setName(APP_NAME);
   registerIpcHandlers();
   configurePermissions();
+  desktopIslandPreferences = await readIslandPreferences();
   configureApplicationMenu();
   registerClipboardRelayShortcut();
   createTray();
-
   configuredServerUrl = await readConfiguredServerUrl();
   refreshTrayMenu();
   if (!configuredServerUrl) {
@@ -668,6 +857,7 @@ if (!squirrelEventHandled) {
     app.on("second-instance", showMainWindow);
     app.on("before-quit", () => {
       isQuitting = true;
+      if (islandPositionSaveTimer) clearTimeout(islandPositionSaveTimer);
       globalShortcut.unregisterAll();
     });
     app.on("activate", showMainWindow);

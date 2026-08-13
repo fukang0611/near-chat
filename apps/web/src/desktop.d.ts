@@ -13,8 +13,12 @@ interface NearChatDesktopBridge {
   }): Promise<boolean>;
   getClipboardRelayStatus(): Promise<DesktopClipboardRelayStatus>;
   requestClipboardRelay(): Promise<void>;
+  getDesktopIslandStatus(): Promise<DesktopIslandStatus>;
+  setDesktopIslandEnabled(enabled: boolean): Promise<DesktopIslandStatus>;
+  openMainWindow(conversationId?: string): Promise<void>;
   onClipboardRelay(listener: (payload: DesktopClipboardRelayPayload) => void): () => void;
   onNotificationClick(listener: (conversationId: string) => void): () => void;
+  onDesktopIslandStatusChanged(listener: (status: DesktopIslandStatus) => void): () => void;
 }
 
 interface DesktopClipboardRelayPayload {
@@ -30,6 +34,11 @@ interface DesktopClipboardRelayStatus {
   registered: boolean;
   accelerator: string;
   message: string;
+}
+
+interface DesktopIslandStatus {
+  enabled: boolean;
+  visible: boolean;
 }
 
 interface Window {

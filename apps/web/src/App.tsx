@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { MessageCircleMore } from "lucide-react";
 import { api, clearToken, getToken, saveToken } from "./api";
 import { ChatPage } from "./components/ChatPage";
+import { DesktopIslandPage, DesktopIslandSignedOut } from "./components/DesktopIslandPage";
 import { LoginPage } from "./components/LoginPage";
 import type { User } from "./types";
 import { getCurrentTheme, setThemePreference, type ThemeMode } from "./utils/theme";
 
 export default function App() {
+  const isDesktopIsland = new URLSearchParams(window.location.search).get("desktopIsland") === "1";
   const [user, setUser] = useState<User | null>(null);
   const [checking, setChecking] = useState(Boolean(getToken()));
   const [theme, setTheme] = useState<ThemeMode>(getCurrentTheme);
@@ -34,6 +36,25 @@ export default function App() {
       .finally(() => setChecking(false));
   }, [logout]);
 
+  useEffect(() => {
+    if (!isDesktopIsland) return;
+    const syncSharedLogin = () => {
+      if (!getToken()) {
+        setUser(null);
+        setChecking(false);
+        return;
+      }
+      setChecking(true);
+      void api
+        .me()
+        .then((result) => setUser(result.user))
+        .catch(logout)
+        .finally(() => setChecking(false));
+    };
+    window.addEventListener("storage", syncSharedLogin);
+    return () => window.removeEventListener("storage", syncSharedLogin);
+  }, [isDesktopIsland, logout]);
+
   if (checking) {
     return (
       <div className="app-boot" role="status" aria-label="正在连接近聊">
@@ -48,6 +69,14 @@ export default function App() {
           </span>
         </div>
       </div>
+    );
+  }
+
+  if (isDesktopIsland) {
+    return user ? (
+      <DesktopIslandPage user={user} onSessionInvalid={logout} />
+    ) : (
+      <DesktopIslandSignedOut />
     );
   }
 
