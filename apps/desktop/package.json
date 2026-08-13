@@ -1,0 +1,27 @@
+{
+  "name": "@near-chat/desktop",
+  "productName": "近聊",
+  "version": "0.1.0",
+  "description": "近聊局域网聊天桌面客户端",
+  "author": "NearChat",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/copy-static.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "npm run build && electron-forge start",
+    "package": "npm run build && electron-forge package",
+    "make": "npm run build && electron-forge make",
+    "make:win": "npm run build && electron-forge make --platform=win32 --arch=x64"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.2",
+    "@electron-forge/maker-squirrel": "^7.11.2",
+    "@electron-forge/maker-zip": "^7.11.2",
+    "@types/node": "^22.15.32",
+    "electron": "^43.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.10"
+  }
+}

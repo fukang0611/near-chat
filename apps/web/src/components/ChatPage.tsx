@@ -186,6 +186,15 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     selectedIdRef.current = selectedId;
   }, [selectedId]);
 
+  useEffect(
+    () =>
+      window.nearChatDesktop?.onNotificationClick((conversationId) => {
+        window.focus();
+        setSelectedId(conversationId);
+      }),
+    [],
+  );
+
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
@@ -459,31 +468,38 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       if (incoming.senderId !== user.id && !isActivelyReading) {
         const preferences = notificationPreferencesRef.current;
         if (preferences.sound) void playMessageSound().catch(() => undefined);
-        if (
-          preferences.desktop &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
+        if (preferences.desktop) {
           const conversation = conversationsRef.current.find(
             (item) => item.id === incoming.conversationId,
           );
-          try {
-            const notification = new Notification(
-              conversation?.type === "GROUP"
-                ? `${incoming.senderName} · ${conversation.title}`
-                : incoming.senderName,
-              {
-                body: messageSummary(incoming),
+          const title =
+            conversation?.type === "GROUP"
+              ? `${incoming.senderName} · ${conversation.title}`
+              : incoming.senderName;
+          const body = messageSummary(incoming);
+
+          if (window.nearChatDesktop) {
+            void window.nearChatDesktop
+              .showNotification({
+                title,
+                body,
+                conversationId: incoming.conversationId,
+              })
+              .catch(() => undefined);
+          } else if ("Notification" in window && Notification.permission === "granted") {
+            try {
+              const notification = new Notification(title, {
+                body,
                 tag: `near-chat:${incoming.conversationId}`,
-              },
-            );
-            notification.onclick = () => {
-              window.focus();
-              setSelectedId(incoming.conversationId);
-              notification.close();
-            };
-          } catch {
-            // 浏览器或操作系统可能临时拒绝通知，不能影响实时消息主流程。
+              });
+              notification.onclick = () => {
+                window.focus();
+                setSelectedId(incoming.conversationId);
+                notification.close();
+              };
+            } catch {
+              // 浏览器或操作系统可能临时拒绝通知，不能影响实时消息主流程。
+            }
           }
         }
       }

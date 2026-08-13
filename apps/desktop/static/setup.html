@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>连接近聊服务器</title>
+    <link rel="stylesheet" href="./setup.css" />
+  </head>
+  <body>
+    <main class="setup-shell">
+      <section class="setup-card" aria-labelledby="setup-title">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+        </div>
+        <p class="eyebrow">NEARCHAT DESKTOP</p>
+        <h1 id="setup-title">连接局域网服务器</h1>
+        <p class="description">输入团队部署的近聊访问地址。验证成功后，客户端会记住该地址。</p>
+
+        <form id="server-form">
+          <label for="server-url">服务器地址</label>
+          <div class="address-field">
+            <span aria-hidden="true">⌁</span>
+            <input
+              id="server-url"
+              name="serverUrl"
+              type="text"
+              inputmode="url"
+              autocomplete="url"
+              spellcheck="false"
+              placeholder="例如 192.168.1.20:3000"
+              required
+            />
+          </div>
+          <p class="hint">支持 HTTP 或 HTTPS，可填写 IP、域名及端口。</p>
+
+          <div id="connection-status" class="status" role="status" aria-live="polite" hidden>
+            <span></span>
+            <p></p>
+          </div>
+
+          <div class="actions">
+            <button id="test-button" class="secondary" type="button">测试连接</button>
+            <button id="connect-button" class="primary" type="submit">连接并进入</button>
+          </div>
+        </form>
+
+        <footer>
+          <span id="app-version">近聊桌面客户端</span>
+          <span>配置仅保存在本机</span>
+        </footer>
+      </section>
+    </main>
+    <script src="./setup.js"></script>
+  </body>
+</html>

@@ -64,6 +64,30 @@ npm run dev
 
 前端开发服务器为 <http://localhost:5173>，后端为 <http://localhost:3000>。
 
+## Electron 桌面客户端
+
+桌面客户端复用服务器提供的同一套 Web 界面，首次启动时填写局域网服务器地址。客户端负责窗口、托盘、系统通知和本机服务器配置，不在本机运行 PostgreSQL、MinIO 或 Node.js 服务。
+
+启动桌面开发版：
+
+```bash
+npm run desktop:start
+```
+
+打包当前系统版本：
+
+```bash
+npm run desktop:package
+```
+
+Windows x64 安装包需在 Windows x64 构建机执行：
+
+```bash
+npm run desktop:make:win
+```
+
+产物位于 `apps/desktop/out/`。详细架构、配置位置和离线交付方式见 [桌面客户端说明](docs/desktop-client.md)。
+
 常用质量检查：
 
 ```bash
@@ -90,6 +114,12 @@ apps/web/src/
   api.ts                  HTTP/WebSocket 客户端入口
   styles.css              基础布局和兼容层
   product-polish.css      产品视觉与交互覆盖层
+
+apps/desktop/
+  src/main.ts             Electron 窗口、托盘、通知与服务器连接
+  src/*-preload.ts        最小权限的页面桥接
+  static/                 首次服务器配置界面
+  forge.config.cjs        Windows/macOS 打包配置
 ```
 
 注释主要说明不直观的约束和设计原因，例如消息幂等、文件访问权限、实时连接生命周期与焦点管理；能够由代码直接表达的步骤不重复注释。
@@ -99,7 +129,7 @@ apps/web/src/
 - 单文件默认最大 50 MB，上传由应用服务代理。
 - 每位用户默认拥有 1 GiB 文件配额，超过 24 小时未发送的附件会自动回收；均可通过环境变量调整。
 - 发送者默认可在 120 秒内撤回消息，时限可通过 `MESSAGE_RECALL_WINDOW_SECONDS` 调整。
-- 桌面通知和提示音是当前浏览器的个人偏好，桌面通知仍受浏览器与操作系统权限控制。
+- 桌面通知和提示音是当前浏览器或桌面客户端的个人偏好，通知仍受操作系统权限控制。
 - 在线状态与实时广播保存在单个应用实例内，暂不支持多副本。
 - 不进行 IP/端口扫描；在线用户由聊天服务统一发现。
 - 暂无端到端加密和音视频。

@@ -5,13 +5,14 @@ import {
   MoreHorizontal,
   Radio,
   Search,
+  Settings2,
   ShieldCheck,
   UserRoundCog,
   UserRoundPlus,
   UsersRound,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionState } from "../hooks/useRealtimeConnection";
 import type { Attachment, Conversation, User } from "../types";
 import { formatConversationPreview, formatSidebarTime } from "../utils/format";
@@ -82,6 +83,55 @@ export function ChatSidebar({
   const [search, setSearch] = useState("");
   const [showSystemMenu, setShowSystemMenu] = useState(false);
   const systemMenuRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 系统信息面板挂在右上角按钮上，但按钮不一定靠近侧栏右边缘（例如 Electron
+   * 隐藏原生窗口控制占位时）。这里以侧栏和视口的交集为安全区域，动态夹取横向
+   * 位置，避免固定偏移在窄窗口、系统缩放或不同平台字体下把面板推到屏幕外。
+   */
+  const updateSystemMenuPosition = useCallback(() => {
+    const anchor = systemMenuRef.current;
+    const popover = anchor?.querySelector<HTMLElement>(".system-popover");
+    const sidebar = anchor?.closest<HTMLElement>(".sidebar");
+    if (!anchor || !popover || !sidebar) return;
+
+    const viewportMargin = 12;
+    const anchorRect = anchor.getBoundingClientRect();
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const popoverWidth = popover.offsetWidth;
+    const safeLeft = Math.max(viewportMargin, sidebarRect.left + viewportMargin);
+    const safeRight = Math.min(
+      window.innerWidth - viewportMargin,
+      sidebarRect.right - viewportMargin,
+    );
+    const latestLeft = anchorRect.right - popoverWidth;
+    const maximumLeft = Math.max(safeLeft, safeRight - popoverWidth);
+    const popoverLeft = Math.min(Math.max(latestLeft, safeLeft), maximumLeft);
+    const relativeLeft = popoverLeft - anchorRect.left;
+    const originX = Math.min(popoverWidth - 18, Math.max(18, anchorRect.width / 2 - relativeLeft));
+
+    anchor.style.setProperty("--system-popover-left", `${relativeLeft}px`);
+    anchor.style.setProperty("--system-popover-origin-x", `${originX}px`);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!showSystemMenu) return;
+
+    updateSystemMenuPosition();
+    window.addEventListener("resize", updateSystemMenuPosition);
+
+    const anchor = systemMenuRef.current;
+    const sidebar = anchor?.closest<HTMLElement>(".sidebar");
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateSystemMenuPosition);
+    if (anchor) resizeObserver?.observe(anchor);
+    if (sidebar) resizeObserver?.observe(sidebar);
+
+    return () => {
+      window.removeEventListener("resize", updateSystemMenuPosition);
+      resizeObserver?.disconnect();
+    };
+  }, [showSystemMenu, updateSystemMenuPosition]);
 
   useEffect(() => {
     if (!showSystemMenu) return;
@@ -192,6 +242,22 @@ export function ChatSidebar({
                     <small>单文件最大 50 MB</small>
                   </span>
                 </div>
+                {window.nearChatDesktop && (
+                  <button
+                    className="system-settings-row"
+                    type="button"
+                    onClick={() => {
+                      setShowSystemMenu(false);
+                      void window.nearChatDesktop?.openServerSettings();
+                    }}
+                  >
+                    <Settings2 size={16} />
+                    <span>
+                      <strong>服务器设置</strong>
+                      <small>更换当前连接的局域网服务</small>
+                    </span>
+                  </button>
+                )}
                 <footer>
                   <ShieldCheck size={13} />
                   消息和文件仅保存在当前局域网

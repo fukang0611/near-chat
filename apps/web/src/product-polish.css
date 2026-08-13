@@ -331,6 +331,11 @@ textarea {
   background: #2fa98c;
 }
 
+/* Electron 使用原生窗口控制按钮，桌面壳内隐藏网页模拟的红黄绿圆点。 */
+html[data-near-chat-desktop="true"] .window-dots {
+  visibility: hidden;
+}
+
 /* 应用框架与侧边栏 */
 .app-frame {
   gap: 9px;
@@ -396,8 +401,9 @@ textarea {
   position: absolute;
   z-index: 20;
   top: 41px;
-  right: 0;
+  left: var(--system-popover-left, 0);
   width: 276px;
+  max-width: calc(100vw - 24px);
   overflow: hidden;
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.9);
@@ -405,7 +411,7 @@ textarea {
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 18px 48px rgba(37, 39, 48, 0.17);
   backdrop-filter: blur(26px) saturate(160%);
-  transform-origin: top right;
+  transform-origin: var(--system-popover-origin-x, right) top;
   animation: popover-materialize 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
@@ -461,6 +467,43 @@ textarea {
 
 .system-status-row + .system-status-row {
   border-top: 1px solid #f0f0f2;
+}
+
+.system-settings-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 8px;
+  border: 0;
+  border-top: 1px solid #f0f0f2;
+  border-radius: 9px;
+  color: #6d7078;
+  background: transparent;
+  text-align: left;
+}
+
+.system-settings-row:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.system-settings-row > span {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.system-settings-row strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.system-settings-row small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .system-status-row > i {
@@ -1847,10 +1890,6 @@ textarea {
     width: 40px;
     height: 40px;
   }
-  .system-popover {
-    right: -2px;
-  }
-
   .chat-surface {
     display: none;
     border: 0;
@@ -4509,6 +4548,16 @@ body,
 
 :root[data-theme="dark"] .system-status-row + .system-status-row {
   border-top-color: #373941;
+}
+
+:root[data-theme="dark"] .system-settings-row {
+  border-top-color: #373941;
+  color: #b1b4bc;
+}
+
+:root[data-theme="dark"] .system-settings-row:hover {
+  color: #bcb3ff;
+  background: rgba(135, 120, 242, 0.13);
 }
 
 :root[data-theme="dark"] .system-popover footer {
