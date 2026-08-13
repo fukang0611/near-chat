@@ -2,7 +2,12 @@ import { Router } from "express";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { currentUser } from "../http.js";
-import { listChatFiles } from "../message-assets-service.js";
+import {
+  createMessageFavorite,
+  listChatFiles,
+  listMessageFavorites,
+  removeMessageFavorite,
+} from "../message-assets-service.js";
 
 const fileLibraryQuerySchema = z.object({
   q: z.string().trim().max(100).optional(),
@@ -28,6 +33,29 @@ export function createMessageAssetsRouter() {
     });
     response.json(page);
   });
+
+  router.get("/message-assets/favorites", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    response.json({ favorites: await listMessageFavorites(user.id) });
+  });
+
+  router.post("/messages/:messageId/favorite", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const messageId = z.string().uuid().parse(request.params.messageId);
+    const result = await createMessageFavorite(user.id, messageId);
+    response.status(result.created ? 201 : 200).json(result);
+  });
+
+  router.delete(
+    "/message-assets/favorites/:favoriteId",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const favoriteId = z.string().uuid().parse(request.params.favoriteId);
+      await removeMessageFavorite(user.id, favoriteId);
+      response.status(204).end();
+    },
+  );
 
   return router;
 }

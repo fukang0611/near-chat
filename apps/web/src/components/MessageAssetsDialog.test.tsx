@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { ChatFilePage, Conversation } from "../types";
+import type { ChatFilePage, Conversation, MessageFavorite } from "../types";
 import { MessageAssetsDialog } from "./MessageAssetsDialog";
 
 const conversation: Conversation = {
@@ -43,6 +43,23 @@ const filePage: ChatFilePage = {
   totalBytes: 2048,
   offset: 0,
   hasMore: false,
+};
+
+const favorite: MessageFavorite = {
+  id: "f17e81a0-aa7a-4ce4-b79e-73fd5944bb8d",
+  sourceMessageId: "76d5d6bc-2a8d-4028-91ba-62213da210f3",
+  sourceConversationId: conversation.id,
+  sourceConversationTitle: conversation.title,
+  sourceSenderId: "user-alice",
+  sourceSenderName: "林小满",
+  sourceSenderAvatarColor: "#e76f88",
+  sourceSenderAvatarUrl: null,
+  type: "TEXT",
+  textContent: "请收藏这条产品决策",
+  messageCreatedAt: "2026-08-13T10:30:00.000Z",
+  createdAt: "2026-08-13T10:35:00.000Z",
+  attachments: [],
+  sourceAvailable: true,
 };
 
 describe("MessageAssetsDialog", () => {
@@ -91,5 +108,30 @@ describe("MessageAssetsDialog", () => {
     await waitFor(() =>
       expect(chatFiles).toHaveBeenLastCalledWith(expect.objectContaining({ category: "IMAGE" })),
     );
+  });
+
+  it("收藏页展示消息快照并经二次确认移除", async () => {
+    vi.spyOn(api, "chatFiles").mockResolvedValue(filePage);
+    vi.spyOn(api, "messageFavorites").mockResolvedValue({ favorites: [favorite] });
+    const deleteFavorite = vi.spyOn(api, "deleteFavorite").mockResolvedValue(undefined);
+    const onFavoriteRemoved = vi.fn();
+    render(
+      <MessageAssetsDialog
+        conversations={[conversation]}
+        onClose={vi.fn()}
+        onOpenMessage={vi.fn()}
+        onFavoriteRemoved={onFavoriteRemoved}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: "我的收藏" }));
+    expect(await screen.findByText("请收藏这条产品决策")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "取消收藏 林小满 的消息" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认移除" }));
+
+    expect(deleteFavorite).toHaveBeenCalledWith(favorite.id);
+    expect(onFavoriteRemoved).toHaveBeenCalledWith(favorite);
+    expect(screen.queryByText("请收藏这条产品决策")).toBeNull();
   });
 });

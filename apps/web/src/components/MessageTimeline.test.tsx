@@ -57,10 +57,13 @@ function renderTimeline(messages: Message[]) {
     loadingOlder: false,
     hasMore: false,
     endRef: createRef<HTMLDivElement>(),
+    favoriteMessageIds: new Set(),
+    favoriteBusyMessageIds: new Set(),
     onLoadOlder: vi.fn(),
     onReply: vi.fn(),
     onAnnotateImage: vi.fn(),
     onCopy: vi.fn(),
+    onToggleFavorite: vi.fn(),
     onReact: vi.fn().mockResolvedValue(true),
     onRecall: vi.fn(),
     onRetry: vi.fn(),
@@ -120,6 +123,22 @@ describe("MessageTimeline", () => {
 
     expect(screen.getByText("你撤回了一条消息")).toBeTruthy();
     expect(screen.queryByText("一条普通消息")).toBeNull();
+  });
+
+  it("消息可从纯图标操作栏收藏并展示选中状态", async () => {
+    const favorite = message({ id: "45a5a477-83fd-4ad0-bccd-2c4244502c53" });
+    const rendered = renderTimeline([favorite]);
+    const props = {
+      ...rendered.props,
+      favoriteMessageIds: new Set([favorite.id]),
+    };
+    rendered.rerender(<MessageTimeline {...props} />);
+
+    const button = screen.getByRole("button", { name: "取消收藏" });
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    await rendered.user.click(button);
+
+    expect(props.onToggleFavorite).toHaveBeenCalledWith(favorite);
   });
 
   it("可从操作栏添加反应，也可点击聚合标签移除自己的反应", async () => {

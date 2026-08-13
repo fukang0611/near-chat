@@ -169,18 +169,26 @@ export function createFileRouter() {
     const file = await findAttachment(fileId);
     if (!file || file.state !== "READY") throw new ApiError(404, "文件不存在或尚未就绪");
 
-    if (file.message_id) {
-      const access = await query(
-        `SELECT 1
-           FROM messages m
-           JOIN conversation_members cm ON cm.conversation_id = m.conversation_id
-          WHERE m.id = $1 AND cm.user_id = $2`,
-        [file.message_id, user.id],
-      );
-      if (access.rowCount === 0) throw new ApiError(403, "无权访问该文件");
-    } else if (file.uploader_id !== user.id) {
-      throw new ApiError(403, "无权访问该文件");
-    }
+    const access = await query(
+      `SELECT 1
+         WHERE ($1::uuid IS NULL AND $3 = $2)
+            OR EXISTS (
+              SELECT 1
+                FROM messages message
+                JOIN conversation_members member
+                  ON member.conversation_id = message.conversation_id
+               WHERE message.id = $1 AND member.user_id = $2
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM favorite_attachments favorite_link
+                JOIN message_favorites favorite
+                  ON favorite.id = favorite_link.favorite_id
+               WHERE favorite_link.attachment_id = $4 AND favorite.user_id = $2
+            )`,
+      [file.message_id, user.id, file.uploader_id, file.id],
+    );
+    if (access.rowCount === 0) throw new ApiError(403, "无权访问该文件");
 
     const download = request.query.download === "1";
     const disposition =
@@ -216,6 +224,14 @@ export function createFileRouter() {
       if (candidate.uploader_id !== user.id || candidate.message_id) {
         throw new ApiError(409, "已发送的附件不能移除");
       }
+      const referenced = await client.query(
+        `SELECT 1
+           FROM favorite_attachments
+          WHERE attachment_id = $1
+          LIMIT 1`,
+        [fileId],
+      );
+      if (referenced.rowCount) throw new ApiError(409, "已被收藏的附件不能移除");
       await client.query(
         `UPDATE attachments
             SET state = 'CLEANING', state_updated_at = NOW()

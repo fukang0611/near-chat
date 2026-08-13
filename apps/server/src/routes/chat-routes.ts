@@ -3,6 +3,10 @@ import { Router } from "express";
 import type { PoolClient } from "pg";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
+import {
+  detachConversationAttachments,
+  detachMessageAttachments,
+} from "../attachment-references.js";
 import { recordAudit } from "../audit-service.js";
 import { publicAvatarUrl } from "../avatar-service.js";
 import { config } from "../config.js";
@@ -160,16 +164,7 @@ async function stageConversationAttachmentsForCleanup(
   client: PoolClient,
   conversationId: string,
 ): Promise<void> {
-  await client.query(
-    `UPDATE attachments attachment
-        SET message_id = NULL,
-            state = 'CLEANUP_FAILED',
-            state_updated_at = NOW()
-       FROM messages message
-      WHERE attachment.message_id = message.id
-        AND message.conversation_id = $1`,
-    [conversationId],
-  );
+  await detachConversationAttachments(client, conversationId);
 }
 
 async function conversationMemberIds(conversationId: string): Promise<string[]> {
@@ -1011,14 +1006,7 @@ export function createChatRouter(realtime: RealtimeHub) {
         }
 
         // 先解除附件关系并进入回收队列，撤回成功后原文件立即不可从消息访问。
-        await client.query(
-          `UPDATE attachments
-              SET message_id = NULL,
-                  state = 'CLEANUP_FAILED',
-                  state_updated_at = NOW()
-            WHERE message_id = $1`,
-          [messageId],
-        );
+        await detachMessageAttachments(client, messageId);
         await client.query(
           `UPDATE messages
               SET text_content = NULL,

@@ -8,6 +8,7 @@ import {
   Reply,
   RotateCcw,
   SmilePlus,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -35,10 +36,13 @@ interface MessageTimelineProps {
   hasMore: boolean;
   endRef: RefObject<HTMLDivElement | null>;
   highlightedMessageId?: string | null;
+  favoriteMessageIds: ReadonlySet<string>;
+  favoriteBusyMessageIds: ReadonlySet<string>;
   onLoadOlder: () => void;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
+  onToggleFavorite: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecall: (message: Message) => void;
   onRetry: (message: Message) => void;
@@ -71,9 +75,12 @@ interface MessageBubbleProps {
   confirmRecall: boolean;
   currentUserId: string;
   reactionsDisabled: boolean;
+  favorited: boolean;
+  favoriteBusy: boolean;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
+  onToggleFavorite: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecallIntent: (messageId: string | null) => void;
   onRecall: (message: Message) => void;
@@ -90,9 +97,12 @@ function MessageBubble({
   confirmRecall,
   currentUserId,
   reactionsDisabled,
+  favorited,
+  favoriteBusy,
   onReply,
   onAnnotateImage,
   onCopy,
+  onToggleFavorite,
   onReact,
   onRecallIntent,
   onRecall,
@@ -306,6 +316,21 @@ function MessageBubble({
               <button type="button" onClick={() => onReply(message)} title="回复" aria-label="回复">
                 <Reply size={15} />
               </button>
+              <button
+                type="button"
+                className={favorited ? "is-favorited" : ""}
+                onClick={() => onToggleFavorite(message)}
+                disabled={favoriteBusy}
+                title={favorited ? "取消收藏" : "收藏"}
+                aria-label={favorited ? "取消收藏" : "收藏"}
+                aria-pressed={favorited}
+              >
+                {favoriteBusy ? (
+                  <LoaderCircle className="spin" size={15} />
+                ) : (
+                  <Star size={15} fill={favorited ? "currentColor" : "none"} />
+                )}
+              </button>
               {message.textContent && (
                 <button
                   type="button"
@@ -386,10 +411,13 @@ export function MessageTimeline({
   hasMore,
   endRef,
   highlightedMessageId,
+  favoriteMessageIds,
+  favoriteBusyMessageIds,
   onLoadOlder,
   onReply,
   onAnnotateImage,
   onCopy,
+  onToggleFavorite,
   onReact,
   onRecall,
   onRetry,
@@ -462,9 +490,12 @@ export function MessageTimeline({
               confirmRecall={recallCandidateId === message.id}
               currentUserId={currentUserId}
               reactionsDisabled={isFlashRoomExpired(conversation.expiresAt, now)}
+              favorited={favoriteMessageIds.has(message.id)}
+              favoriteBusy={favoriteBusyMessageIds.has(message.id)}
               onReply={onReply}
               onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
+              onToggleFavorite={onToggleFavorite}
               onReact={onReact}
               onRecallIntent={setRecallCandidateId}
               onRecall={onRecall}

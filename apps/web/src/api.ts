@@ -7,6 +7,7 @@ import type {
   Conversation,
   FileQuota,
   Message,
+  MessageFavorite,
   MessagePage,
   TeamRadar,
   User,
@@ -216,6 +217,15 @@ export const api = {
     if (options.conversationId) query.set("conversationId", options.conversationId);
     return request<ChatFilePage>(`/api/message-assets/files?${query}`);
   },
+  messageFavorites: () =>
+    request<{ favorites: MessageFavorite[] }>("/api/message-assets/favorites"),
+  favoriteMessage: (messageId: string) =>
+    request<{ favorite: MessageFavorite; created: boolean }>(
+      `/api/messages/${messageId}/favorite`,
+      { method: "POST" },
+    ),
+  deleteFavorite: (favoriteId: string) =>
+    request<void>(`/api/message-assets/favorites/${favoriteId}`, { method: "DELETE" }),
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(`/api/files/${fileId}/content${download ? "?download=1" : ""}`, {

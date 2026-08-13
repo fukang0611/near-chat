@@ -22,7 +22,14 @@ import {
 } from "react";
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
-import type { Attachment, Conversation, Message, NudgeEvent, User } from "../types";
+import type {
+  Attachment,
+  Conversation,
+  Message,
+  MessageFavorite,
+  NudgeEvent,
+  User,
+} from "../types";
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
@@ -142,6 +149,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [messageLoadVersion, setMessageLoadVersion] = useState(0);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("recent");
+  const [favoriteByMessageId, setFavoriteByMessageId] = useState<Record<string, string>>({});
+  const [favoriteBusyMessageIds, setFavoriteBusyMessageIds] = useState<Set<string>>(new Set());
 
   // 草稿与待发送附件按会话隔离，切换会话时保留各自上下文。
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -210,6 +219,10 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           left.id.localeCompare(right.id),
       ),
     [messages, selectedOutbox],
+  );
+  const favoriteMessageIds = useMemo(
+    () => new Set(Object.keys(favoriteByMessageId)),
+    [favoriteByMessageId],
   );
   const clipboardRelayUsers = useMemo(() => {
     const currentUsers = new Map(users.map((candidate) => [candidate.id, candidate]));
@@ -359,6 +372,28 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       .catch((error) => notify(errorMessage(error, "数据加载失败"), "error"))
       .finally(() => setSidebarLoading(false));
   }, [notify, refreshConversations, refreshUsers]);
+
+  useEffect(() => {
+    let active = true;
+    void api
+      .messageFavorites()
+      .then((result) => {
+        if (!active) return;
+        setFavoriteByMessageId(
+          Object.fromEntries(
+            result.favorites.flatMap((favorite) =>
+              favorite.sourceMessageId ? [[favorite.sourceMessageId, favorite.id]] : [],
+            ),
+          ),
+        );
+      })
+      .catch((error) => {
+        if (active) notify(errorMessage(error, "收藏状态同步失败"), "error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [notify, user.id]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -1187,6 +1222,51 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     }
   };
 
+  const toggleMessageFavorite = async (message: Message) => {
+    if (message.deliveryState || message.recalledAt || favoriteBusyMessageIds.has(message.id))
+      return;
+    setFavoriteBusyMessageIds((current) => new Set(current).add(message.id));
+    try {
+      const favoriteId = favoriteByMessageId[message.id];
+      if (favoriteId) {
+        await api.deleteFavorite(favoriteId);
+        setFavoriteByMessageId((current) => {
+          const next = { ...current };
+          delete next[message.id];
+          return next;
+        });
+        notify("已取消收藏", "success");
+      } else {
+        const result = await api.favoriteMessage(message.id);
+        if (result.favorite.sourceMessageId) {
+          setFavoriteByMessageId((current) => ({
+            ...current,
+            [result.favorite.sourceMessageId!]: result.favorite.id,
+          }));
+        }
+        notify("已保存到我的收藏", "success");
+      }
+    } catch (error) {
+      notify(errorMessage(error, "收藏操作失败"), "error");
+    } finally {
+      setFavoriteBusyMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
+    }
+  };
+
+  const forgetFavorite = (favorite: MessageFavorite) => {
+    if (!favorite.sourceMessageId) return;
+    setFavoriteByMessageId((current) => {
+      if (current[favorite.sourceMessageId!] !== favorite.id) return current;
+      const next = { ...current };
+      delete next[favorite.sourceMessageId!];
+      return next;
+    });
+  };
+
   const recallMessage = async (message: Message) => {
     try {
       const result = await api.recallMessage(message.conversationId, message.id);
@@ -1444,6 +1524,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 hasMore={hasMoreMessages}
                 endRef={endRef}
                 highlightedMessageId={highlightedMessageId}
+                favoriteMessageIds={favoriteMessageIds}
+                favoriteBusyMessageIds={favoriteBusyMessageIds}
                 onLoadOlder={() => void loadOlderMessages()}
                 onReply={(message) => {
                   if (!selectedId) return;
@@ -1451,6 +1533,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 }}
                 onAnnotateImage={(message, _attachment, file) => sendAnnotatedImage(message, file)}
                 onCopy={(message) => void copyMessage(message)}
+                onToggleFavorite={(message) => void toggleMessageFavorite(message)}
                 onReact={toggleMessageReaction}
                 onRecall={(message) => void recallMessage(message)}
                 onRetry={retryMessage}
@@ -1567,6 +1650,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setSidebarMode("recent");
             setShowMessageAssets(false);
           }}
+          onFavoriteRemoved={forgetFavorite}
         />
       )}
       {showTeamRadar && (

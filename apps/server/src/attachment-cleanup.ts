@@ -16,6 +16,11 @@ async function claimOrphanAttachments(): Promise<CleanupAttachmentRow[]> {
       `SELECT id, bucket_name, object_key
          FROM attachments
         WHERE message_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+              FROM favorite_attachments favorite_link
+             WHERE favorite_link.attachment_id = attachments.id
+          )
           AND (
             state = 'CLEANUP_FAILED'
             OR (state = 'CLEANING' AND state_updated_at < NOW() - INTERVAL '10 minutes')
@@ -43,7 +48,17 @@ export async function removeAttachmentObject(attachment: CleanupAttachmentRow): 
     attempts: config.storageRetryAttempts,
     delayMs: 500,
   });
-  await query("DELETE FROM attachments WHERE id = $1 AND message_id IS NULL", [attachment.id]);
+  await query(
+    `DELETE FROM attachments attachment
+      WHERE attachment.id = $1
+        AND attachment.message_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+            FROM favorite_attachments favorite_link
+           WHERE favorite_link.attachment_id = attachment.id
+        )`,
+    [attachment.id],
+  );
 }
 
 /** 回收超过保留期仍未发送的附件；失败记录留待下一轮继续重试。 */

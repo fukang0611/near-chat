@@ -186,6 +186,24 @@ export interface ChatFilePage {
   hasMore: boolean;
 }
 
+/** 收藏使用消息快照；sourceAvailable 仅控制是否还能跳回原会话。 */
+export interface MessageFavorite {
+  id: string;
+  sourceMessageId: string | null;
+  sourceConversationId: string | null;
+  sourceConversationTitle: string;
+  sourceSenderId: string | null;
+  sourceSenderName: string;
+  sourceSenderAvatarColor: string;
+  sourceSenderAvatarUrl: string | null;
+  type: MessageKind;
+  textContent: string | null;
+  messageCreatedAt: string;
+  createdAt: string;
+  attachments: Attachment[];
+  sourceAvailable: boolean;
+}
+
 export interface AuditLog {
   id: string;
   action: string;

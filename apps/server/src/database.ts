@@ -163,6 +163,37 @@ ALTER TABLE attachments
   ADD CONSTRAINT attachments_state_check
   CHECK (state IN ('PENDING', 'READY', 'CLEANING', 'CLEANUP_FAILED'));
 
+-- 附件可以被收藏长期引用；原消息删除时只解除归属，真正回收由引用检查决定。
+ALTER TABLE attachments DROP CONSTRAINT IF EXISTS attachments_message_id_fkey;
+ALTER TABLE attachments
+  ADD CONSTRAINT attachments_message_id_fkey
+  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE SET NULL;
+
+CREATE TABLE IF NOT EXISTS message_favorites (
+  id UUID PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  source_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+  source_conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+  source_conversation_title VARCHAR(80) NOT NULL,
+  source_sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  source_sender_name VARCHAR(80) NOT NULL,
+  source_sender_avatar_color VARCHAR(20) NOT NULL,
+  source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE')),
+  text_content TEXT,
+  message_created_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_favorites_user_source
+  ON message_favorites(user_id, source_message_id)
+  WHERE source_message_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS favorite_attachments (
+  favorite_id UUID NOT NULL REFERENCES message_favorites(id) ON DELETE CASCADE,
+  attachment_id UUID NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+  PRIMARY KEY (favorite_id, attachment_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -215,6 +246,10 @@ CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_uploader ON attachments(uploader_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_orphan_cleanup
   ON attachments(state, created_at) WHERE message_id IS NULL;
+CREATE INDEX IF NOT EXISTS idx_message_favorites_user_created
+  ON message_favorites(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_favorite_attachments_attachment
+  ON favorite_attachments(attachment_id);
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);
