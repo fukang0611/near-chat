@@ -30,6 +30,7 @@ import { formatConversationPreview, formatSidebarTime } from "../utils/format";
 import type { ThemeMode } from "../utils/theme";
 import { Avatar } from "./Avatar";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserStatusBubble } from "./UserStatusBubble";
 
 export type SidebarMode = "recent" | "people";
 
@@ -532,6 +533,8 @@ export function ChatSidebar({
                             <>
                               <em>草稿</em>[待发送附件]
                             </>
+                          ) : conversation.type === "DIRECT" && conversation.peer?.status ? (
+                            <UserStatusBubble status={conversation.peer.status} compact />
                           ) : (
                             formatConversationPreview(conversation)
                           )}
@@ -586,8 +589,14 @@ export function ChatSidebar({
                     <strong>{peer.displayName}</strong>
                   </span>
                   <span>
-                    <small>
-                      @{peer.username} · {peer.online ? "在线" : "离线，仍可留言"}
+                    <small className="people-presence-line">
+                      {peer.status ? (
+                        <UserStatusBubble status={peer.status} compact />
+                      ) : (
+                        <>
+                          @{peer.username} · {peer.online ? "在线" : "离线，仍可留言"}
+                        </>
+                      )}
                     </small>
                   </span>
                 </span>
@@ -624,12 +633,18 @@ export function ChatSidebar({
         <span>
           <strong>{currentUser.displayName}</strong>
           <small>
-            <i className={`profile-status ${connection}`} />
-            {connection === "connected"
-              ? "已连接局域网"
-              : connection === "connecting"
-                ? "正在连接"
-                : "连接已断开"}
+            {currentUser.status ? (
+              <UserStatusBubble status={currentUser.status} compact />
+            ) : (
+              <>
+                <i className={`profile-status ${connection}`} />
+                {connection === "connected"
+                  ? "已连接局域网"
+                  : connection === "connecting"
+                    ? "正在连接"
+                    : "连接已断开"}
+              </>
+            )}
           </small>
         </span>
         <button type="button" onClick={onOpenProfile} aria-label="打开个人设置" title="个人设置">

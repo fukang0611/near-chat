@@ -7191,6 +7191,213 @@ body,
   }
 }
 
+/* 第六阶段：限时状态气泡 */
+.user-status-bubble {
+  min-width: 0;
+  width: fit-content;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  padding: 4px 7px;
+  border: 1px solid rgba(103, 87, 232, 0.13);
+  border-radius: 999px;
+  color: #5f55ae;
+  background: linear-gradient(135deg, rgba(239, 236, 255, 0.92), rgba(247, 245, 255, 0.76));
+  font-size: 10px;
+  line-height: 1;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.user-status-bubble > span {
+  flex: none;
+  font-size: 11px;
+}
+
+.user-status-bubble > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.user-status-bubble > small {
+  flex: none;
+  color: #8d84c5;
+  font-size: 9px;
+}
+
+.user-status-bubble.is-compact {
+  margin-top: 0;
+  padding: 3px 6px;
+  font-size: 9px;
+}
+
+.conversation-copy small > .user-status-bubble,
+.people-presence-line > .user-status-bubble,
+.sidebar-profile small > .user-status-bubble {
+  vertical-align: middle;
+}
+
+.conversation-copy small > .user-status-bubble {
+  max-width: 170px;
+}
+
+.people-presence-line {
+  overflow: visible !important;
+}
+
+.chat-title > .user-status-bubble {
+  margin-top: 4px;
+}
+
+.status-settings-section .settings-section-heading {
+  align-items: flex-start;
+}
+
+.status-settings-section .settings-section-heading > .user-status-bubble {
+  flex: none;
+}
+
+.status-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 13px;
+}
+
+.status-preset-grid > button,
+.status-duration-row > button {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #e7e7eb;
+  border-radius: 11px;
+  color: #686b73;
+  background: #f7f7f9;
+  font-size: 10px;
+  transition: 150ms ease;
+}
+
+.status-preset-grid > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.status-preset-grid > button span {
+  font-size: 14px;
+}
+
+.status-preset-grid > button:hover,
+.status-duration-row > button:hover,
+.status-preset-grid > button.is-selected,
+.status-duration-row > button.is-selected {
+  border-color: rgba(103, 87, 232, 0.3);
+  color: #5d51bd;
+  background: #f0edff;
+}
+
+.status-preset-grid > button.is-selected,
+.status-duration-row > button.is-selected {
+  box-shadow: inset 0 0 0 1px rgba(103, 87, 232, 0.08);
+}
+
+.status-text-field > span:last-child {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #e4e5e8;
+  border-radius: 11px;
+  background: #fafafa;
+}
+
+.status-text-field > span:last-child:focus-within {
+  border-color: rgba(103, 87, 232, 0.48);
+  box-shadow: 0 0 0 3px rgba(103, 87, 232, 0.08);
+}
+
+.status-text-field b {
+  padding-left: 11px;
+  font-size: 15px;
+}
+
+.status-text-field input {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.status-duration-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.status-duration-row > button {
+  height: 32px;
+}
+
+.status-setting-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.status-setting-actions > button:first-child:not(:last-child) {
+  border: 0;
+  color: #8a8d95;
+  background: transparent;
+  font-size: 10px;
+}
+
+.status-setting-actions .settings-submit {
+  width: auto;
+  min-width: 102px;
+  margin: 0;
+}
+
+:root[data-theme="dark"] .user-status-bubble {
+  border-color: rgba(147, 132, 245, 0.2);
+  color: #c4bcff;
+  background: linear-gradient(135deg, rgba(63, 56, 106, 0.75), rgba(45, 42, 67, 0.88));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="dark"] .user-status-bubble > small {
+  color: #9690be;
+}
+
+:root[data-theme="dark"] .status-preset-grid > button,
+:root[data-theme="dark"] .status-duration-row > button,
+:root[data-theme="dark"] .status-text-field > span:last-child {
+  border-color: #3b3d45;
+  color: #aeb0b9;
+  background: #292b31;
+}
+
+:root[data-theme="dark"] .status-preset-grid > button:hover,
+:root[data-theme="dark"] .status-duration-row > button:hover,
+:root[data-theme="dark"] .status-preset-grid > button.is-selected,
+:root[data-theme="dark"] .status-duration-row > button.is-selected {
+  border-color: rgba(147, 132, 245, 0.38);
+  color: #c7bfff;
+  background: #343044;
+}
+
+@media (max-width: 520px) {
+  .status-preset-grid,
+  .status-duration-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Electron 剪贴板接力：确认内容与目标后才发送，避免全局快捷键造成误投。 */
 .clipboard-relay-row.has-warning {
   color: #b07931;

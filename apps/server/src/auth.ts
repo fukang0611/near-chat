@@ -11,6 +11,9 @@ export interface AuthUser {
   avatarColor: string;
   avatarObjectKey: string | null;
   avatarVersion: number;
+  statusText: string | null;
+  statusEmoji: string | null;
+  statusExpiresAt: Date | null;
   tokenVersion: number;
 }
 
@@ -22,6 +25,9 @@ export interface AuthUserRow {
   avatar_color: string;
   avatar_object_key: string | null;
   avatar_version: number;
+  status_text: string | null;
+  status_emoji: string | null;
+  status_expires_at: Date | null;
   token_version: number;
   enabled: boolean;
 }
@@ -35,6 +41,9 @@ export function toAuthUser(row: AuthUserRow): AuthUser {
     avatarColor: row.avatar_color,
     avatarObjectKey: row.avatar_object_key,
     avatarVersion: row.avatar_version,
+    statusText: row.status_text,
+    statusEmoji: row.status_emoji,
+    statusExpiresAt: row.status_expires_at,
     tokenVersion: row.token_version,
   };
 }
@@ -61,7 +70,8 @@ export async function userFromToken(token: string): Promise<AuthUser | null> {
 
     const result = await query<AuthUserRow>(
       `SELECT id, username, display_name, role, avatar_color, avatar_object_key,
-              avatar_version, token_version, enabled
+              avatar_version, status_text, status_emoji, status_expires_at,
+              token_version, enabled
          FROM users
         WHERE id = $1`,
       [payload.sub],

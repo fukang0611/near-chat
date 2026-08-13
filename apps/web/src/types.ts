@@ -4,8 +4,15 @@ export interface User {
   displayName: string;
   avatarColor: string;
   avatarUrl: string | null;
+  status?: UserStatus | null;
   online?: boolean;
   role?: "ADMIN" | "USER";
+}
+
+export interface UserStatus {
+  text: string;
+  emoji: string;
+  expiresAt: string;
 }
 
 export interface Conversation {

@@ -63,4 +63,32 @@ describe("ProfileDialog avatar presets", () => {
     expect(onUpdated).toHaveBeenCalledWith(updatedUser);
     expect(await screen.findByText("已应用“星星云朵”动态头像")).toBeTruthy();
   });
+
+  it("选择预设状态和时长后更新当前用户", async () => {
+    const updatedUser: User = {
+      ...currentUser,
+      status: { text: "午休", emoji: "☕", expiresAt: "2026-08-13T06:00:00.000Z" },
+    };
+    const updateStatus = vi.spyOn(api, "updateStatus").mockResolvedValue({ user: updatedUser });
+    const onUpdated = vi.fn();
+
+    render(
+      <ProfileDialog
+        user={currentUser}
+        onClose={vi.fn()}
+        onUpdated={onUpdated}
+        onPasswordChanged={vi.fn()}
+        notificationPreferences={{ desktop: false, sound: false }}
+        onNotificationPreferencesChanged={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /午休/ }));
+    await userEvent.click(screen.getByRole("button", { name: "4 小时" }));
+    await userEvent.click(screen.getByRole("button", { name: "设置状态" }));
+
+    await waitFor(() => expect(updateStatus).toHaveBeenCalledOnce());
+    expect(updateStatus.mock.calls[0][0]).toMatchObject({ text: "午休", emoji: "☕" });
+    expect(onUpdated).toHaveBeenCalledWith(updatedUser);
+  });
 });

@@ -25,7 +25,8 @@ interface PublicAvatarRow extends AvatarStorageRow {
 
 const authUserColumns = `
   id, username, display_name, role, enabled, avatar_color,
-  avatar_object_key, avatar_version, token_version
+  avatar_object_key, avatar_version, status_text, status_emoji,
+  status_expires_at, token_version
 `;
 
 async function removeAvatarObject(bucket: string | null, objectKey: string | null): Promise<void> {

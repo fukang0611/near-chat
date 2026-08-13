@@ -215,6 +215,12 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
+  updateStatus: (input: { text: string; emoji: string; expiresAt: string }) =>
+    request<{ user: User }>("/api/auth/status", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  clearStatus: () => request<{ user: User }>("/api/auth/status", { method: "DELETE" }),
   uploadAvatar: (file: File) => {
     const form = new FormData();
     form.append("avatar", file);

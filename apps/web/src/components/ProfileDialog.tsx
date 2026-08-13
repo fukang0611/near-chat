@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   Check,
   HardDrive,
@@ -26,6 +27,7 @@ import {
 } from "../utils/notifications";
 import { Avatar } from "./Avatar";
 import { AvatarPresetPicker } from "./AvatarPresetPicker";
+import { UserStatusBubble } from "./UserStatusBubble";
 
 interface ProfileDialogProps {
   user: User;
@@ -39,6 +41,23 @@ interface ProfileDialogProps {
 const avatarPalette = ["#6757E8", "#E76F88", "#2FA98C", "#E08A45", "#4A86D8", "#9A63C7"];
 const avatarContentTypes = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
 const AVATAR_MAX_BYTES = 8 * 1024 * 1024;
+const statusPresets = [
+  { emoji: "🎯", text: "专注中" },
+  { emoji: "📅", text: "开会中" },
+  { emoji: "☕", text: "午休" },
+  { emoji: "🚶", text: "外出" },
+] as const;
+type StatusDuration = "30" | "60" | "240" | "today";
+
+function statusExpiry(duration: StatusDuration): string {
+  const now = new Date();
+  if (duration !== "today") {
+    return new Date(now.getTime() + Number(duration) * 60_000).toISOString();
+  }
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  return new Date(Math.max(endOfDay.getTime(), now.getTime() + 60_000)).toISOString();
+}
 
 /** 个人资料、存储用量和密码安全集中在一个自助设置面板中。 */
 export function ProfileDialog({
@@ -63,6 +82,10 @@ export function ProfileDialog({
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [notificationCapability, setNotificationCapability] = useState(getNotificationCapability);
   const [requestingNotifications, setRequestingNotifications] = useState(false);
+  const [statusText, setStatusText] = useState(user.status?.text ?? "专注中");
+  const [statusEmoji, setStatusEmoji] = useState(user.status?.emoji ?? "🎯");
+  const [statusDuration, setStatusDuration] = useState<StatusDuration>("60");
+  const [savingStatus, setSavingStatus] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -79,6 +102,7 @@ export function ProfileDialog({
         !savingProfile &&
         !changingPassword &&
         !updatingAvatar &&
+        !savingStatus &&
         !requestingNotifications
       ) {
         onClose();
@@ -86,7 +110,14 @@ export function ProfileDialog({
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [changingPassword, onClose, requestingNotifications, savingProfile, updatingAvatar]);
+  }, [
+    changingPassword,
+    onClose,
+    requestingNotifications,
+    savingProfile,
+    savingStatus,
+    updatingAvatar,
+  ]);
 
   useEffect(
     () => () => {
@@ -217,6 +248,39 @@ export function ProfileDialog({
     if (enabled) void playMessageSound().catch(() => undefined);
   };
 
+  const saveStatus = async () => {
+    if (!statusText.trim()) return;
+    setSavingStatus(true);
+    setNotice(null);
+    try {
+      const result = await api.updateStatus({
+        text: statusText.trim(),
+        emoji: statusEmoji,
+        expiresAt: statusExpiry(statusDuration),
+      });
+      onUpdated(result.user);
+      setNotice({ tone: "success", text: "状态已同步给身边的伙伴" });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "状态设置失败") });
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
+  const clearStatus = async () => {
+    setSavingStatus(true);
+    setNotice(null);
+    try {
+      const result = await api.clearStatus();
+      onUpdated(result.user);
+      setNotice({ tone: "success", text: "状态已清除" });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "状态清除失败") });
+    } finally {
+      setSavingStatus(false);
+    }
+  };
+
   return createPortal(
     <div
       className="dialog-layer"
@@ -227,6 +291,7 @@ export function ProfileDialog({
           !savingProfile &&
           !changingPassword &&
           !updatingAvatar &&
+          !savingStatus &&
           !requestingNotifications
         ) {
           onClose();
@@ -251,7 +316,11 @@ export function ProfileDialog({
             type="button"
             onClick={onClose}
             disabled={
-              savingProfile || changingPassword || updatingAvatar || requestingNotifications
+              savingProfile ||
+              changingPassword ||
+              updatingAvatar ||
+              requestingNotifications ||
+              savingStatus
             }
             aria-label="关闭个人设置"
           >
@@ -369,6 +438,80 @@ export function ProfileDialog({
               保存资料
             </button>
           </form>
+
+          <section className="settings-section status-settings-section">
+            <div className="settings-section-heading">
+              <Activity size={16} />
+              <span>
+                <strong>状态气泡</strong>
+                <small>告诉伙伴你当下的节奏，到期后自动消失</small>
+              </span>
+              <UserStatusBubble status={user.status} compact />
+            </div>
+            <div className="status-preset-grid" role="group" aria-label="状态预设">
+              {statusPresets.map((preset) => (
+                <button
+                  key={preset.text}
+                  type="button"
+                  className={statusText === preset.text ? "is-selected" : ""}
+                  onClick={() => {
+                    setStatusText(preset.text);
+                    setStatusEmoji(preset.emoji);
+                  }}
+                >
+                  <span>{preset.emoji}</span>
+                  {preset.text}
+                </button>
+              ))}
+            </div>
+            <label className="settings-field status-text-field">
+              <span>自定义状态</span>
+              <span>
+                <b aria-hidden="true">{statusEmoji}</b>
+                <input
+                  value={statusText}
+                  onChange={(event) => setStatusText(event.target.value)}
+                  maxLength={40}
+                  placeholder="例如：整理需求中"
+                />
+              </span>
+            </label>
+            <div className="status-duration-row" role="group" aria-label="状态持续时间">
+              {(
+                [
+                  ["30", "30 分钟"],
+                  ["60", "1 小时"],
+                  ["240", "4 小时"],
+                  ["today", "今天结束"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={statusDuration === value ? "is-selected" : ""}
+                  onClick={() => setStatusDuration(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="status-setting-actions">
+              {user.status && (
+                <button type="button" onClick={() => void clearStatus()} disabled={savingStatus}>
+                  清除状态
+                </button>
+              )}
+              <button
+                className="settings-submit"
+                type="button"
+                onClick={() => void saveStatus()}
+                disabled={savingStatus || !statusText.trim()}
+              >
+                {savingStatus ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
+                设置状态
+              </button>
+            </div>
+          </section>
 
           <section className="settings-section quota-section">
             <div className="settings-section-heading">

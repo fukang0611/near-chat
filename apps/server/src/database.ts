@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_content_type VARCHAR(50),
   avatar_size_bytes BIGINT,
   avatar_version INTEGER NOT NULL DEFAULT 0,
+  status_text VARCHAR(40),
+  status_emoji VARCHAR(16),
+  status_expires_at TIMESTAMPTZ,
   token_version INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -63,6 +66,11 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_size_bytes BIGINT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_version INTEGER NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_avatar_object_key
   ON users(avatar_object_key) WHERE avatar_object_key IS NOT NULL;
+
+-- 限时状态是用户资料的一部分，不写入消息表；过期后查询层会自动隐藏。
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_text VARCHAR(40);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_emoji VARCHAR(16);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status_expires_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS conversations (
   id UUID PRIMARY KEY,

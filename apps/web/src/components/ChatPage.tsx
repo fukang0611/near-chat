@@ -54,6 +54,7 @@ import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
 import { NudgeNotice } from "./NudgeNotice";
 import { ProfileDialog } from "./ProfileDialog";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserStatusBubble } from "./UserStatusBubble";
 
 interface ChatPageProps {
   user: User;
@@ -1285,13 +1286,17 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               />
               <div className="chat-title">
                 <strong>{selectedConversation.title}</strong>
-                <span>
-                  {selectedConversation.type === "GROUP"
-                    ? `${selectedConversation.onlineMemberCount} 人在线 · 共 ${selectedConversation.memberCount} 位成员`
-                    : selectedConversation.peer?.online
-                      ? "在线 · 可以即时收到消息"
-                      : "离线 · 消息将在下次登录时送达"}
-                </span>
+                {selectedConversation.type === "DIRECT" && selectedConversation.peer?.status ? (
+                  <UserStatusBubble status={selectedConversation.peer.status} />
+                ) : (
+                  <span>
+                    {selectedConversation.type === "GROUP"
+                      ? `${selectedConversation.onlineMemberCount} 人在线 · 共 ${selectedConversation.memberCount} 位成员`
+                      : selectedConversation.peer?.online
+                        ? "在线 · 可以即时收到消息"
+                        : "离线 · 消息将在下次登录时送达"}
+                  </span>
+                )}
               </div>
               <ThemeToggle
                 compact

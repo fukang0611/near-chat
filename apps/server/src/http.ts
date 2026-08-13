@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import type { AuthUser } from "./auth.js";
 import { publicAvatarUrl } from "./avatar-service.js";
 import { config } from "./config.js";
+import { activeUserStatus } from "./status-service.js";
 
 /** 可安全暴露给客户端的业务错误。未识别错误统一按 500 处理。 */
 export class ApiError extends Error {
@@ -33,6 +34,7 @@ export function publicUser(user: AuthUser) {
     role: user.role,
     avatarColor: user.avatarColor,
     avatarUrl: publicAvatarUrl(user.id, user.avatarObjectKey, user.avatarVersion),
+    status: activeUserStatus(user.statusText, user.statusEmoji, user.statusExpiresAt),
   };
 }
 

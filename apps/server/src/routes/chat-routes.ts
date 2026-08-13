@@ -21,6 +21,7 @@ import {
   markMessageDelivered,
 } from "../receipt-service.js";
 import { RealtimeHub } from "../realtime.js";
+import { activeUserStatus } from "../status-service.js";
 
 interface MemberRow {
   user_id: string;
@@ -38,6 +39,9 @@ interface ConversationMember {
   avatarColor: string;
   avatarObjectKey: string | null;
   avatarVersion: number;
+  statusText: string | null;
+  statusEmoji: string | null;
+  statusExpiresAt: string | null;
 }
 
 interface ConversationRow {
@@ -160,11 +164,14 @@ async function conversationMemberIds(conversationId: string): Promise<string[]> 
 }
 
 function serializeConversation(row: ConversationRow, currentUserId: string, realtime: RealtimeHub) {
-  const members = row.members.map(({ avatarObjectKey, avatarVersion, ...member }) => ({
-    ...member,
-    avatarUrl: publicAvatarUrl(member.id, avatarObjectKey, avatarVersion),
-    online: realtime.isOnline(member.id),
-  }));
+  const members = row.members.map(
+    ({ avatarObjectKey, avatarVersion, statusText, statusEmoji, statusExpiresAt, ...member }) => ({
+      ...member,
+      avatarUrl: publicAvatarUrl(member.id, avatarObjectKey, avatarVersion),
+      status: activeUserStatus(statusText, statusEmoji, statusExpiresAt),
+      online: realtime.isOnline(member.id),
+    }),
+  );
   const peer = row.type === "DIRECT" ? members.find((member) => member.id !== currentUserId) : null;
   const title =
     row.type === "GROUP" ? (row.name ?? "未命名群聊") : (peer?.displayName ?? "未知用户");
@@ -209,8 +216,12 @@ export function createChatRouter(realtime: RealtimeHub) {
       avatar_color: string;
       avatar_object_key: string | null;
       avatar_version: number;
+      status_text: string | null;
+      status_emoji: string | null;
+      status_expires_at: Date | null;
     }>(
-      `SELECT id, username, display_name, avatar_color, avatar_object_key, avatar_version
+      `SELECT id, username, display_name, avatar_color, avatar_object_key, avatar_version,
+              status_text, status_emoji, status_expires_at
          FROM users
         WHERE enabled = TRUE AND id <> $1
         ORDER BY display_name, username`,
@@ -223,6 +234,7 @@ export function createChatRouter(realtime: RealtimeHub) {
         displayName: row.display_name,
         avatarColor: row.avatar_color,
         avatarUrl: publicAvatarUrl(row.id, row.avatar_object_key, row.avatar_version),
+        status: activeUserStatus(row.status_text, row.status_emoji, row.status_expires_at),
         online: realtime.isOnline(row.id),
       })),
     });
@@ -244,7 +256,10 @@ export function createChatRouter(realtime: RealtimeHub) {
                             'displayName', member_user.display_name,
                             'avatarColor', member_user.avatar_color,
                             'avatarObjectKey', member_user.avatar_object_key,
-                            'avatarVersion', member_user.avatar_version
+                            'avatarVersion', member_user.avatar_version,
+                            'statusText', member_user.status_text,
+                            'statusEmoji', member_user.status_emoji,
+                            'statusExpiresAt', member_user.status_expires_at
                           )
                           ORDER BY member_user.display_name, member_user.username
                         )

@@ -6,6 +6,7 @@ import { authenticate, signToken, toAuthUser, type AuthUserRow } from "../auth.j
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser, publicUser } from "../http.js";
 import { RealtimeHub } from "../realtime.js";
+import { isAllowedStatusExpiry } from "../status-service.js";
 
 interface LoginUserRow extends AuthUserRow {
   password_hash: string;
@@ -35,6 +36,22 @@ const changePasswordSchema = z
     path: ["newPassword"],
   });
 
+const statusSchema = z
+  .object({
+    text: z.string().trim().min(1, "状态内容不能为空").max(40, "状态最多 40 个字符"),
+    emoji: z.string().trim().min(1).max(16),
+    expiresAt: z.string().datetime({ offset: true }),
+  })
+  .superRefine((value, context) => {
+    if (!isAllowedStatusExpiry(new Date(value.expiresAt))) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["expiresAt"],
+        message: "状态有效期需在 1 分钟至 24 小时之间",
+      });
+    }
+  });
+
 /** 登录态路由模块：签发令牌，恢复当前用户，并提供客户端退出语义。 */
 export function createAuthRouter(realtime: RealtimeHub) {
   const router = Router();
@@ -43,7 +60,8 @@ export function createAuthRouter(realtime: RealtimeHub) {
     const input = loginSchema.parse(request.body);
     const result = await query<LoginUserRow>(
       `SELECT id, username, display_name, password_hash, role, enabled,
-              avatar_color, avatar_object_key, avatar_version, token_version
+              avatar_color, avatar_object_key, avatar_version, status_text,
+              status_emoji, status_expires_at, token_version
          FROM users
         WHERE username = $1`,
       [input.username.toLowerCase()],
@@ -62,6 +80,60 @@ export function createAuthRouter(realtime: RealtimeHub) {
     response.json({ user: publicUser(currentUser(request)) });
   });
 
+  router.put("/auth/status", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const input = statusSchema.parse(request.body);
+    const result = await transaction(async (client) => {
+      const updated = await client.query<AuthUserRow>(
+        `UPDATE users
+            SET status_text = $2,
+                status_emoji = $3,
+                status_expires_at = $4,
+                updated_at = NOW()
+          WHERE id = $1
+          RETURNING id, username, display_name, role, enabled, avatar_color,
+                    avatar_object_key, avatar_version, status_text, status_emoji,
+                    status_expires_at, token_version`,
+        [user.id, input.text, input.emoji, input.expiresAt],
+      );
+      await recordAudit(
+        {
+          actorId: user.id,
+          action: "STATUS_UPDATE",
+          targetType: "USER",
+          targetId: user.id,
+          details: { text: input.text, expiresAt: input.expiresAt },
+        },
+        client,
+      );
+      return toAuthUser(updated.rows[0]);
+    });
+    realtime.sendToUsers(realtime.onlineUserIds(), {
+      type: "users.changed",
+      payload: { userId: user.id },
+    });
+    response.json({ user: publicUser(result) });
+  });
+
+  router.delete("/auth/status", authenticate, async (request, response) => {
+    const user = currentUser(request);
+    const result = await query<AuthUserRow>(
+      `UPDATE users
+          SET status_text = NULL, status_emoji = NULL, status_expires_at = NULL,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, username, display_name, role, enabled, avatar_color,
+                  avatar_object_key, avatar_version, status_text, status_emoji,
+                  status_expires_at, token_version`,
+      [user.id],
+    );
+    realtime.sendToUsers(realtime.onlineUserIds(), {
+      type: "users.changed",
+      payload: { userId: user.id },
+    });
+    response.json({ user: publicUser(toAuthUser(result.rows[0])) });
+  });
+
   router.patch("/auth/profile", authenticate, async (request, response) => {
     const user = currentUser(request);
     const input = profileSchema.parse(request.body);
@@ -73,7 +145,8 @@ export function createAuthRouter(realtime: RealtimeHub) {
                 updated_at = NOW()
           WHERE id = $1
           RETURNING id, username, display_name, password_hash, role, enabled,
-                    avatar_color, avatar_object_key, avatar_version, token_version`,
+                    avatar_color, avatar_object_key, avatar_version, status_text,
+                    status_emoji, status_expires_at, token_version`,
         [user.id, input.displayName ?? null, input.avatarColor ?? null],
       );
       const row = result.rows[0];
