@@ -22,6 +22,7 @@ import {
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type { Attachment, Conversation, Message, User } from "../types";
+import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
 import {
@@ -711,7 +712,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const send = () => {
     if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
     const conversationId = selectedId;
-    const clientMessageId = crypto.randomUUID();
+    const clientMessageId = createClientMessageId();
     const createdAt = new Date().toISOString();
     const type = pendingAttachment
       ? pendingAttachment.contentType.startsWith("image/")
