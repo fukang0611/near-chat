@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "../types";
 import { MessageComposer } from "./MessageComposer";
 
@@ -41,6 +41,17 @@ function renderComposer(overrides: Partial<React.ComponentProps<typeof MessageCo
 }
 
 describe("MessageComposer", () => {
+  beforeEach(() => {
+    const values = new Map<string, string>();
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      },
+    });
+  });
+
   it("展示引用摘要并允许取消回复", async () => {
     const { props, user } = renderComposer();
 
@@ -58,5 +69,49 @@ describe("MessageComposer", () => {
     await user.click(screen.getByRole("button", { name: "发送消息" }));
 
     expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("把表情插入当前光标位置并恢复输入焦点", async () => {
+    const onTextChange = vi.fn();
+    const { user } = renderComposer({
+      text: "你好世界",
+      replyingTo: null,
+      onTextChange,
+    });
+    const textarea = screen.getByPlaceholderText("发消息给 林小满") as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+
+    await user.click(screen.getByRole("button", { name: "选择表情" }));
+    await user.click(screen.getByRole("button", { name: "开心" }));
+
+    expect(onTextChange).toHaveBeenCalledWith("你好😀世界");
+    await waitFor(() => expect(document.activeElement).toBe(textarea));
+    expect(textarea.selectionStart).toBe(4);
+    expect(screen.getByRole("dialog", { name: "选择表情" })).toBeTruthy();
+  });
+
+  it("点击编辑器外部会关闭表情面板", async () => {
+    const { user } = renderComposer({ replyingTo: null });
+
+    await user.click(screen.getByRole("button", { name: "选择表情" }));
+    expect(screen.getByRole("dialog", { name: "选择表情" })).toBeTruthy();
+
+    await user.click(document.body);
+    expect(screen.queryByRole("dialog", { name: "选择表情" })).toBeNull();
+  });
+
+  it("剩余字数不足时不会截断双字节表情", async () => {
+    const onTextChange = vi.fn();
+    const text = "a".repeat(4_999);
+    const { user } = renderComposer({ text, replyingTo: null, onTextChange });
+    const textarea = screen.getByPlaceholderText("发消息给 林小满") as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(text.length, text.length);
+
+    await user.click(screen.getByRole("button", { name: "选择表情" }));
+    await user.click(screen.getByRole("button", { name: "开心" }));
+
+    expect(onTextChange).not.toHaveBeenCalled();
   });
 });

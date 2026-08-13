@@ -1,8 +1,17 @@
-import { FileText, LoaderCircle, Paperclip, Reply, Send, X } from "lucide-react";
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useEffect, useRef } from "react";
+import { FileText, Laugh, LoaderCircle, Paperclip, Reply, Send, X } from "lucide-react";
+import {
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Attachment, Message } from "../types";
 import { formatBytes } from "../utils/format";
 import { messageSummary } from "../utils/message";
+import { EmojiPicker } from "./EmojiPicker";
 
 export interface UploadProgress {
   name: string;
@@ -44,6 +53,11 @@ export function MessageComposer({
 }: MessageComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const emojiAnchorRef = useRef<HTMLDivElement>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const selectionRef = useRef({ start: text.length, end: text.length });
+
+  const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -55,6 +69,15 @@ export function MessageComposer({
   useEffect(() => {
     if (replyingTo) textareaRef.current?.focus();
   }, [replyingTo]);
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!emojiAnchorRef.current?.contains(event.target as Node)) closeEmojiPicker();
+    };
+    window.addEventListener("pointerdown", closeOutside);
+    return () => window.removeEventListener("pointerdown", closeOutside);
+  }, [closeEmojiPicker, showEmojiPicker]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -76,6 +99,41 @@ export function MessageComposer({
   };
 
   const canSend = !sending && !upload && Boolean(text.trim() || pendingAttachment);
+
+  const rememberSelection = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    selectionRef.current = {
+      start: textarea.selectionStart ?? text.length,
+      end: textarea.selectionEnd ?? text.length,
+    };
+  };
+
+  const toggleEmojiPicker = () => {
+    if (!showEmojiPicker) rememberSelection();
+    setShowEmojiPicker((current) => !current);
+  };
+
+  const insertEmoji = (emoji: string) => {
+    const { start, end } = selectionRef.current;
+    // 外部切换会话或清空草稿后，旧光标位置可能超过新文本长度，先收敛到有效范围。
+    const safeStart = Math.max(0, Math.min(start, text.length));
+    const safeEnd = Math.min(Math.max(end, safeStart), text.length);
+    const nextText = `${text.slice(0, safeStart)}${emoji}${text.slice(safeEnd)}`;
+
+    // 与 textarea 的 maxLength 保持一致；空间不足时不截断 Emoji，避免产生半个代理字符。
+    if (nextText.length > 5_000) return;
+
+    const nextPosition = safeStart + emoji.length;
+    selectionRef.current = { start: nextPosition, end: nextPosition };
+    onTextChange(nextText);
+    window.requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(nextPosition, nextPosition);
+    });
+  };
 
   return (
     <form className="composer-wrap" onSubmit={submit}>
@@ -135,6 +193,9 @@ export function MessageComposer({
           ref={textareaRef}
           value={text}
           onChange={(event) => onTextChange(event.target.value)}
+          onSelect={rememberSelection}
+          onClick={rememberSelection}
+          onKeyUp={rememberSelection}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder={`发消息给 ${peerName}`}
@@ -162,6 +223,29 @@ export function MessageComposer({
             >
               <Paperclip size={19} />
             </button>
+            <div className="emoji-picker-anchor" ref={emojiAnchorRef}>
+              <button
+                type="button"
+                onClick={toggleEmojiPicker}
+                aria-label="选择表情"
+                title="选择表情"
+                aria-expanded={showEmojiPicker}
+                aria-haspopup="dialog"
+              >
+                <Laugh size={19} />
+              </button>
+              {showEmojiPicker && (
+                <>
+                  <button
+                    className="emoji-mobile-scrim"
+                    type="button"
+                    onClick={closeEmojiPicker}
+                    aria-label="关闭表情面板"
+                  />
+                  <EmojiPicker onSelect={insertEmoji} onClose={closeEmojiPicker} />
+                </>
+              )}
+            </div>
             <span>支持粘贴或拖入文件 · 最大 50 MB</span>
           </div>
           <div className="send-group">
