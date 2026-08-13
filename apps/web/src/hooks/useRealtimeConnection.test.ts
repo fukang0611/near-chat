@@ -2,6 +2,37 @@ import { describe, expect, it } from "vitest";
 import { parseRealtimeEvent } from "./useRealtimeConnection";
 
 describe("parseRealtimeEvent", () => {
+  it("保留消息反应的成员聚合结果", () => {
+    const message = {
+      id: "message-one",
+      conversationId: "conversation-one",
+      senderId: "user-one",
+      senderName: "林小满",
+      senderAvatarColor: "#e46a87",
+      senderAvatarUrl: null,
+      clientMessageId: "client-one",
+      type: "TEXT",
+      textContent: "收到",
+      createdAt: "2026-08-13T10:00:00.000Z",
+      recalledAt: null,
+      recallableUntil: "2026-08-13T10:02:00.000Z",
+      replyTo: null,
+      attachments: [],
+      reactions: [
+        {
+          emoji: "👍",
+          count: 1,
+          users: [{ id: "user-two", displayName: "周远" }],
+        },
+      ],
+      receipt: { recipientCount: 1, deliveredCount: 1, readCount: 1 },
+    };
+
+    expect(
+      parseRealtimeEvent(JSON.stringify({ type: "message.updated", payload: { message } })),
+    ).toEqual({ type: "message.updated", payload: { message } });
+  });
+
   it("解析完整的敲一下事件", () => {
     const nudge = {
       id: "nudge-one",

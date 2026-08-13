@@ -7,13 +7,21 @@ import {
   RefreshCw,
   Reply,
   RotateCcw,
+  SmilePlus,
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, type RefObject, useEffect, useState } from "react";
+import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import type { Attachment, Conversation, Message } from "../types";
+import { isFlashRoomExpired } from "../utils/flash-room";
 import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/format";
 import { replySummary } from "../utils/message";
+import {
+  MESSAGE_REACTION_OPTIONS,
+  reactionLabel,
+  reactionTooltip,
+  type MessageReactionEmoji,
+} from "../utils/reactions";
 import { AttachmentView } from "./AttachmentView";
 import { Avatar } from "./Avatar";
 import { FlashRoomBadge } from "./FlashRoomBadge";
@@ -31,6 +39,7 @@ interface MessageTimelineProps {
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
+  onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecall: (message: Message) => void;
   onRetry: (message: Message) => void;
   onDiscard: (message: Message) => void;
@@ -60,9 +69,12 @@ interface MessageBubbleProps {
   highlighted: boolean;
   now: number;
   confirmRecall: boolean;
+  currentUserId: string;
+  reactionsDisabled: boolean;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
+  onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
   onRecallIntent: (messageId: string | null) => void;
   onRecall: (message: Message) => void;
   onRetry: (message: Message) => void;
@@ -76,15 +88,26 @@ function MessageBubble({
   highlighted,
   now,
   confirmRecall,
+  currentUserId,
+  reactionsDisabled,
   onReply,
   onAnnotateImage,
   onCopy,
+  onReact,
   onRecallIntent,
   onRecall,
   onRetry,
   onDiscard,
   onJumpToMessage,
 }: MessageBubbleProps) {
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [reactingEmoji, setReactingEmoji] = useState<MessageReactionEmoji | null>(null);
+  const [reactionBurst, setReactionBurst] = useState<{
+    emoji: MessageReactionEmoji;
+    nonce: number;
+  } | null>(null);
+  const reactionControlRef = useRef<HTMLSpanElement>(null);
+  const burstNonceRef = useRef(0);
   const hasAttachment = message.attachments.length > 0;
   const hasText = Boolean(message.textContent);
   const recalled = Boolean(message.recalledAt);
@@ -96,6 +119,42 @@ function MessageBubble({
     !message.deliveryState &&
     !recalled &&
     new Date(message.recallableUntil).getTime() >= now;
+
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!reactionControlRef.current?.contains(event.target as Node)) setReactionPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setReactionPickerOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [reactionPickerOpen]);
+
+  useEffect(() => {
+    if (!reactionBurst) return;
+    const timer = window.setTimeout(() => setReactionBurst(null), 700);
+    return () => window.clearTimeout(timer);
+  }, [reactionBurst]);
+
+  const toggleReaction = async (emoji: MessageReactionEmoji) => {
+    if (reactingEmoji || reactionsDisabled) return;
+    setReactionPickerOpen(false);
+    setReactingEmoji(emoji);
+    try {
+      if (await onReact(message, emoji)) {
+        burstNonceRef.current += 1;
+        setReactionBurst({ emoji, nonce: burstNonceRef.current });
+      }
+    } finally {
+      setReactingEmoji(null);
+    }
+  };
 
   return (
     <div
@@ -148,9 +207,50 @@ function MessageBubble({
                   {message.textContent}
                 </div>
               )}
+              {reactionBurst && (
+                <span
+                  className="message-reaction-burst"
+                  key={`${reactionBurst.emoji}-${reactionBurst.nonce}`}
+                  aria-hidden="true"
+                >
+                  <b>{reactionBurst.emoji}</b>
+                  <i />
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              )}
             </>
           )}
         </div>
+
+        {!recalled && (message.reactions?.length ?? 0) > 0 && (
+          <div className="message-reactions" aria-label="消息反应">
+            {message.reactions!.map((reaction) => {
+              const option = MESSAGE_REACTION_OPTIONS.find(
+                (candidate) => candidate.emoji === reaction.emoji,
+              );
+              if (!option) return null;
+              const currentUserReacted = reaction.users.some(
+                (reactionUser) => reactionUser.id === currentUserId,
+              );
+              return (
+                <button
+                  type="button"
+                  className={`message-reaction-chip ${currentUserReacted ? "is-mine" : ""}`}
+                  key={reaction.emoji}
+                  onClick={() => void toggleReaction(option.emoji)}
+                  disabled={Boolean(reactingEmoji) || reactionsDisabled}
+                  aria-label={`${currentUserReacted ? "移除" : "添加"}${reactionLabel(reaction.emoji)}反应，当前 ${reaction.count} 人`}
+                  title={reactionTooltip(reaction)}
+                >
+                  <span>{reaction.emoji}</span>
+                  <b>{reaction.count}</b>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {failed && (
           <div className="message-failure" role="status">
@@ -168,7 +268,41 @@ function MessageBubble({
 
         <div className="message-footer">
           {!recalled && !failed && !sending && (
-            <div className="message-actions" aria-label="消息操作">
+            <div
+              className={`message-actions ${reactionPickerOpen ? "is-open" : ""}`}
+              aria-label="消息操作"
+            >
+              {!reactionsDisabled && (
+                <span className="message-reaction-control" ref={reactionControlRef}>
+                  <button
+                    type="button"
+                    onClick={() => setReactionPickerOpen((current) => !current)}
+                    title="添加表情反应"
+                    aria-label="添加表情反应"
+                    aria-expanded={reactionPickerOpen}
+                    aria-haspopup="menu"
+                  >
+                    <SmilePlus size={15} />
+                  </button>
+                  {reactionPickerOpen && (
+                    <span className="message-reaction-picker" role="menu" aria-label="选择消息反应">
+                      {MESSAGE_REACTION_OPTIONS.map((option) => (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          key={option.emoji}
+                          onClick={() => void toggleReaction(option.emoji)}
+                          disabled={Boolean(reactingEmoji)}
+                          aria-label={`用${option.label}回应`}
+                          title={option.label}
+                        >
+                          {option.emoji}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              )}
               <button type="button" onClick={() => onReply(message)} title="回复" aria-label="回复">
                 <Reply size={15} />
               </button>
@@ -256,6 +390,7 @@ export function MessageTimeline({
   onReply,
   onAnnotateImage,
   onCopy,
+  onReact,
   onRecall,
   onRetry,
   onDiscard,
@@ -325,9 +460,12 @@ export function MessageTimeline({
               highlighted={highlightedMessageId === message.id}
               now={now}
               confirmRecall={recallCandidateId === message.id}
+              currentUserId={currentUserId}
+              reactionsDisabled={isFlashRoomExpired(conversation.expiresAt, now)}
               onReply={onReply}
               onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
+              onReact={onReact}
               onRecallIntent={setRecallCandidateId}
               onRecall={onRecall}
               onRetry={onRetry}

@@ -130,6 +130,14 @@ ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_type_check;
 ALTER TABLE messages
   ADD CONSTRAINT messages_type_check CHECK (type IN ('TEXT', 'IMAGE', 'AUDIO', 'FILE'));
 
+CREATE TABLE IF NOT EXISTS message_reactions (
+  message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  emoji VARCHAR(16) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (message_id, user_id, emoji)
+);
+
 CREATE TABLE IF NOT EXISTS attachments (
   id UUID PRIMARY KEY,
   uploader_id UUID NOT NULL REFERENCES users(id),
@@ -202,6 +210,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation_time
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_cursor
   ON messages(conversation_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to_message_id);
+CREATE INDEX IF NOT EXISTS idx_message_reactions_user ON message_reactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_uploader ON attachments(uploader_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_orphan_cleanup

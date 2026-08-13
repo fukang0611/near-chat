@@ -22,6 +22,7 @@ import {
   markConversationRead,
   markMessageDelivered,
 } from "../receipt-service.js";
+import { MESSAGE_REACTION_EMOJIS } from "../reaction-service.js";
 import { RealtimeHub } from "../realtime.js";
 import { activeUserStatus } from "../status-service.js";
 
@@ -108,6 +109,8 @@ const searchSchema = z.object({
   conversationId: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
+
+const reactionSchema = z.object({ emoji: z.enum(MESSAGE_REACTION_EMOJIS) });
 
 async function ensureMember(conversationId: string, userId: string): Promise<void> {
   const result = await query(
@@ -906,6 +909,65 @@ export function createChatRouter(realtime: RealtimeHub) {
   );
 
   router.post(
+    "/conversations/:conversationId/messages/:messageId/reactions",
+    authenticate,
+    async (request, response) => {
+      const user = currentUser(request);
+      const conversationId = z.string().uuid().parse(request.params.conversationId);
+      const messageId = z.string().uuid().parse(request.params.messageId);
+      const { emoji } = reactionSchema.parse(request.body);
+
+      const toggled = await transaction(async (client) => {
+        // 锁住消息可同时串行化撤回与反应切换，避免给刚撤回的消息留下新反应。
+        const target = await client.query<{
+          recalled_at: Date | null;
+          expires_at: Date | null;
+        }>(
+          `SELECT message.recalled_at, conversation.expires_at
+             FROM messages message
+             JOIN conversations conversation ON conversation.id = message.conversation_id
+             JOIN conversation_members member
+               ON member.conversation_id = conversation.id AND member.user_id = $3
+            WHERE message.id = $1 AND message.conversation_id = $2
+            FOR UPDATE OF message`,
+          [messageId, conversationId, user.id],
+        );
+        const message = target.rows[0];
+        if (!message) throw new ApiError(404, "消息不存在或无权访问");
+        if (message.recalled_at) throw new ApiError(409, "已撤回的消息不能添加反应");
+        if (isFlashRoomExpired(message.expires_at)) {
+          throw new ApiError(409, "闪聊房间已结束，现在只能查看历史消息");
+        }
+
+        const removed = await client.query(
+          `DELETE FROM message_reactions
+            WHERE message_id = $1 AND user_id = $2 AND emoji = $3
+          RETURNING message_id`,
+          [messageId, user.id, emoji],
+        );
+        const active = removed.rowCount === 0;
+        if (active) {
+          await client.query(
+            `INSERT INTO message_reactions (message_id, user_id, emoji)
+             VALUES ($1, $2, $3)`,
+            [messageId, user.id, emoji],
+          );
+        }
+
+        return { message: await findMessage(messageId, client), active };
+      });
+
+      if (!toggled.message) throw new ApiError(500, "消息反应同步失败");
+      const members = await conversationMemberIds(conversationId);
+      realtime.sendToUsers(members, {
+        type: "message.updated",
+        payload: { message: toggled.message },
+      });
+      response.json(toggled);
+    },
+  );
+
+  router.post(
     "/conversations/:conversationId/messages/:messageId/recall",
     authenticate,
     async (request, response) => {
@@ -964,6 +1026,7 @@ export function createChatRouter(realtime: RealtimeHub) {
             WHERE id = $1`,
           [messageId],
         );
+        await client.query("DELETE FROM message_reactions WHERE message_id = $1", [messageId]);
         return { message: await findMessage(messageId, client), changed: true };
       });
 

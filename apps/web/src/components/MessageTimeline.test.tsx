@@ -61,6 +61,7 @@ function renderTimeline(messages: Message[]) {
     onReply: vi.fn(),
     onAnnotateImage: vi.fn(),
     onCopy: vi.fn(),
+    onReact: vi.fn().mockResolvedValue(true),
     onRecall: vi.fn(),
     onRetry: vi.fn(),
     onDiscard: vi.fn(),
@@ -119,5 +120,32 @@ describe("MessageTimeline", () => {
 
     expect(screen.getByText("你撤回了一条消息")).toBeTruthy();
     expect(screen.queryByText("一条普通消息")).toBeNull();
+  });
+
+  it("可从操作栏添加反应，也可点击聚合标签移除自己的反应", async () => {
+    const reacted = message({
+      reactions: [
+        {
+          emoji: "🎉",
+          count: 2,
+          users: [
+            { id: currentUserId, displayName: "当前用户" },
+            { id: conversation.peer!.id, displayName: "林小满" },
+          ],
+        },
+      ],
+    });
+    const { props, user, container } = renderTimeline([reacted]);
+
+    await user.click(screen.getByRole("button", { name: "添加表情反应" }));
+    await user.click(screen.getByRole("menuitem", { name: "用喜欢回应" }));
+    expect(props.onReact).toHaveBeenCalledWith(reacted, "❤️");
+    expect(container.querySelector(".message-reaction-burst")?.textContent).toBe("❤️");
+
+    await user.click(screen.getByRole("button", { name: /移除庆祝反应/ }));
+    expect(props.onReact).toHaveBeenLastCalledWith(reacted, "🎉");
+    expect(screen.getByRole("button", { name: /当前 2 人/ }).getAttribute("title")).toContain(
+      "当前用户、林小满",
+    );
   });
 });

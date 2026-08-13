@@ -51,7 +51,22 @@ function isMessage(value: unknown): value is Message {
     typeof value.recallableUntil === "string" &&
     (value.replyTo === null || isMessageReply(value.replyTo)) &&
     Array.isArray(value.attachments) &&
+    (value.reactions === undefined ||
+      (Array.isArray(value.reactions) && value.reactions.every(isMessageReaction))) &&
     isReceiptSummary(value.receipt)
+  );
+}
+
+function isMessageReaction(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.emoji === "string" &&
+    typeof value.count === "number" &&
+    Array.isArray(value.users) &&
+    value.users.every(
+      (user) =>
+        isRecord(user) && typeof user.id === "string" && typeof user.displayName === "string",
+    )
   );
 }
 

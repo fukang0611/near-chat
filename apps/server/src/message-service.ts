@@ -17,6 +17,12 @@ export interface ReceiptSummaryDto {
   readCount: number;
 }
 
+export interface MessageReactionDto {
+  emoji: string;
+  count: number;
+  users: Array<{ id: string; displayName: string }>;
+}
+
 export interface MessageReplyDto {
   id: string;
   senderId: string;
@@ -42,6 +48,7 @@ export interface MessageDto {
   recallableUntil: string;
   replyTo: MessageReplyDto | null;
   attachments: AttachmentDto[];
+  reactions: MessageReactionDto[];
   receipt: ReceiptSummaryDto;
 }
 
@@ -83,6 +90,11 @@ interface MessageRow {
     originalName: string;
     contentType: string;
     sizeBytes: string | number;
+  }>;
+  reactions: Array<{
+    emoji: string;
+    count: string | number;
+    users: Array<{ id: string; displayName: string }>;
   }>;
   receipt: {
     recipientCount: string | number;
@@ -135,6 +147,31 @@ const messageSelect = `
              WHERE a.message_id = m.id),
            '[]'::json
          ) AS attachments,
+         COALESCE(
+           (SELECT json_agg(
+              json_build_object(
+                'emoji', reaction_group.emoji,
+                'count', reaction_group.reaction_count,
+                'users', reaction_group.reaction_users
+              ) ORDER BY reaction_group.first_created_at, reaction_group.emoji
+            )
+              FROM (
+                SELECT reaction.emoji,
+                       COUNT(*)::int AS reaction_count,
+                       MIN(reaction.created_at) AS first_created_at,
+                       json_agg(
+                         json_build_object(
+                           'id', reaction_user.id,
+                           'displayName', reaction_user.display_name
+                         ) ORDER BY reaction.created_at, reaction_user.id
+                       ) AS reaction_users
+                  FROM message_reactions reaction
+                  JOIN users reaction_user ON reaction_user.id = reaction.user_id
+                 WHERE reaction.message_id = m.id
+                 GROUP BY reaction.emoji
+              ) reaction_group),
+           '[]'::json
+         ) AS reactions,
          (SELECT json_build_object(
                    'recipientCount', COUNT(*)::int,
                    'deliveredCount', COUNT(delivered_at)::int,
@@ -174,6 +211,10 @@ function toDto(row: MessageRow): MessageDto {
     attachments: row.attachments.map((attachment) => ({
       ...attachment,
       sizeBytes: Number(attachment.sizeBytes),
+    })),
+    reactions: row.reactions.map((reaction) => ({
+      ...reaction,
+      count: Number(reaction.count),
     })),
     receipt: {
       recipientCount: Number(row.receipt.recipientCount),

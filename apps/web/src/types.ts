@@ -58,6 +58,12 @@ export interface MessageReply {
   recalled: boolean;
 }
 
+export interface MessageReaction {
+  emoji: string;
+  count: number;
+  users: Array<{ id: string; displayName: string }>;
+}
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -73,6 +79,8 @@ export interface Message {
   recallableUntil: string;
   replyTo: MessageReply | null;
   attachments: Attachment[];
+  /** 旧版本缓存可能没有该字段，展示层按空数组兼容。 */
+  reactions?: MessageReaction[];
   receipt: ReceiptSummary;
   /** 仅存在于客户端待发送队列，服务端消息不会携带该字段。 */
   deliveryState?: "SENDING" | "FAILED";

@@ -145,6 +145,14 @@ export const api = {
       `/api/conversations/${conversationId}/messages/${messageId}/recall`,
       { method: "POST" },
     ),
+  toggleMessageReaction: (conversationId: string, messageId: string, emoji: string) =>
+    request<{ message: Message; active: boolean }>(
+      `/api/conversations/${conversationId}/messages/${messageId}/reactions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ emoji }),
+      },
+    ),
   markRead: (conversationId: string, throughMessageId?: string) =>
     request<{ unreadCount: number }>(`/api/conversations/${conversationId}/read`, {
       method: "POST",

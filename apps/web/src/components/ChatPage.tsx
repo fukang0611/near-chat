@@ -27,6 +27,7 @@ import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
 import { messageSummary, toMessageReply } from "../utils/message";
 import { messageKindFromContentType } from "../utils/message-kind";
+import type { MessageReactionEmoji } from "../utils/reactions";
 import { isFlashRoomExpired } from "../utils/flash-room";
 import {
   loadNotificationPreferences,
@@ -1200,6 +1201,22 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     }
   };
 
+  const toggleMessageReaction = async (
+    message: Message,
+    emoji: MessageReactionEmoji,
+  ): Promise<boolean> => {
+    try {
+      const result = await api.toggleMessageReaction(message.conversationId, message.id, emoji);
+      if (selectedIdRef.current === message.conversationId) {
+        setMessages((current) => applyMessageUpdate(current, result.message));
+      }
+      return result.active;
+    } catch (error) {
+      notify(errorMessage(error, "消息反应同步失败"), "error");
+      return false;
+    }
+  };
+
   const jumpToMessage = (messageId: string) => {
     const element = document.getElementById(`message-${messageId}`);
     if (element) {
@@ -1428,6 +1445,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 }}
                 onAnnotateImage={(message, _attachment, file) => sendAnnotatedImage(message, file)}
                 onCopy={(message) => void copyMessage(message)}
+                onReact={toggleMessageReaction}
                 onRecall={(message) => void recallMessage(message)}
                 onRetry={retryMessage}
                 onDiscard={discardMessage}
