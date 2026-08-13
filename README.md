@@ -1,21 +1,105 @@
+<div align="center">
+
 # 近聊 NearChat
 
-面向局域网的轻量聊天工具，支持账号与会话管理、单聊与群聊、在线状态、未读与消息回执、历史分页与搜索、引用回复、限时撤回、失败重试，以及文本、图片和附件。PostgreSQL 保存业务数据，MinIO 提供私有文件存储。
+**部署在自己局域网里的轻量团队聊天工具**
 
-完整边界与设计见 [第一阶段整体方案](docs/phase-1-plan.md)。
+账号、消息与文件均由团队自己的 PostgreSQL 和 MinIO 保存，支持浏览器与 Electron 桌面客户端。
 
-## 快速启动
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
+![MinIO](https://img.shields.io/badge/MinIO-Object_Storage-C72E49?logo=minio&logoColor=white)
+
+</div>
+
+![近聊明亮主题聊天界面](docs/images/chat-light.jpg)
+
+## 项目定位
+
+近聊面向办公室、实验室和离线网络中的小型团队，提供一套可以自行部署、开箱即用的内部沟通工具。当前版本已经覆盖日常团队聊天的核心链路，适合作为**局域网内部可用版本**部署；它不是面向公网、多租户或超大规模集群的即时通信平台。
+
+数据流转范围由你的网络和部署方式决定。应用本身不扫描 IP 或端口，用户发现、在线状态和消息投递均由近聊服务统一完成。
+
+## 核心能力
+
+| 领域       | 已实现能力                                                                   |
+| ---------- | ---------------------------------------------------------------------------- |
+| 即时沟通   | 单聊、群聊、WebSocket 实时消息、在线状态、未读计数、送达与已读回执           |
+| 消息能力   | 文本、图片、附件、离线表情、引用回复、历史分页、全文搜索、限时撤回、失败重试 |
+| 文件服务   | MinIO 私有存储、图片弹窗预览、原图下载、用户配额、孤立附件自动回收           |
+| 组织管理   | 管理员创建与停用账号、重置密码、强制退出、操作日志                           |
+| 群聊管理   | 群资料、头像颜色、成员管理、群主转让、退出与解散群聊                         |
+| 使用体验   | 明亮/黑暗主题、响应式布局、桌面通知、提示音、会话草稿                        |
+| 桌面客户端 | Electron 服务器配置、单实例、系统托盘、原生通知、点击通知定位会话            |
+| 部署方式   | Docker Compose、本地 Docker 镜像、Rancher/Kubernetes 单文件清单              |
+
+## 界面预览
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/chat-dark-emoji.jpg" alt="暗色主题与离线表情面板" /></td>
+    <td width="50%"><img src="docs/images/admin-center.jpg" alt="管理员中心" /></td>
+  </tr>
+  <tr>
+    <td align="center">暗色主题与离线表情</td>
+    <td align="center">账号、会话与操作日志管理</td>
+  </tr>
+</table>
+
+<details>
+<summary>查看 Electron 首次连接界面</summary>
+
+<p align="center">
+  <img src="docs/images/desktop-setup.jpg" width="440" alt="Electron 客户端服务器配置" />
+</p>
+
+</details>
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    Browser["浏览器客户端"] -->|HTTP / WebSocket| App["NearChat 应用服务"]
+    Desktop["Electron 桌面客户端"] -->|HTTP / WebSocket| App
+    App --> Web["React 静态资源"]
+    App --> API["Express API 与实时服务"]
+    API --> PG[(PostgreSQL)]
+    API --> MinIO[(MinIO)]
+```
+
+应用容器同时提供 React 页面、HTTP API 和 WebSocket 服务。PostgreSQL 保存用户、会话、消息与审计数据，MinIO 保存图片及附件；桌面客户端只负责桌面集成，不在用户电脑上运行后端或中间件。
+
+## 快速体验
+
+### 环境要求
+
+- Docker 24+
+- Docker Compose v2
+
+### 启动完整服务
 
 ```bash
+git clone https://github.com/fukang0611/near-chat.git
+cd near-chat
 docker compose up --build -d
 ```
 
-启动后访问：
+启动完成后访问：
 
-- 聊天界面：<http://localhost:3000>
+- 近聊：<http://localhost:3000>
 - MinIO 控制台：<http://localhost:9001>
 
-首次启动会创建演示账号：
+查看服务状态：
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+本地体验环境会初始化以下账号：
 
 | 用户名  | 密码       | 角色     |
 | ------- | ---------- | -------- |
@@ -23,21 +107,7 @@ docker compose up --build -d
 | `alice` | `alice123` | 普通用户 |
 | `bob`   | `bob123`   | 普通用户 |
 
-这些密码仅用于本地快速体验。共享给局域网其他用户前，请通过环境变量更换初始化密码和 `JWT_SECRET`。
-设置 `SEED_DEMO_USERS=false` 可在全新数据库中只创建管理员，不创建 Alice 和 Bob。
-
-## Rancher 部署
-
-Rancher/Kubernetes 单文件资源清单位于 `deploy/rancher/near-chat.yaml`。导入前修改镜像地址、PostgreSQL URL、MinIO 服务信息、密钥和 Ingress 域名，具体说明见 `deploy/rancher/README.md`。
-
-当前 WebSocket 在线状态保存在应用进程内，Rancher 部署必须保持单副本。
-
-查看状态和日志：
-
-```bash
-docker compose ps
-docker compose logs -f app
-```
+> 演示密码只用于本机体验。共享到局域网前，请替换 `JWT_SECRET`、MinIO/PostgreSQL 凭据与初始化密码；正式环境建议设置 `SEED_DEMO_USERS=false`。
 
 停止服务：
 
@@ -45,91 +115,94 @@ docker compose logs -f app
 docker compose down
 ```
 
-如需同时删除 PostgreSQL 与 MinIO 数据卷，必须明确执行 `docker compose down -v`；该操作不可恢复。
+`docker compose down -v` 会永久删除 PostgreSQL 与 MinIO 数据卷，请仅在明确需要清空数据时执行。
+
+## Rancher / Kubernetes 部署
+
+仓库提供 [Rancher 部署清单](deploy/rancher/near-chat.yaml)。目标环境已经具备 PostgreSQL 和 MinIO 时，只需要构建并导入近聊应用镜像，然后配置：
+
+1. 应用镜像地址。
+2. PostgreSQL 连接地址。
+3. MinIO 地址、Bucket 与访问凭据。
+4. JWT 密钥和初始管理员密码。
+5. Ingress 域名或 Rancher Service 暴露方式。
+
+具体步骤见 [Rancher 部署说明](deploy/rancher/README.md)。当前在线状态和 WebSocket 广播保存在单个应用进程中，因此 Deployment 必须保持 `replicas: 1`。
+
+## Electron 桌面客户端
+
+桌面客户端首次启动时填写团队的近聊访问地址，验证通过后会把地址保存在本机。它提供系统托盘、原生通知、服务器切换和窗口生命周期管理，并自动读取服务端发布的最新前端页面。
+
+```bash
+# 开发模式
+npm run desktop:start
+
+# 打包当前系统目录版
+npm run desktop:package
+
+# 在 Windows x64 构建机生成安装包
+npm run desktop:make:win
+```
+
+产物位于 `apps/desktop/out/`。更多说明见 [桌面客户端文档](docs/desktop-client.md)。
 
 ## 本地开发
 
-先启动中间件：
+需要 Node.js 20+ 与 Docker。
 
 ```bash
 docker compose up -d postgres minio
-```
-
-将 `.env.example` 复制为 `.env` 后运行：
-
-```bash
+cp .env.example .env
 npm install
 npm run dev
 ```
 
-前端开发服务器为 <http://localhost:5173>，后端为 <http://localhost:3000>。
+- Vite 开发服务器：<http://localhost:5173>
+- API 与 WebSocket 服务：<http://localhost:3000>
 
-## Electron 桌面客户端
-
-桌面客户端复用服务器提供的同一套 Web 界面，首次启动时填写局域网服务器地址。客户端负责窗口、托盘、系统通知和本机服务器配置，不在本机运行 PostgreSQL、MinIO 或 Node.js 服务。
-
-启动桌面开发版：
+常用命令：
 
 ```bash
-npm run desktop:start
+npm run check          # 格式、类型、单元测试与构建
+npm run smoke          # 第一阶段核心链路冒烟测试
+npm run smoke:phase2   # 文件治理、群管理与账号管理
+npm run smoke:phase3   # 回执、搜索、撤回与实时事件
 ```
 
-打包当前系统版本：
+## 关键配置
 
-```bash
-npm run desktop:package
-```
+完整配置示例见 [.env.example](.env.example)。
 
-Windows x64 安装包需在 Windows x64 构建机执行：
+| 变量                            | 默认值          | 用途                  |
+| ------------------------------- | --------------- | --------------------- |
+| `DATABASE_URL`                  | 本地 PostgreSQL | 业务数据库连接地址    |
+| `JWT_SECRET`                    | 仅供本地开发    | 登录令牌签名密钥      |
+| `MINIO_*`                       | 本地 MinIO      | 对象存储连接与 Bucket |
+| `FILE_MAX_BYTES`                | `52428800`      | 单文件最大 50 MiB     |
+| `FILE_USER_QUOTA_BYTES`         | `1073741824`    | 单用户文件配额 1 GiB  |
+| `FILE_ORPHAN_TTL_HOURS`         | `24`            | 未发送附件保留时间    |
+| `MESSAGE_RECALL_WINDOW_SECONDS` | `120`           | 消息可撤回时限        |
+| `SEED_DEMO_USERS`               | `true`          | 是否初始化演示用户    |
 
-```bash
-npm run desktop:make:win
-```
-
-产物位于 `apps/desktop/out/`。详细架构、配置位置和离线交付方式见 [桌面客户端说明](docs/desktop-client.md)。
-
-常用质量检查：
-
-```bash
-npm run check
-npm run smoke # 需要本地服务已启动
-npm run smoke:phase2
-npm run smoke:phase3
-```
-
-## 代码结构
+## 目录结构
 
 ```text
-apps/server/src/
-  app.ts                 HTTP 应用装配与静态资源托管
-  routes/                登录、聊天、文件和用户管理领域路由
-  message-service.ts     消息查询与 DTO 映射
-  receipt-service.ts     送达/已读状态推进与实时广播
-  realtime.ts            WebSocket 在线状态与事件分发
-  database.ts / minio.ts 基础设施初始化
+apps/
+├── server/      Express、WebSocket、PostgreSQL 与 MinIO 服务
+├── web/         React + Vite Web 客户端
+└── desktop/     Electron 主进程、预加载桥接与配置界面
 
-apps/web/src/
-  components/            页面与可复用界面模块
-  utils/                 格式化、消息摘要与浏览器提醒偏好
-  api.ts                  HTTP/WebSocket 客户端入口
-  styles.css              基础布局和兼容层
-  product-polish.css      产品视觉与交互覆盖层
-
-apps/desktop/
-  src/main.ts             Electron 窗口、托盘、通知与服务器连接
-  src/*-preload.ts        最小权限的页面桥接
-  static/                 首次服务器配置界面
-  forge.config.cjs        Windows/macOS 打包配置
+deploy/rancher/  Rancher / Kubernetes 部署资源
+docs/            方案、桌面端说明、发布记录与截图
+scripts/         分阶段端到端冒烟测试
 ```
 
-注释主要说明不直观的约束和设计原因，例如消息幂等、文件访问权限、实时连接生命周期与焦点管理；能够由代码直接表达的步骤不重复注释。
+## 当前边界
 
-## 当前限制
+- 面向可信局域网内部团队使用，未按公网 SaaS 的威胁模型设计。
+- 当前实时在线状态位于单个应用进程，暂不支持多副本水平扩容。
+- 单文件默认上限为 50 MiB，上传流量由应用服务代理。
+- 暂不提供端到端加密、音视频通话、消息漫游同步策略或移动原生客户端。
+- 通知权限仍由浏览器或操作系统控制。
 
-- 单文件默认最大 50 MB，上传由应用服务代理。
-- 每位用户默认拥有 1 GiB 文件配额，超过 24 小时未发送的附件会自动回收；均可通过环境变量调整。
-- 发送者默认可在 120 秒内撤回消息，时限可通过 `MESSAGE_RECALL_WINDOW_SECONDS` 调整。
-- 桌面通知和提示音是当前浏览器或桌面客户端的个人偏好，通知仍受操作系统权限控制。
-- 在线状态与实时广播保存在单个应用实例内，暂不支持多副本。
-- 不进行 IP/端口扫描；在线用户由聊天服务统一发现。
-- 暂无端到端加密和音视频。
+更完整的需求边界与阶段设计见 [第一阶段整体方案](docs/phase-1-plan.md)。
