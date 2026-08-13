@@ -22,3 +22,18 @@ export interface DesktopNotificationPermissionResult {
   status: "granted" | "requested" | "unsupported" | "failed";
   message: string;
 }
+
+export interface DesktopClipboardRelayPayload {
+  id: string;
+  text: string | null;
+  imageDataUrl: string | null;
+  imageSizeBytes: number | null;
+  capturedAt: string;
+  issue: string | null;
+}
+
+export interface DesktopClipboardRelayStatus {
+  registered: boolean;
+  accelerator: string;
+  message: string;
+}

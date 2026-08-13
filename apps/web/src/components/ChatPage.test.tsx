@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -124,6 +124,10 @@ describe("ChatPage message scrolling", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    Object.defineProperty(window, "nearChatDesktop", {
+      configurable: true,
+      value: undefined,
+    });
     if (originalScrollHeight) {
       Object.defineProperty(HTMLElement.prototype, "scrollHeight", originalScrollHeight);
     } else {
@@ -223,5 +227,73 @@ describe("ChatPage message scrolling", () => {
 
     expect(nudgeConversation).toHaveBeenCalledWith("conversation-direct");
     expect(await screen.findByText("已敲了敲 周远")).toBeTruthy();
+  });
+
+  it("接收 Electron 剪贴板事件并在确认目标后复用标准发送链路", async () => {
+    const user = userEvent.setup();
+    let relayListener: ((payload: DesktopClipboardRelayPayload) => void) | null = null;
+    Object.defineProperty(window, "nearChatDesktop", {
+      configurable: true,
+      value: {
+        platform: "darwin",
+        openServerSettings: vi.fn(),
+        requestNotificationPermission: vi.fn(),
+        showNotification: vi.fn(),
+        getClipboardRelayStatus: vi.fn().mockResolvedValue({
+          registered: true,
+          accelerator: "CommandOrControl+Shift+V",
+          message: "快捷键可用：⌘⇧V",
+        }),
+        requestClipboardRelay: vi.fn(),
+        onClipboardRelay: (listener: (payload: DesktopClipboardRelayPayload) => void) => {
+          relayListener = listener;
+          return vi.fn();
+        },
+        onNotificationClick: vi.fn().mockReturnValue(vi.fn()),
+      },
+    });
+    vi.spyOn(api, "directConversation").mockResolvedValue({
+      conversationId: "conversation-direct",
+    });
+    const sendMessage = vi
+      .spyOn(api, "sendMessage")
+      .mockImplementation(async (conversationId, input) => ({
+        message: {
+          ...message(conversationId, input.text ?? ""),
+          id: "message-clipboard-relay",
+          clientMessageId: input.clientMessageId,
+        },
+      }));
+
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+    await screen.findByText("conversation-one 的最新消息");
+
+    act(() => {
+      relayListener?.({
+        id: "relay-one",
+        text: "桌面剪贴板接力",
+        imageDataUrl: null,
+        imageSizeBytes: null,
+        capturedAt: "2026-08-13T12:00:00.000Z",
+        issue: null,
+      });
+    });
+    await user.click(await screen.findByRole("button", { name: "确认发送" }));
+
+    await waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith(
+        "conversation-direct",
+        expect.objectContaining({ text: "桌面剪贴板接力" }),
+      ),
+    );
+    expect(screen.queryByRole("dialog", { name: "发送剪贴板内容" })).toBeNull();
   });
 });

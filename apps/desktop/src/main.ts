@@ -1,9 +1,12 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   app,
   BrowserWindow,
+  clipboard,
+  globalShortcut,
   ipcMain,
   Menu,
   nativeImage,
@@ -15,11 +18,13 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import type {
+  DesktopClipboardRelayStatus,
   DesktopNotificationInput,
   DesktopNotificationPermissionResult,
   ServerConnectionResult,
   SetupState,
 } from "./contracts";
+import { buildClipboardRelayPayload, CLIPBOARD_RELAY_ACCELERATOR } from "./clipboard-relay";
 import { DEFAULT_SERVER_URL, normalizeServerUrl, serverHealthUrl } from "./server-url";
 
 const APP_NAME = "近聊";
@@ -32,6 +37,7 @@ let tray: Tray | null = null;
 let configuredServerUrl: string | null = null;
 let setupErrorMessage: string | null = null;
 let isQuitting = false;
+let clipboardRelayRegistered = false;
 
 const userDataOverride = process.env.NEAR_CHAT_DESKTOP_USER_DATA?.trim();
 if (userDataOverride) app.setPath("userData", path.resolve(userDataOverride));
@@ -182,10 +188,67 @@ function showMainWindow(): void {
   mainWindow?.focus();
 }
 
+function clipboardRelayStatus(): DesktopClipboardRelayStatus {
+  const shortcutLabel = process.platform === "darwin" ? "⌘⇧V" : "Ctrl+Shift+V";
+  return clipboardRelayRegistered
+    ? {
+        registered: true,
+        accelerator: CLIPBOARD_RELAY_ACCELERATOR,
+        message: `快捷键可用：${shortcutLabel}`,
+      }
+    : {
+        registered: false,
+        accelerator: CLIPBOARD_RELAY_ACCELERATOR,
+        message: "快捷键被其他应用占用，可从这里手动打开",
+      };
+}
+
+/** 读取动作发生在用户按下快捷键之后，剪贴板内容只发送到当前近聊渲染页。 */
+function requestClipboardRelay(): void {
+  if (!configuredServerUrl) {
+    showSetupWindow("请先连接近聊服务器，再使用剪贴板接力");
+    return;
+  }
+
+  const image = clipboard.readImage();
+  const payload = buildClipboardRelayPayload({
+    id: randomUUID(),
+    text: clipboard.readText(),
+    imagePng: image.isEmpty() ? null : image.toPNG(),
+    capturedAt: new Date().toISOString(),
+  });
+  showMainWindow();
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+
+  const sendPayload = () => {
+    if (!window.isDestroyed()) window.webContents.send("desktop:clipboard-relay", payload);
+  };
+  if (window.webContents.isLoadingMainFrame())
+    window.webContents.once("did-finish-load", sendPayload);
+  else sendPayload();
+}
+
+function registerClipboardRelayShortcut(): void {
+  try {
+    clipboardRelayRegistered = globalShortcut.register(
+      CLIPBOARD_RELAY_ACCELERATOR,
+      requestClipboardRelay,
+    );
+  } catch {
+    clipboardRelayRegistered = false;
+  }
+}
+
 function refreshTrayMenu(): void {
   if (!tray) return;
   const template: MenuItemConstructorOptions[] = [
     { label: "打开近聊", click: showMainWindow },
+    {
+      label: "剪贴板接力…",
+      sublabel: clipboardRelayStatus().message,
+      click: requestClipboardRelay,
+    },
     {
       label: configuredServerUrl ? `服务器：${configuredServerUrl}` : "尚未配置服务器",
       enabled: false,
@@ -463,6 +526,22 @@ function registerIpcHandlers(): void {
     showSetupWindow();
   });
 
+  ipcMain.handle("desktop:get-clipboard-relay-status", (event): DesktopClipboardRelayStatus => {
+    if (!isConfiguredServerSender(event)) {
+      return {
+        registered: false,
+        accelerator: CLIPBOARD_RELAY_ACCELERATOR,
+        message: "不允许的剪贴板接力状态请求",
+      };
+    }
+    return clipboardRelayStatus();
+  });
+
+  ipcMain.handle("desktop:request-clipboard-relay", (event) => {
+    if (!isConfiguredServerSender(event)) return;
+    requestClipboardRelay();
+  });
+
   ipcMain.handle(
     "desktop:request-notification-permission",
     async (event): Promise<DesktopNotificationPermissionResult> => {
@@ -563,6 +642,7 @@ async function startApplication(): Promise<void> {
   registerIpcHandlers();
   configurePermissions();
   configureApplicationMenu();
+  registerClipboardRelayShortcut();
   createTray();
 
   configuredServerUrl = await readConfiguredServerUrl();
@@ -588,6 +668,7 @@ if (!squirrelEventHandled) {
     app.on("second-instance", showMainWindow);
     app.on("before-quit", () => {
       isQuitting = true;
+      globalShortcut.unregisterAll();
     });
     app.on("activate", showMainWindow);
     app.on("window-all-closed", () => {

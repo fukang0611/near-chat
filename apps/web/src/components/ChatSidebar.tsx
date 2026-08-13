@@ -1,4 +1,5 @@
 import {
+  ClipboardPaste,
   HardDrive,
   LogOut,
   MessageCircleMore,
@@ -148,8 +149,23 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
   const [showSystemMenu, setShowSystemMenu] = useState(false);
+  const [clipboardRelayStatus, setClipboardRelayStatus] =
+    useState<DesktopClipboardRelayStatus | null>(null);
   const [contactDropTargetId, setContactDropTargetId] = useState<string | null>(null);
   const systemMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    void window.nearChatDesktop
+      ?.getClipboardRelayStatus()
+      .then((status) => {
+        if (active) setClipboardRelayStatus(status);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   /** 拖入即建立空间对应关系，目标行从指针进入开始持续反馈。 */
   const handleContactDrag = (event: DragEvent<HTMLButtonElement>, peerId: string) => {
@@ -333,20 +349,36 @@ export function ChatSidebar({
                   </span>
                 </div>
                 {window.nearChatDesktop && (
-                  <button
-                    className="system-settings-row"
-                    type="button"
-                    onClick={() => {
-                      setShowSystemMenu(false);
-                      void window.nearChatDesktop?.openServerSettings();
-                    }}
-                  >
-                    <Settings2 size={16} />
-                    <span>
-                      <strong>服务器设置</strong>
-                      <small>更换当前连接的局域网服务</small>
-                    </span>
-                  </button>
+                  <>
+                    <button
+                      className={`system-settings-row clipboard-relay-row ${clipboardRelayStatus && !clipboardRelayStatus.registered ? "has-warning" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setShowSystemMenu(false);
+                        void window.nearChatDesktop?.requestClipboardRelay();
+                      }}
+                    >
+                      <ClipboardPaste size={16} />
+                      <span>
+                        <strong>剪贴板接力</strong>
+                        <small>{clipboardRelayStatus?.message ?? "正在读取快捷键状态"}</small>
+                      </span>
+                    </button>
+                    <button
+                      className="system-settings-row"
+                      type="button"
+                      onClick={() => {
+                        setShowSystemMenu(false);
+                        void window.nearChatDesktop?.openServerSettings();
+                      }}
+                    >
+                      <Settings2 size={16} />
+                      <span>
+                        <strong>服务器设置</strong>
+                        <small>更换当前连接的局域网服务</small>
+                      </span>
+                    </button>
+                  </>
                 )}
                 <footer>
                   <ShieldCheck size={13} />
