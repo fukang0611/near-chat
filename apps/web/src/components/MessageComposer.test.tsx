@@ -1,8 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "../types";
 import { MessageComposer } from "./MessageComposer";
+
+const defaultViewport = { width: window.innerWidth, height: window.innerHeight };
 
 const replyTarget: Message = {
   id: "cf09370d-09f3-4d82-8960-0488023f9f2d",
@@ -49,6 +51,18 @@ describe("MessageComposer", () => {
         getItem: (key: string) => values.get(key) ?? null,
         setItem: (key: string, value: string) => values.set(key, value),
       },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: defaultViewport.width,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: defaultViewport.height,
     });
   });
 
@@ -99,6 +113,25 @@ describe("MessageComposer", () => {
 
     await user.click(document.body);
     expect(screen.queryByRole("dialog", { name: "选择表情" })).toBeNull();
+  });
+
+  it("按完整输入器边界把表情面板定位到输入内容上方", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_280 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 720 });
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.classList.contains("composer")) return new DOMRect(371, 566, 873, 122);
+      if (this.classList.contains("emoji-picker-anchor")) return new DOMRect(433, 637, 36, 36);
+      return new DOMRect();
+    });
+    const { user } = renderComposer({ replyingTo: null });
+
+    await user.click(screen.getByRole("button", { name: "选择表情" }));
+
+    const anchor = screen.getByRole("button", { name: "选择表情" }).parentElement;
+    expect(anchor?.style.getPropertyValue("--emoji-picker-offset")).toBe("117px");
+    expect(anchor?.style.getPropertyValue("--emoji-picker-viewport-bottom")).toBe("164px");
   });
 
   it("剩余字数不足时不会截断双字节表情", async () => {

@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -12,6 +13,10 @@ import type { Attachment, Message } from "../types";
 import { formatBytes } from "../utils/format";
 import { messageSummary } from "../utils/message";
 import { EmojiPicker } from "./EmojiPicker";
+
+const EMOJI_PICKER_WIDTH = 354;
+const EMOJI_PICKER_GAP = 10;
+const EMOJI_PICKER_VIEWPORT_MARGIN = 12;
 
 export interface UploadProgress {
   name: string;
@@ -53,11 +58,52 @@ export function MessageComposer({
 }: MessageComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const emojiAnchorRef = useRef<HTMLDivElement>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const selectionRef = useRef({ start: text.length, end: text.length });
 
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), []);
+
+  const updateEmojiPickerPosition = useCallback(() => {
+    const composer = composerRef.current;
+    const anchor = emojiAnchorRef.current;
+    if (!composer || !anchor) return;
+
+    const composerRect = composer.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const maximumLeft = Math.max(
+      EMOJI_PICKER_VIEWPORT_MARGIN,
+      viewportWidth - EMOJI_PICKER_VIEWPORT_MARGIN - EMOJI_PICKER_WIDTH,
+    );
+    const clampedLeft = Math.min(
+      Math.max(anchorRect.left, EMOJI_PICKER_VIEWPORT_MARGIN),
+      maximumLeft,
+    );
+
+    // 桌面端相对按钮定位，移动端相对视口定位；两者都以完整输入器顶部为下边界。
+    anchor.style.setProperty(
+      "--emoji-picker-offset",
+      `${Math.round(anchorRect.bottom - composerRect.top + EMOJI_PICKER_GAP)}px`,
+    );
+    anchor.style.setProperty(
+      "--emoji-picker-viewport-bottom",
+      `${Math.round(viewportHeight - composerRect.top + EMOJI_PICKER_GAP)}px`,
+    );
+    anchor.style.setProperty(
+      "--emoji-picker-max-height",
+      `${Math.max(
+        160,
+        Math.floor(composerRect.top - EMOJI_PICKER_GAP - EMOJI_PICKER_VIEWPORT_MARGIN),
+      )}px`,
+    );
+    anchor.style.setProperty(
+      "--emoji-picker-shift-x",
+      `${Math.round(clampedLeft - anchorRect.left)}px`,
+    );
+  }, []);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -69,6 +115,23 @@ export function MessageComposer({
   useEffect(() => {
     if (replyingTo) textareaRef.current?.focus();
   }, [replyingTo]);
+
+  useLayoutEffect(() => {
+    if (!showEmojiPicker) return;
+
+    updateEmojiPickerPosition();
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateEmojiPickerPosition);
+    if (composerRef.current) resizeObserver?.observe(composerRef.current);
+    window.addEventListener("resize", updateEmojiPickerPosition);
+    window.visualViewport?.addEventListener("resize", updateEmojiPickerPosition);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateEmojiPickerPosition);
+      window.visualViewport?.removeEventListener("resize", updateEmojiPickerPosition);
+    };
+  }, [showEmojiPicker, updateEmojiPickerPosition]);
 
   useEffect(() => {
     if (!showEmojiPicker) return;
@@ -137,7 +200,7 @@ export function MessageComposer({
 
   return (
     <form className="composer-wrap" onSubmit={submit}>
-      <div className="composer">
+      <div className="composer" ref={composerRef}>
         {replyingTo && (
           <div className="composer-reply">
             <span className="composer-reply-icon">
