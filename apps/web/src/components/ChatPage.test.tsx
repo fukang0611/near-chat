@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
@@ -17,6 +17,15 @@ const currentUser: User = {
   avatarUrl: null,
   role: "ADMIN",
 };
+const peerUser: User = {
+  id: "peer-user",
+  username: "zhouyuan",
+  displayName: "周远",
+  avatarColor: "#2fae91",
+  avatarUrl: null,
+  online: true,
+  role: "USER",
+};
 const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
 
 function conversation(id: string, title: string): Conversation {
@@ -31,6 +40,23 @@ function conversation(id: string, title: string): Conversation {
     members: [currentUser],
     memberCount: 1,
     onlineMemberCount: 1,
+    lastMessage: null,
+    unreadCount: 0,
+  };
+}
+
+function directConversation(id: string): Conversation {
+  return {
+    id,
+    type: "DIRECT",
+    title: peerUser.displayName,
+    avatarColor: peerUser.avatarColor,
+    avatarUrl: peerUser.avatarUrl,
+    ownerId: null,
+    peer: peerUser,
+    members: [currentUser, peerUser],
+    memberCount: 2,
+    onlineMemberCount: 2,
     lastMessage: null,
     unreadCount: 0,
   };
@@ -78,8 +104,9 @@ describe("ChatPage message scrolling", () => {
     const conversations = [
       conversation("conversation-one", "第一会话"),
       conversation("conversation-two", "第二会话"),
+      directConversation("conversation-direct"),
     ];
-    vi.spyOn(api, "users").mockResolvedValue({ users: [currentUser] });
+    vi.spyOn(api, "users").mockResolvedValue({ users: [peerUser] });
     vi.spyOn(api, "conversations").mockResolvedValue({ conversations });
     vi.spyOn(api, "messages").mockImplementation(async (conversationId) => ({
       messages: [message(conversationId, `${conversationId} 的最新消息`)],
@@ -125,5 +152,55 @@ describe("ChatPage message scrolling", () => {
     await screen.findByText("conversation-two 的最新消息");
 
     await waitFor(() => expect(messageScroll?.scrollTop).toBe(1_200));
+  });
+
+  it("将联系人上的拖拽文本通过标准单聊消息链路直接发送", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "directConversation").mockResolvedValue({
+      conversationId: "conversation-direct",
+    });
+    const sendMessage = vi
+      .spyOn(api, "sendMessage")
+      .mockImplementation(async (conversationId, input) => ({
+        message: {
+          ...message(conversationId, input.text ?? ""),
+          id: "message-avatar-drop",
+          clientMessageId: input.clientMessageId,
+        },
+      }));
+
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("conversation-one 的最新消息");
+    await user.click(screen.getByRole("tab", { name: /联系人/ }));
+    const target = screen.getByRole("button", { name: /周远/ });
+    const dataTransfer = {
+      types: ["text/plain"],
+      files: [],
+      dropEffect: "none",
+      getData: () => "从头像直接发送",
+    } as unknown as DataTransfer;
+
+    fireEvent.drop(target, { dataTransfer });
+
+    await waitFor(() => expect(api.directConversation).toHaveBeenCalledWith("peer-user"));
+    await waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith(
+        "conversation-direct",
+        expect.objectContaining({
+          text: "从头像直接发送",
+          attachmentIds: [],
+        }),
+      ),
+    );
+    expect(await screen.findByText("已投递给 周远")).toBeTruthy();
   });
 });

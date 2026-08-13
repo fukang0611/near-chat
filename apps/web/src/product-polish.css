@@ -6376,3 +6376,140 @@ body,
     animation: none;
   }
 }
+
+/* 头像投递：拖拽内容进入单聊/联系人时，用目标行本身承接操作反馈。 */
+.conversation-item {
+  position: relative;
+  overflow: hidden;
+}
+
+.conversation-item.is-contact-drop-target,
+.conversation-item.is-contact-delivering {
+  border-color: rgba(103, 87, 232, 0.42);
+  box-shadow:
+    0 8px 22px rgba(89, 72, 218, 0.12),
+    0 0 0 3px rgba(103, 87, 232, 0.08);
+}
+
+.contact-drop-cue {
+  position: absolute;
+  z-index: 4;
+  inset: 4px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 12px;
+  border: 1px solid rgba(103, 87, 232, 0.2);
+  border-radius: 12px;
+  color: #5443dc;
+  background: rgba(247, 245, 255, 0.94);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.74);
+  backdrop-filter: blur(14px) saturate(135%);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.005em;
+  pointer-events: none;
+  transform-origin: 18% 50%;
+  animation: contact-drop-materialize 160ms cubic-bezier(0.2, 0.72, 0.25, 1) both;
+}
+
+.contact-drop-cue > svg {
+  flex: none;
+}
+
+.contact-drop-cue.is-progress {
+  justify-content: flex-start;
+}
+
+.contact-drop-cue.is-progress > span {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.contact-drop-cue.is-progress strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: inherit;
+  font-size: inherit;
+  white-space: nowrap;
+}
+
+.contact-drop-cue.is-progress > i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 0 2px 2px 0;
+  background: #6757e8;
+  transition: width 120ms linear;
+}
+
+@keyframes contact-drop-materialize {
+  from {
+    opacity: 0;
+    transform: scale(0.975);
+    backdrop-filter: blur(3px) saturate(100%);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    backdrop-filter: blur(14px) saturate(135%);
+  }
+}
+
+:root[data-theme="dark"] .conversation-item.is-contact-drop-target,
+:root[data-theme="dark"] .conversation-item.is-contact-delivering {
+  border-color: rgba(143, 126, 245, 0.48);
+  box-shadow:
+    0 9px 22px rgba(0, 0, 0, 0.24),
+    0 0 0 3px rgba(135, 120, 242, 0.1);
+}
+
+:root[data-theme="dark"] .contact-drop-cue {
+  border-color: rgba(143, 126, 245, 0.28);
+  color: #c6bfff;
+  background: rgba(42, 40, 59, 0.94);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.055);
+}
+
+:root[data-theme="dark"] .contact-drop-cue.is-progress > i {
+  background: #9384f5;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .contact-drop-cue {
+    background: #f6f3ff;
+    backdrop-filter: none;
+  }
+
+  :root[data-theme="dark"] .contact-drop-cue {
+    background: #2a283b;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .conversation-item.is-contact-drop-target,
+  .conversation-item.is-contact-delivering,
+  .contact-drop-cue {
+    border-color: currentColor;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contact-drop-cue {
+    animation: none;
+  }
+
+  .contact-drop-cue.is-progress > i {
+    transition: none;
+  }
+}

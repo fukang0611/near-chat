@@ -37,7 +37,12 @@ import {
 import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
 import { Avatar } from "./Avatar";
-import { ChatSidebar, type SidebarMode } from "./ChatSidebar";
+import {
+  ChatSidebar,
+  type ContactDeliveryProgress,
+  type ContactDropPayload,
+  type SidebarMode,
+} from "./ChatSidebar";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { GroupManagementDialog } from "./GroupManagementDialog";
 import { MessageComposer } from "./MessageComposer";
@@ -139,6 +144,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
+  const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
   const [toast, setToast] = useState<ToastNotice | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const messageScrollRef = useRef<HTMLDivElement>(null);
@@ -147,6 +153,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const messagesRef = useRef<Message[]>([]);
   const notificationPreferencesRef = useRef(notificationPreferences);
   const confirmedClientMessageIdsRef = useRef(new Set<string>());
+  const contactDeliveryInFlightRef = useRef(false);
   const scrollActionRef = useRef<
     { type: "bottom" } | { type: "preserve"; previousHeight: number; previousTop: number } | null
   >(null);
@@ -662,6 +669,10 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const chooseFile = async (file: File | undefined) => {
     const targetConversationId = selectedId;
     if (!file || !targetConversationId) return;
+    if (contactDeliveryInFlightRef.current) {
+      notify("头像投递完成后即可继续选择附件", "info");
+      return;
+    }
     if (pendingAttachments[targetConversationId]) {
       notify("请先发送或移除当前待发送附件", "info");
       return;
@@ -723,7 +734,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     });
   };
 
-  const deliverOutboxMessage = async (message: Message) => {
+  const deliverOutboxMessage = async (message: Message): Promise<boolean> => {
     const conversationId = message.conversationId;
     setOutbox((current) => ({
       ...current,
@@ -747,11 +758,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         setMessages((current) => upsertServerMessage(current, result.message));
       }
       refreshConversationsInBackground();
+      return true;
     } catch (error) {
       // WebSocket 可能先于 HTTP 响应确认消息；此时不能把已送达消息误标为失败。
       if (confirmedClientMessageIdsRef.current.has(message.clientMessageId)) {
         removeOutboxMessage(conversationId, message.clientMessageId);
-        return;
+        return true;
       }
       const failure = errorMessage(error, "发送失败，请重试");
       setOutbox((current) => ({
@@ -763,16 +775,24 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         ),
       }));
       notify("消息发送失败，可在消息下方重试", "error");
+      return false;
     }
   };
 
-  const send = () => {
-    if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
-    const conversationId = selectedId;
+  /**
+   * 所有发送入口都先进入同一待发送队列。编辑器、头像投递以及后续桌面快捷发送
+   * 因而共享幂等键、乐观消息、失败重试和附件清理语义。
+   */
+  const enqueueOutgoingMessage = (
+    conversationId: string,
+    input: { text?: string; attachment?: Attachment | null; replyTarget?: Message | null },
+  ): Promise<boolean> => {
     const clientMessageId = createClientMessageId();
     const createdAt = new Date().toISOString();
-    const type = pendingAttachment
-      ? pendingAttachment.contentType.startsWith("image/")
+    const normalizedText = input.text?.trim() ?? "";
+    const attachment = input.attachment ?? null;
+    const type = attachment
+      ? attachment.contentType.startsWith("image/")
         ? "IMAGE"
         : "FILE"
       : "TEXT";
@@ -785,12 +805,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       senderAvatarUrl: user.avatarUrl,
       clientMessageId,
       type,
-      textContent: text.trim() || null,
+      textContent: normalizedText || null,
       createdAt,
       recalledAt: null,
       recallableUntil: new Date(Date.now() + 120_000).toISOString(),
-      replyTo: replyingTo ? toMessageReply(replyingTo) : null,
-      attachments: pendingAttachment ? [pendingAttachment] : [],
+      replyTo: input.replyTarget ? toMessageReply(input.replyTarget) : null,
+      attachments: attachment ? [attachment] : [],
       receipt: { recipientCount: 0, deliveredCount: 0, readCount: 0 },
       deliveryState: "SENDING",
     };
@@ -799,6 +819,18 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       ...current,
       [conversationId]: [...(current[conversationId] ?? []), optimisticMessage],
     }));
+    if (selectedIdRef.current === conversationId) scrollActionRef.current = { type: "bottom" };
+    return deliverOutboxMessage(optimisticMessage);
+  };
+
+  const send = () => {
+    if (!selectedId || sending || (!text.trim() && !pendingAttachment)) return;
+    const conversationId = selectedId;
+    void enqueueOutgoingMessage(conversationId, {
+      text,
+      attachment: pendingAttachment,
+      replyTarget: replyingTo,
+    });
     setDrafts((current) => {
       const next = { ...current };
       delete next[conversationId];
@@ -814,8 +846,93 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       delete next[conversationId];
       return next;
     });
-    scrollActionRef.current = { type: "bottom" };
-    void deliverOutboxMessage(optimisticMessage);
+  };
+
+  /**
+   * 头像投递是“松手即发送”的快捷入口：先解析或复用单聊，再沿用标准上传与
+   * 待发送队列。它不占用编辑器草稿，也不会把投递附件留成编辑器待发送项。
+   */
+  const deliverToContact = async (peerId: string, payload: ContactDropPayload) => {
+    if (contactDeliveryInFlightRef.current || uploadState) {
+      notify("当前已有文件或头像投递正在处理", "info");
+      return;
+    }
+
+    const peer = users.find((candidate) => candidate.id === peerId);
+    if (!peer) {
+      notify("联系人已不可用，请刷新后重试", "error");
+      return;
+    }
+
+    const file = payload.kind === "files" ? payload.files[0] : null;
+    if (payload.kind === "files" && payload.files.length !== 1) {
+      notify("一次只能投递一个图片或文件", "info");
+      return;
+    }
+    if (file && file.size > MAX_FILE_BYTES) {
+      notify("单个文件不能超过 50 MB", "error");
+      return;
+    }
+    if (payload.kind === "text" && payload.text.length > 5_000) {
+      notify("投递文本不能超过 5000 个字符", "error");
+      return;
+    }
+
+    contactDeliveryInFlightRef.current = true;
+    setContactDelivery({
+      peerId,
+      label: file?.name ?? "文字消息",
+      progress: file ? 0 : null,
+    });
+
+    let attachment: Attachment | null = null;
+    let queued = false;
+    let targetConversationId: string | null = null;
+    try {
+      const direct = await api.directConversation(peerId);
+      targetConversationId = direct.conversationId;
+      await refreshConversations();
+      messageTargetRef.current = null;
+      setHighlightedMessageId(null);
+      selectedIdRef.current = direct.conversationId;
+      setSelectedId(direct.conversationId);
+      setSidebarMode("recent");
+
+      if (file) {
+        setUploadState({
+          conversationId: direct.conversationId,
+          name: file.name,
+          progress: 0,
+        });
+        attachment = await api.upload(file, (progress) => {
+          setUploadState((current) =>
+            current?.conversationId === direct.conversationId ? { ...current, progress } : current,
+          );
+          setContactDelivery((current) =>
+            current?.peerId === peerId ? { ...current, progress } : current,
+          );
+        });
+      }
+
+      queued = true;
+      const delivered = await enqueueOutgoingMessage(direct.conversationId, {
+        text: payload.kind === "text" ? payload.text : undefined,
+        attachment,
+      });
+      if (delivered) notify(`已投递给 ${peer.displayName}`, "success");
+    } catch (error) {
+      // 只有尚未进入待发送队列的附件才能在这里安全删除；队列中的失败消息仍可重试。
+      if (attachment && !queued) await api.deleteFile(attachment.id).catch(() => undefined);
+      notify(errorMessage(error, `向 ${peer.displayName} 投递失败`), "error");
+    } finally {
+      contactDeliveryInFlightRef.current = false;
+      setContactDelivery(null);
+      if (targetConversationId) {
+        setUploadState((current) =>
+          current?.conversationId === targetConversationId ? null : current,
+        );
+      }
+    }
   };
 
   const retryMessage = (message: Message) => {
@@ -922,6 +1039,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         connection={connection}
         theme={theme}
         mode={sidebarMode}
+        contactDelivery={contactDelivery}
+        contactDropBusy={Boolean(contactDelivery) || Boolean(uploadState)}
         onThemeChange={onThemeChange}
         onModeChange={setSidebarMode}
         onSelectConversation={(conversationId) => {
@@ -930,6 +1049,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           setSelectedId(conversationId);
         }}
         onOpenDirect={(peerId) => void openDirect(peerId)}
+        onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenProfile={() => setShowProfile(true)}
         onOpenAdmin={() => setShowAdmin(true)}

@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { User } from "../types";
 import { ChatSidebar } from "./ChatSidebar";
@@ -28,7 +29,17 @@ function rectangle(left: number, top: number, width: number, height: number): DO
   } as DOMRect;
 }
 
-function renderSidebar() {
+const peer: User = {
+  id: "peer-user",
+  username: "zhouyuan",
+  displayName: "周远",
+  avatarColor: "#2fae91",
+  avatarUrl: null,
+  online: true,
+  role: "USER",
+};
+
+function renderSidebar(overrides: Partial<ComponentProps<typeof ChatSidebar>> = {}) {
   render(
     <ChatSidebar
       currentUser={currentUser}
@@ -41,14 +52,18 @@ function renderSidebar() {
       connection="connected"
       theme="light"
       mode="recent"
+      contactDelivery={null}
+      contactDropBusy={false}
       onThemeChange={vi.fn()}
       onModeChange={vi.fn()}
       onSelectConversation={vi.fn()}
       onOpenDirect={vi.fn()}
+      onDropToContact={vi.fn()}
       onCreateGroup={vi.fn()}
       onOpenProfile={vi.fn()}
       onOpenAdmin={vi.fn()}
       onLogout={vi.fn()}
+      {...overrides}
     />,
   );
 }
@@ -88,5 +103,50 @@ describe("ChatSidebar", () => {
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "系统信息" })).toBeNull();
+  });
+
+  it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
+    const onDropToContact = vi.fn();
+    renderSidebar({
+      users: [peer],
+      mode: "people",
+      onDropToContact,
+    });
+    const target = screen.getByRole("button", { name: /周远/ });
+    const dataTransfer = {
+      types: ["text/plain"],
+      files: [],
+      dropEffect: "none",
+      getData: () => "  请看最新方案  ",
+    } as unknown as DataTransfer;
+
+    fireEvent.dragEnter(target, { dataTransfer });
+    expect(screen.getByText("松开发送给 周远")).toBeTruthy();
+
+    fireEvent.drop(target, { dataTransfer });
+    expect(onDropToContact).toHaveBeenCalledWith("peer-user", {
+      kind: "text",
+      text: "请看最新方案",
+    });
+    expect(screen.queryByText("松开发送给 周远")).toBeNull();
+  });
+
+  it("文件优先于拖拽附带的文本地址", () => {
+    const onDropToContact = vi.fn();
+    const file = new File(["content"], "方案.md", { type: "text/markdown" });
+    renderSidebar({ users: [peer], mode: "people", onDropToContact });
+    const target = screen.getByRole("button", { name: /周远/ });
+    const dataTransfer = {
+      types: ["Files", "text/plain"],
+      files: [file],
+      dropEffect: "none",
+      getData: () => "file:///方案.md",
+    } as unknown as DataTransfer;
+
+    fireEvent.drop(target, { dataTransfer });
+    expect(onDropToContact).toHaveBeenCalledWith("peer-user", {
+      kind: "files",
+      files: [file],
+    });
   });
 });

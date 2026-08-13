@@ -5,6 +5,7 @@ import {
   MoreHorizontal,
   Radio,
   Search,
+  Send,
   Settings2,
   ShieldCheck,
   UserRoundCog,
@@ -12,7 +13,15 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ConnectionState } from "../hooks/useRealtimeConnection";
 import type { Attachment, Conversation, User } from "../types";
 import { formatConversationPreview, formatSidebarTime } from "../utils/format";
@@ -21,6 +30,57 @@ import { Avatar } from "./Avatar";
 import { ThemeToggle } from "./ThemeToggle";
 
 export type SidebarMode = "recent" | "people";
+
+/** 联系人头像接收的原始投递内容；校验与真正发送由聊天页统一编排。 */
+export type ContactDropPayload = { kind: "files"; files: File[] } | { kind: "text"; text: string };
+
+export interface ContactDeliveryProgress {
+  peerId: string;
+  label: string;
+  progress: number | null;
+}
+
+function supportsContactDrop(dataTransfer: DataTransfer): boolean {
+  const types = Array.from(dataTransfer.types);
+  return types.includes("Files") || types.includes("text/plain") || types.includes("text");
+}
+
+function readContactDrop(dataTransfer: DataTransfer): ContactDropPayload | null {
+  const files = Array.from(dataTransfer.files);
+  if (files.length > 0) return { kind: "files", files };
+  const text = (dataTransfer.getData("text/plain") || dataTransfer.getData("text")).trim();
+  return text ? { kind: "text", text } : null;
+}
+
+function ContactDropCue({
+  targetName,
+  highlighted,
+  delivery,
+}: {
+  targetName: string;
+  highlighted: boolean;
+  delivery: ContactDeliveryProgress | null;
+}) {
+  if (delivery) {
+    return (
+      <span className="contact-drop-cue is-progress" aria-live="polite">
+        <Send size={15} />
+        <span>
+          <strong>{delivery.label}</strong>
+          {delivery.progress === null ? "正在投递" : `${delivery.progress}%`}
+        </span>
+        {delivery.progress !== null && <i style={{ width: `${delivery.progress}%` }} />}
+      </span>
+    );
+  }
+  if (!highlighted) return null;
+  return (
+    <span className="contact-drop-cue" aria-hidden="true">
+      <Send size={15} />
+      松开发送给 {targetName}
+    </span>
+  );
+}
 
 interface ChatSidebarProps {
   currentUser: User;
@@ -33,10 +93,13 @@ interface ChatSidebarProps {
   connection: ConnectionState;
   theme: ThemeMode;
   mode: SidebarMode;
+  contactDelivery: ContactDeliveryProgress | null;
+  contactDropBusy: boolean;
   onThemeChange: (theme: ThemeMode) => void;
   onModeChange: (mode: SidebarMode) => void;
   onSelectConversation: (conversationId: string) => void;
   onOpenDirect: (userId: string) => void;
+  onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
   onOpenProfile: () => void;
   onOpenAdmin: () => void;
@@ -71,10 +134,13 @@ export function ChatSidebar({
   connection,
   theme,
   mode,
+  contactDelivery,
+  contactDropBusy,
   onThemeChange,
   onModeChange,
   onSelectConversation,
   onOpenDirect,
+  onDropToContact,
   onCreateGroup,
   onOpenProfile,
   onOpenAdmin,
@@ -82,7 +148,31 @@ export function ChatSidebar({
 }: ChatSidebarProps) {
   const [search, setSearch] = useState("");
   const [showSystemMenu, setShowSystemMenu] = useState(false);
+  const [contactDropTargetId, setContactDropTargetId] = useState<string | null>(null);
   const systemMenuRef = useRef<HTMLDivElement>(null);
+
+  /** 拖入即建立空间对应关系，目标行从指针进入开始持续反馈。 */
+  const handleContactDrag = (event: DragEvent<HTMLButtonElement>, peerId: string) => {
+    if (!supportsContactDrop(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = contactDropBusy ? "none" : "copy";
+    if (!contactDropBusy) setContactDropTargetId(peerId);
+  };
+
+  const handleContactDragLeave = (event: DragEvent<HTMLButtonElement>, peerId: string) => {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+    setContactDropTargetId((current) => (current === peerId ? null : current));
+  };
+
+  const handleContactDrop = (event: DragEvent<HTMLButtonElement>, peerId: string) => {
+    if (!supportsContactDrop(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContactDropTargetId(null);
+    const payload = readContactDrop(event.dataTransfer);
+    if (payload) onDropToContact(peerId, payload);
+  };
 
   /**
    * 系统信息面板挂在右上角按钮上，但按钮不一定靠近侧栏右边缘（例如 Electron
@@ -327,53 +417,78 @@ export function ChatSidebar({
             <SidebarSkeleton />
           ) : mode === "recent" ? (
             filteredConversations.length > 0 ? (
-              filteredConversations.map((conversation) => (
-                <button
-                  type="button"
-                  className={`conversation-item ${selectedId === conversation.id ? "is-selected" : ""}`}
-                  key={conversation.id}
-                  onClick={() => onSelectConversation(conversation.id)}
-                  aria-current={selectedId === conversation.id ? "page" : undefined}
-                >
-                  <Avatar
-                    name={conversation.title}
-                    color={conversation.avatarColor}
-                    src={conversation.avatarUrl}
-                    online={conversation.type === "DIRECT" ? conversation.peer?.online : undefined}
-                  />
-                  <span className="conversation-copy">
-                    <span>
-                      <strong>{conversation.title}</strong>
-                      <time>{formatSidebarTime(conversation.lastMessage?.createdAt)}</time>
-                    </span>
-                    <span>
-                      <small
-                        className={
-                          drafts[conversation.id]?.trim() || pendingAttachments[conversation.id]
-                            ? "has-draft"
-                            : ""
-                        }
-                      >
-                        {drafts[conversation.id]?.trim() ? (
-                          <>
-                            <em>草稿</em>
-                            {drafts[conversation.id].trim()}
-                          </>
-                        ) : pendingAttachments[conversation.id] ? (
-                          <>
-                            <em>草稿</em>[待发送附件]
-                          </>
-                        ) : (
-                          formatConversationPreview(conversation)
+              filteredConversations.map((conversation) => {
+                const dropPeerId =
+                  conversation.type === "DIRECT" ? conversation.peer?.id : undefined;
+                const isDropTarget = dropPeerId === contactDropTargetId;
+                const isDelivering = dropPeerId === contactDelivery?.peerId;
+                return (
+                  <button
+                    type="button"
+                    className={`conversation-item ${selectedId === conversation.id ? "is-selected" : ""} ${isDropTarget ? "is-contact-drop-target" : ""} ${isDelivering ? "is-contact-delivering" : ""}`}
+                    key={conversation.id}
+                    onClick={() => onSelectConversation(conversation.id)}
+                    onDragEnter={
+                      dropPeerId ? (event) => handleContactDrag(event, dropPeerId) : undefined
+                    }
+                    onDragOver={
+                      dropPeerId ? (event) => handleContactDrag(event, dropPeerId) : undefined
+                    }
+                    onDragLeave={
+                      dropPeerId ? (event) => handleContactDragLeave(event, dropPeerId) : undefined
+                    }
+                    onDrop={
+                      dropPeerId ? (event) => handleContactDrop(event, dropPeerId) : undefined
+                    }
+                    aria-current={selectedId === conversation.id ? "page" : undefined}
+                  >
+                    <Avatar
+                      name={conversation.title}
+                      color={conversation.avatarColor}
+                      src={conversation.avatarUrl}
+                      online={
+                        conversation.type === "DIRECT" ? conversation.peer?.online : undefined
+                      }
+                    />
+                    <span className="conversation-copy">
+                      <span>
+                        <strong>{conversation.title}</strong>
+                        <time>{formatSidebarTime(conversation.lastMessage?.createdAt)}</time>
+                      </span>
+                      <span>
+                        <small
+                          className={
+                            drafts[conversation.id]?.trim() || pendingAttachments[conversation.id]
+                              ? "has-draft"
+                              : ""
+                          }
+                        >
+                          {drafts[conversation.id]?.trim() ? (
+                            <>
+                              <em>草稿</em>
+                              {drafts[conversation.id].trim()}
+                            </>
+                          ) : pendingAttachments[conversation.id] ? (
+                            <>
+                              <em>草稿</em>[待发送附件]
+                            </>
+                          ) : (
+                            formatConversationPreview(conversation)
+                          )}
+                        </small>
+                        {conversation.unreadCount > 0 && (
+                          <b>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</b>
                         )}
-                      </small>
-                      {conversation.unreadCount > 0 && (
-                        <b>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</b>
-                      )}
+                      </span>
                     </span>
-                  </span>
-                </button>
-              ))
+                    <ContactDropCue
+                      targetName={conversation.title}
+                      highlighted={isDropTarget}
+                      delivery={isDelivering ? contactDelivery : null}
+                    />
+                  </button>
+                );
+              })
             ) : (
               <div className="list-empty">
                 <span className="empty-icon">
@@ -392,9 +507,13 @@ export function ChatSidebar({
             filteredUsers.map((peer) => (
               <button
                 type="button"
-                className="conversation-item people-item"
+                className={`conversation-item people-item ${contactDropTargetId === peer.id ? "is-contact-drop-target" : ""} ${contactDelivery?.peerId === peer.id ? "is-contact-delivering" : ""}`}
                 key={peer.id}
                 onClick={() => onOpenDirect(peer.id)}
+                onDragEnter={(event) => handleContactDrag(event, peer.id)}
+                onDragOver={(event) => handleContactDrag(event, peer.id)}
+                onDragLeave={(event) => handleContactDragLeave(event, peer.id)}
+                onDrop={(event) => handleContactDrop(event, peer.id)}
               >
                 <Avatar
                   name={peer.displayName}
@@ -415,6 +534,11 @@ export function ChatSidebar({
                 <span className="chat-action">
                   <MessageCircleMore size={16} />
                 </span>
+                <ContactDropCue
+                  targetName={peer.displayName}
+                  highlighted={contactDropTargetId === peer.id}
+                  delivery={contactDelivery?.peerId === peer.id ? contactDelivery : null}
+                />
               </button>
             ))
           ) : (
