@@ -1063,6 +1063,46 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     return delivered;
   };
 
+  /**
+   * 圈图回复先把浏览器生成的新 PNG 上传为独立附件，再引用原消息进入统一待发送
+   * 队列。上传失败时删除孤立附件；进入队列后则保留附件以支持用户原地重试。
+   */
+  const sendAnnotatedImage = async (sourceMessage: Message, file: File): Promise<boolean> => {
+    if (uploadState) {
+      notify("当前已有文件正在上传，请稍后再发送圈图", "info");
+      return false;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      notify("标注图片不能超过 50 MB", "error");
+      return false;
+    }
+
+    const conversationId = sourceMessage.conversationId;
+    setUploadState({ conversationId, name: file.name, progress: 0 });
+    let attachment: Attachment | null = null;
+    let queued = false;
+    try {
+      attachment = await api.upload(file, (progress) =>
+        setUploadState((current) =>
+          current?.conversationId === conversationId ? { ...current, progress } : current,
+        ),
+      );
+      queued = true;
+      const delivered = await enqueueOutgoingMessage(conversationId, {
+        attachment,
+        replyTarget: sourceMessage,
+      });
+      if (delivered) notify("圈图回复已发送", "success");
+      return true;
+    } catch (error) {
+      if (attachment && !queued) await api.deleteFile(attachment.id).catch(() => undefined);
+      notify(errorMessage(error, "圈图回复上传失败"), "error");
+      return false;
+    } finally {
+      setUploadState((current) => (current?.conversationId === conversationId ? null : current));
+    }
+  };
+
   const retryMessage = (message: Message) => {
     if (message.deliveryState !== "FAILED") return;
     void deliverOutboxMessage(message);
@@ -1327,6 +1367,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                   if (!selectedId) return;
                   setReplyTargets((current) => ({ ...current, [selectedId]: message }));
                 }}
+                onAnnotateImage={(message, _attachment, file) => sendAnnotatedImage(message, file)}
                 onCopy={(message) => void copyMessage(message)}
                 onRecall={(message) => void recallMessage(message)}
                 onRetry={retryMessage}

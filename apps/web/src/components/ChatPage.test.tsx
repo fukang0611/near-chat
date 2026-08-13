@@ -9,6 +9,17 @@ vi.mock("../hooks/useRealtimeConnection", () => ({
   useRealtimeConnection: () => "connected",
 }));
 
+vi.mock("./ImageAnnotationDialog", () => ({
+  ImageAnnotationDialog: ({ onSend }: { onSend: (file: File) => Promise<boolean> }) => (
+    <button
+      type="button"
+      onClick={() => void onSend(new File(["marked"], "圈图-原始截图.png", { type: "image/png" }))}
+    >
+      提交测试圈图
+    </button>
+  ),
+}));
+
 const currentUser: User = {
   id: "current-user",
   username: "admin",
@@ -79,6 +90,22 @@ function message(conversationId: string, textContent: string): Message {
     replyTo: null,
     attachments: [],
     receipt: { recipientCount: 1, deliveredCount: 1, readCount: 1 },
+  };
+}
+
+function imageMessage(conversationId: string): Message {
+  return {
+    ...message(conversationId, ""),
+    type: "IMAGE",
+    textContent: null,
+    attachments: [
+      {
+        id: "source-image",
+        originalName: "原始截图.png",
+        contentType: "image/png",
+        sizeBytes: 128_000,
+      },
+    ],
   };
 }
 
@@ -295,5 +322,75 @@ describe("ChatPage message scrolling", () => {
       ),
     );
     expect(screen.queryByRole("dialog", { name: "发送剪贴板内容" })).toBeNull();
+  });
+
+  it("圈图上传为新附件并引用原图片消息发送", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.messages).mockImplementation(async (conversationId) => ({
+      messages: [
+        conversationId === "conversation-one"
+          ? imageMessage(conversationId)
+          : message(conversationId, `${conversationId} 的最新消息`),
+      ],
+      nextCursor: null,
+      hasMore: false,
+    }));
+    vi.spyOn(api, "fileBlob").mockResolvedValue(new Blob(["image"], { type: "image/png" }));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:source-image");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const annotatedAttachment = {
+      id: "annotated-image",
+      originalName: "圈图-原始截图.png",
+      contentType: "image/png",
+      sizeBytes: 6,
+    };
+    const upload = vi.spyOn(api, "upload").mockResolvedValue(annotatedAttachment);
+    const sendMessage = vi
+      .spyOn(api, "sendMessage")
+      .mockImplementation(async (conversationId, input) => ({
+        message: {
+          ...imageMessage(conversationId),
+          id: "annotated-message",
+          clientMessageId: input.clientMessageId,
+          attachments: [annotatedAttachment],
+          replyTo: {
+            id: `message-${conversationId}`,
+            senderId: currentUser.id,
+            senderName: currentUser.displayName,
+            type: "IMAGE",
+            textContent: null,
+            attachmentName: "原始截图.png",
+            recalled: false,
+          },
+        },
+      }));
+
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    const preview = await screen.findByRole("button", { name: "预览图片 原始截图.png" });
+    await waitFor(() => expect(preview.getAttribute("aria-busy")).toBe("false"));
+    await user.click(preview);
+    await user.click(screen.getByRole("button", { name: "圈图回复 原始截图.png" }));
+    await user.click(screen.getByRole("button", { name: "提交测试圈图" }));
+
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+    expect((upload.mock.calls[0]?.[0] as File).name).toBe("圈图-原始截图.png");
+    await waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith(
+        "conversation-one",
+        expect.objectContaining({
+          attachmentIds: ["annotated-image"],
+          replyToMessageId: "message-conversation-one",
+        }),
+      ),
+    );
   });
 });

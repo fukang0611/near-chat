@@ -59,6 +59,7 @@ function renderTimeline(messages: Message[]) {
     endRef: createRef<HTMLDivElement>(),
     onLoadOlder: vi.fn(),
     onReply: vi.fn(),
+    onAnnotateImage: vi.fn(),
     onCopy: vi.fn(),
     onRecall: vi.fn(),
     onRetry: vi.fn(),

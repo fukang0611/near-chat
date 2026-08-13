@@ -4,6 +4,7 @@ import {
   FileText,
   LoaderCircle,
   Maximize2,
+  PenLine,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -12,9 +13,11 @@ import { createPortal } from "react-dom";
 import { api } from "../api";
 import type { Attachment } from "../types";
 import { formatBytes } from "../utils/format";
+import { ImageAnnotationDialog } from "./ImageAnnotationDialog";
 
 interface AttachmentViewProps {
   attachment: Attachment;
+  onAnnotate?: (file: File) => Promise<boolean>;
 }
 
 /**
@@ -57,6 +60,7 @@ interface ImagePreviewProps {
   restoreFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onDownload: () => void;
+  onAnnotate?: () => void;
 }
 
 function ImagePreview({
@@ -67,6 +71,7 @@ function ImagePreview({
   restoreFocusRef,
   onClose,
   onDownload,
+  onAnnotate,
 }: ImagePreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -114,7 +119,7 @@ function ImagePreview({
   return createPortal(
     <div
       ref={previewRef}
-      className="image-preview-layer"
+      className={`image-preview-layer ${onAnnotate ? "has-annotate" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label={`预览图片 ${attachment.originalName}`}
@@ -131,6 +136,18 @@ function ImagePreview({
       >
         <X size={20} />
       </button>
+      {onAnnotate && (
+        <button
+          type="button"
+          className="image-preview-annotate"
+          onClick={onAnnotate}
+          onMouseDown={(event) => event.stopPropagation()}
+          aria-label={`圈图回复 ${attachment.originalName}`}
+        >
+          <PenLine size={18} />
+          <span>圈图回复</span>
+        </button>
+      )}
       <img
         className="image-preview-media"
         src={imageUrl}
@@ -163,12 +180,13 @@ function ImagePreview({
   );
 }
 
-function ImageAttachment({ attachment }: AttachmentViewProps) {
+function ImageAttachment({ attachment, onAnnotate }: AttachmentViewProps) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [loadKey, setLoadKey] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [annotating, setAnnotating] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const { downloading, downloadError, download } = useAttachmentDownload(attachment);
   const closePreview = useCallback(() => setPreviewOpen(false), []);
@@ -243,6 +261,22 @@ function ImageAttachment({ attachment }: AttachmentViewProps) {
           restoreFocusRef={triggerRef}
           onClose={closePreview}
           onDownload={() => void download()}
+          onAnnotate={
+            onAnnotate
+              ? () => {
+                  setPreviewOpen(false);
+                  setAnnotating(true);
+                }
+              : undefined
+          }
+        />
+      )}
+      {annotating && imageUrl && onAnnotate && (
+        <ImageAnnotationDialog
+          attachment={attachment}
+          imageUrl={imageUrl}
+          onDismiss={() => setAnnotating(false)}
+          onSend={onAnnotate}
         />
       )}
     </>
@@ -278,9 +312,9 @@ function FileAttachment({ attachment }: AttachmentViewProps) {
 }
 
 /** 根据媒体类型选择展示模块，调用方无需了解预览或下载状态。 */
-export function AttachmentView({ attachment }: AttachmentViewProps) {
+export function AttachmentView({ attachment, onAnnotate }: AttachmentViewProps) {
   return attachment.contentType.startsWith("image/") ? (
-    <ImageAttachment attachment={attachment} />
+    <ImageAttachment attachment={attachment} onAnnotate={onAnnotate} />
   ) : (
     <FileAttachment attachment={attachment} />
   );

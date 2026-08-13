@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { Fragment, type RefObject, useEffect, useState } from "react";
-import type { Conversation, Message } from "../types";
+import type { Attachment, Conversation, Message } from "../types";
 import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/format";
 import { replySummary } from "../utils/message";
 import { AttachmentView } from "./AttachmentView";
@@ -28,6 +28,7 @@ interface MessageTimelineProps {
   highlightedMessageId?: string | null;
   onLoadOlder: () => void;
   onReply: (message: Message) => void;
+  onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onRecall: (message: Message) => void;
   onRetry: (message: Message) => void;
@@ -59,6 +60,7 @@ interface MessageBubbleProps {
   now: number;
   confirmRecall: boolean;
   onReply: (message: Message) => void;
+  onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onRecallIntent: (messageId: string | null) => void;
   onRecall: (message: Message) => void;
@@ -74,6 +76,7 @@ function MessageBubble({
   now,
   confirmRecall,
   onReply,
+  onAnnotateImage,
   onCopy,
   onRecallIntent,
   onRecall,
@@ -129,7 +132,15 @@ function MessageBubble({
           ) : (
             <>
               {message.attachments.map((attachment) => (
-                <AttachmentView attachment={attachment} key={attachment.id} />
+                <AttachmentView
+                  attachment={attachment}
+                  key={attachment.id}
+                  onAnnotate={
+                    attachment.contentType.startsWith("image/") && !message.deliveryState
+                      ? (file) => onAnnotateImage(message, attachment, file)
+                      : undefined
+                  }
+                />
               ))}
               {message.textContent && (
                 <div className={`message-bubble ${mine ? "mine-bubble" : "peer-bubble"}`}>
@@ -242,6 +253,7 @@ export function MessageTimeline({
   highlightedMessageId,
   onLoadOlder,
   onReply,
+  onAnnotateImage,
   onCopy,
   onRecall,
   onRetry,
@@ -312,6 +324,7 @@ export function MessageTimeline({
               now={now}
               confirmRecall={recallCandidateId === message.id}
               onReply={onReply}
+              onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
               onRecallIntent={setRecallCandidateId}
               onRecall={onRecall}

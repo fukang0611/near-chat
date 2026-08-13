@@ -43,4 +43,17 @@ describe("AttachmentView 图片预览", () => {
     await user.click(screen.getByRole("button", { name: "下载原图 界面参考.png" }));
     await waitFor(() => expect(api.fileBlob).toHaveBeenCalledWith(imageAttachment.id, true));
   });
+
+  it("有回复能力时在图片预览中提供圈图入口", async () => {
+    const user = userEvent.setup();
+    render(<AttachmentView attachment={imageAttachment} onAnnotate={vi.fn()} />);
+
+    const trigger = await screen.findByRole("button", { name: "预览图片 界面参考.png" });
+    await waitFor(() => expect(trigger.getAttribute("aria-busy")).toBe("false"));
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "圈图回复 界面参考.png" }));
+
+    expect(screen.getByRole("dialog", { name: "圈图回复" })).toBeTruthy();
+    expect(api.fileBlob).toHaveBeenCalledTimes(1);
+  });
 });
