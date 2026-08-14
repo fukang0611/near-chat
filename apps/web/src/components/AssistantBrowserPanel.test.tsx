@@ -205,4 +205,61 @@ describe("AssistantBrowserPanel", () => {
       ),
     );
   });
+
+  it("从任务历史进入时优先定位指定的浏览器执行", async () => {
+    const firstRun = browserRun("ACTIVE");
+    const focusedRun = {
+      ...browserRun("SUCCEEDED"),
+      id: "55555555-5555-4555-8555-555555555555",
+      goal: "自动任务：日报截图",
+      pageTitle: "日报页面",
+      steps: [],
+    };
+    vi.mocked(api.aiAssistantBrowserPermission).mockResolvedValueOnce({
+      permission: enabledPermission,
+    });
+    vi.mocked(api.aiAssistantBrowserRuns).mockResolvedValueOnce({
+      runs: [firstRun, focusedRun],
+    });
+
+    render(
+      <AssistantBrowserPanel
+        assistant={assistant}
+        focusRunId={focusedRun.id}
+        onNotice={vi.fn()}
+        onFilesChanged={vi.fn()}
+      />,
+    );
+
+    const focusedButton = await screen.findByRole("button", { name: /自动任务：日报截图/ });
+    expect(focusedButton.className).toContain("is-active");
+    expect(screen.getAllByText("日报页面").length).toBeGreaterThan(0);
+  });
+
+  it("自动任务运行中只展示预授权进度，不提供人工确认入口", async () => {
+    const automaticStep: AiAssistantBrowserStep = {
+      ...openStep("AWAITING_CONFIRMATION"),
+      id: "66666666-6666-4666-8666-666666666666",
+      sequence: 2,
+      action: "SCREENSHOT",
+      input: { automatic: true },
+    };
+    const automaticRun = {
+      ...browserRun("ACTIVE"),
+      goal: "自动任务：页面截图",
+      steps: [{ ...openStep("SUCCEEDED"), input: { automatic: true } }, automaticStep],
+    };
+    vi.mocked(api.aiAssistantBrowserPermission).mockResolvedValueOnce({
+      permission: enabledPermission,
+    });
+    vi.mocked(api.aiAssistantBrowserRuns).mockResolvedValueOnce({ runs: [automaticRun] });
+
+    render(
+      <AssistantBrowserPanel assistant={assistant} onNotice={vi.fn()} onFilesChanged={vi.fn()} />,
+    );
+
+    expect(await screen.findByText("只读工具正在执行")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "确认执行此步骤" })).toBeNull();
+    expect(screen.queryByLabelText("下一步")).toBeNull();
+  });
 });

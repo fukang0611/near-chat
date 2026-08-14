@@ -188,6 +188,7 @@ export function AssistantWorkspace({
     "chat",
   );
   const [assistantFiles, setAssistantFiles] = useState<AiAssistantFile[]>([]);
+  const [browserFocusRunId, setBrowserFocusRunId] = useState<string | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [filePickerOpen, setFilePickerOpen] = useState(false);
@@ -367,6 +368,11 @@ export function AssistantWorkspace({
     setWorkspaceMode("chat");
     setTargetMessageId(messageId);
     setMessageLoadVersion((current) => current + 1);
+  }, []);
+
+  const openTaskBrowserRun = useCallback((runId: string) => {
+    setBrowserFocusRunId(runId);
+    setWorkspaceMode("browser");
   }, []);
 
   useEffect(() => {
@@ -754,9 +760,16 @@ export function AssistantWorkspace({
               {workspaceMode === "tasks" ? (
                 <AssistantTasksPanel
                   assistant={selectedAssistant}
+                  files={assistantFiles}
                   refreshVersion={refreshVersion}
                   onNotice={showNotice}
                   onOpenMessage={openTaskMessage}
+                  onOpenBrowserRun={openTaskBrowserRun}
+                  onOpenBrowserSettings={() => {
+                    setBrowserFocusRunId(null);
+                    setWorkspaceMode("browser");
+                  }}
+                  onOpenFiles={() => setWorkspaceMode("files")}
                 />
               ) : workspaceMode === "files" ? (
                 <AssistantFilesPanel
@@ -770,6 +783,7 @@ export function AssistantWorkspace({
               ) : workspaceMode === "browser" ? (
                 <AssistantBrowserPanel
                   assistant={selectedAssistant}
+                  focusRunId={browserFocusRunId}
                   onNotice={showNotice}
                   onFilesChanged={() => {
                     setLoadingFiles(true);

@@ -120,6 +120,16 @@ describe("AssistantWorkspace", () => {
     vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
     vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
     vi.spyOn(api, "aiAssistantTasks").mockResolvedValue({ tasks: [] });
+    vi.spyOn(api, "aiAssistantBrowserPermission").mockResolvedValue({
+      permission: {
+        assistantId: assistant.id,
+        enabled: false,
+        allowRead: true,
+        allowScreenshot: false,
+        allowInteraction: false,
+        updatedAt: null,
+      },
+    });
   });
 
   afterEach(() => {
@@ -337,6 +347,17 @@ describe("AssistantWorkspace", () => {
 
   it("可以在助理内创建一次性后台任务", async () => {
     const user = userEvent.setup();
+    vi.mocked(api.aiAssistantFiles).mockResolvedValue({ files: [workspaceFile] });
+    vi.mocked(api.aiAssistantBrowserPermission).mockResolvedValue({
+      permission: {
+        assistantId: assistant.id,
+        enabled: true,
+        allowRead: true,
+        allowScreenshot: true,
+        allowInteraction: false,
+        updatedAt: "2026-08-14T08:10:00.000Z",
+      },
+    });
     const scheduledFor = new Date(Date.now() + 30 * 60_000);
     const local = new Date(scheduledFor.getTime() - scheduledFor.getTimezoneOffset() * 60_000)
       .toISOString()
@@ -347,6 +368,9 @@ describe("AssistantWorkspace", () => {
       title: "整理项目摘要",
       prompt: "总结今天的重要进展和待办。",
       scheduleType: "ONCE",
+      fileIds: [workspaceFile.id],
+      browserAction: "SCREENSHOT",
+      browserUrl: "https://intranet.example.com/status",
       enabled: true,
       nextRunAt: scheduledFor.toISOString(),
       runRequested: false,
@@ -366,6 +390,9 @@ describe("AssistantWorkspace", () => {
     await user.type(screen.getByRole("textbox", { name: "任务名称" }), task.title);
     await user.type(screen.getByRole("textbox", { name: "交给助理的任务内容" }), task.prompt);
     fireEvent.change(screen.getByLabelText("首次执行"), { target: { value: local } });
+    await user.click(screen.getByRole("button", { name: /项目计划\.md/ }));
+    await user.click(screen.getByRole("button", { name: /保存截图/ }));
+    await user.type(screen.getByRole("textbox", { name: /目标页面/ }), task.browserUrl!);
     await user.click(screen.getByRole("button", { name: "保存任务" }));
 
     await waitFor(() =>
@@ -376,9 +403,13 @@ describe("AssistantWorkspace", () => {
           prompt: task.prompt,
           scheduleType: "ONCE",
           enabled: true,
+          fileIds: [workspaceFile.id],
+          browserAction: "SCREENSHOT",
+          browserUrl: task.browserUrl,
         }),
       ),
     );
     expect(await screen.findByText(task.title)).toBeTruthy();
+    expect(screen.getByText("1 个文件")).toBeTruthy();
   });
 });

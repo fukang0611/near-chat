@@ -93,6 +93,11 @@ export interface SaveAiAssistantTaskInput {
   scheduleType: AiAssistantTaskSchedule;
   scheduledFor: string;
   enabled: boolean;
+  /** 只有这里显式选择的助理文件才会交给后台任务读取。 */
+  fileIds: string[];
+  /** 自动任务仅支持无副作用的页面读取和截图。 */
+  browserAction: "NONE" | "READ" | "SCREENSHOT";
+  browserUrl: string | null;
 }
 
 export interface AdminAiMutationResponse {

@@ -542,6 +542,16 @@ export async function getAiAssistantBrowserPermission(userId: string, assistantI
   return publicAssistantBrowserPermission(await permissionRow(userId, assistantId), assistantId);
 }
 
+/** 自动任务只能预授权读取或截图；交互动作始终走用户逐步确认入口。 */
+export async function assertAiAssistantBrowserTaskPermission(
+  userId: string,
+  assistantId: string,
+  action: "READ" | "SCREENSHOT",
+  client?: PoolClient,
+): Promise<void> {
+  requirePermission(await permissionRow(userId, assistantId, client), action);
+}
+
 export async function updateAiAssistantBrowserPermission(
   userId: string,
   assistantId: string,
@@ -831,6 +841,208 @@ async function executeBrowserStep(
   };
 }
 
+export interface AssistantTaskBrowserResult {
+  runId: string;
+  action: "READ" | "SCREENSHOT";
+  pageTitle: string;
+  pageUrl: string;
+  pageExcerpt: string;
+  artifactFileId: string | null;
+}
+
+export class AssistantTaskBrowserExecutionError extends Error {
+  constructor(
+    message: string,
+    readonly runId: string,
+  ) {
+    super(message);
+    this.name = "AssistantTaskBrowserExecutionError";
+  }
+}
+
+/**
+ * 自动任务专用的只读浏览器入口。它不会接受 CLICK/FILL，也不会复用手动会话；
+ * OPEN 与 READ/SCREENSHOT 的输入、输出仍完整写入既有浏览器运行与步骤表。
+ */
+export async function executeAiAssistantTaskBrowser(input: {
+  userId: string;
+  assistantId: string;
+  goal: string;
+  startUrl: string;
+  action: "READ" | "SCREENSHOT";
+}): Promise<AssistantTaskBrowserResult> {
+  const startUrl = normalizeAssistantBrowserUrl(input.startUrl);
+  const parsedUrl = new URL(startUrl);
+  if (parsedUrl.search || parsedUrl.hash) {
+    throw new ApiError(400, "自动任务的页面地址暂不支持查询参数或片段");
+  }
+  const runId = randomUUID();
+  const openStepId = randomUUID();
+  const toolStepId = randomUUID();
+
+  await transaction(async (client) => {
+    await assertAssistantOwner(client, input.userId, input.assistantId, true);
+    await assertAiAssistantBrowserTaskPermission(
+      input.userId,
+      input.assistantId,
+      input.action,
+      client,
+    );
+    const count = await client.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM ai_assistant_browser_runs
+        WHERE assistant_id = $1 AND owner_id = $2`,
+      [input.assistantId, input.userId],
+    );
+    if (Number(count.rows[0]?.total ?? 0) >= ASSISTANT_BROWSER_RUN_LIMIT) {
+      throw new ApiError(400, `每个助理最多保留 ${ASSISTANT_BROWSER_RUN_LIMIT} 次浏览器执行`);
+    }
+    await client.query(
+      `INSERT INTO ai_assistant_browser_runs
+         (id, assistant_id, owner_id, goal, start_url, status)
+       VALUES ($1, $2, $3, $4, $5, 'ACTIVE')`,
+      [runId, input.assistantId, input.userId, input.goal.trim(), startUrl],
+    );
+    await client.query(
+      `INSERT INTO ai_assistant_browser_steps
+         (id, run_id, sequence, action, status, input, started_at)
+       VALUES
+         ($1, $3, 1, 'OPEN', 'RUNNING', $4::jsonb, NOW()),
+         ($2, $3, 2, $5, 'AWAITING_CONFIRMATION', $6::jsonb, NULL)`,
+      [
+        openStepId,
+        toolStepId,
+        runId,
+        JSON.stringify({ url: sanitizePersistedBrowserUrl(startUrl), automatic: true }),
+        input.action,
+        JSON.stringify({ automatic: true }),
+      ],
+    );
+  });
+
+  try {
+    let run = await transaction((client) =>
+      selectRun(client, input.userId, input.assistantId, runId),
+    );
+    const [openStep] = await loadSteps([runId]);
+    if (!openStep) throw new Error("自动浏览器打开步骤创建失败");
+    const opened = await executeBrowserStep(run, openStep, input.userId);
+    await transaction(async (client) => {
+      await client.query(
+        `UPDATE ai_assistant_browser_steps
+            SET status = 'SUCCEEDED', output = $2::jsonb, completed_at = NOW()
+          WHERE id = $1 AND status = 'RUNNING'`,
+        [openStepId, JSON.stringify(opened.output)],
+      );
+      await client.query(
+        `UPDATE ai_assistant_browser_runs
+            SET current_url = $2, page_title = $3, page_excerpt = $4,
+                page_elements = $5::jsonb, opened_at = NOW(), updated_at = NOW()
+          WHERE id = $1 AND status = 'ACTIVE'`,
+        [
+          runId,
+          opened.snapshot.url,
+          opened.snapshot.title,
+          opened.snapshot.excerpt,
+          JSON.stringify(opened.snapshot.elements),
+        ],
+      );
+      await client.query(
+        `UPDATE ai_assistant_browser_steps
+            SET status = 'RUNNING', started_at = NOW()
+          WHERE id = $1 AND status = 'AWAITING_CONFIRMATION'`,
+        [toolStepId],
+      );
+    });
+
+    run = {
+      ...run,
+      current_url: opened.snapshot.url,
+      page_title: opened.snapshot.title,
+      page_excerpt: opened.snapshot.excerpt,
+      page_elements: opened.snapshot.elements,
+      opened_at: new Date(),
+    };
+    const toolStep = (await loadSteps([runId])).find((step) => step.id === toolStepId);
+    if (!toolStep) throw new Error("自动浏览器工具步骤创建失败");
+    const completed = await executeBrowserStep(run, toolStep, input.userId);
+    await transaction(async (client) => {
+      await client.query(
+        `UPDATE ai_assistant_browser_steps
+            SET status = 'SUCCEEDED', output = $2::jsonb, artifact_file_id = $3,
+                completed_at = NOW(), error_message = NULL
+          WHERE id = $1 AND status = 'RUNNING'`,
+        [toolStepId, JSON.stringify(completed.output), completed.artifactFileId],
+      );
+      await client.query(
+        `UPDATE ai_assistant_browser_runs
+            SET status = 'SUCCEEDED', start_url = $2, current_url = $3,
+                page_title = $4, page_excerpt = $5, page_elements = $6::jsonb,
+                completed_at = NOW(), updated_at = NOW(), error_message = NULL
+          WHERE id = $1 AND status = 'ACTIVE'`,
+        [
+          runId,
+          sanitizePersistedBrowserUrl(startUrl),
+          completed.snapshot.url,
+          completed.snapshot.title,
+          completed.snapshot.excerpt,
+          JSON.stringify(completed.snapshot.elements),
+        ],
+      );
+      await recordAudit(
+        {
+          actorId: input.userId,
+          action: "AI_ASSISTANT_TASK_BROWSER_RUN",
+          targetType: "AI_ASSISTANT_BROWSER_RUN",
+          targetId: runId,
+          details: { assistantId: input.assistantId, action: input.action, succeeded: true },
+        },
+        client,
+      );
+    });
+    return {
+      runId,
+      action: input.action,
+      pageTitle: completed.snapshot.title,
+      pageUrl: completed.snapshot.url,
+      pageExcerpt: completed.snapshot.excerpt,
+      artifactFileId: completed.artifactFileId,
+    };
+  } catch (error) {
+    const message = sanitizeAssistantBrowserError(
+      error instanceof Error ? error.message : "自动浏览器任务失败",
+    );
+    await transaction(async (client) => {
+      await client.query(
+        `UPDATE ai_assistant_browser_steps
+            SET status = CASE WHEN status = 'RUNNING' THEN 'FAILED' ELSE 'CANCELLED' END,
+                completed_at = NOW(), error_message = $2
+          WHERE run_id = $1 AND status IN ('AWAITING_CONFIRMATION', 'RUNNING')`,
+        [runId, message],
+      );
+      await client.query(
+        `UPDATE ai_assistant_browser_runs
+            SET status = 'FAILED', start_url = $2, completed_at = NOW(),
+                updated_at = NOW(), error_message = $3
+          WHERE id = $1 AND status = 'ACTIVE'`,
+        [runId, sanitizePersistedBrowserUrl(startUrl), message],
+      );
+      await recordAudit(
+        {
+          actorId: input.userId,
+          action: "AI_ASSISTANT_TASK_BROWSER_RUN",
+          targetType: "AI_ASSISTANT_BROWSER_RUN",
+          targetId: runId,
+          details: { assistantId: input.assistantId, action: input.action, succeeded: false },
+        },
+        client,
+      );
+    }).catch(() => undefined);
+    throw new AssistantTaskBrowserExecutionError(message, runId);
+  } finally {
+    await closeSession(runId);
+  }
+}
+
 export async function confirmAiAssistantBrowserStep(
   userId: string,
   assistantId: string,
@@ -852,6 +1064,9 @@ export async function confirmAiAssistantBrowserStep(
     const step = stepResult.rows[0];
     if (!step) throw new ApiError(404, "待确认步骤不存在");
     if (step.status !== "AWAITING_CONFIRMATION") throw new ApiError(409, "该步骤已经处理");
+    if (step.input.automatic === true) {
+      throw new ApiError(409, "自动任务步骤由后台调度器执行，无需重复确认");
+    }
     requirePermission(await permissionRow(userId, assistantId, client), step.action);
     if (step.action === "OPEN" && run.opened_at) throw new ApiError(409, "页面已经打开");
     if (step.action !== "OPEN" && !run.opened_at) throw new ApiError(409, "请先确认打开页面");

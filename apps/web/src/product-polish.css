@@ -9385,6 +9385,8 @@ body,
 }
 
 .assistant-task-editor {
+  max-height: calc(100% - 88px);
+  overflow: auto;
   margin: 12px clamp(18px, 3vw, 36px) 0;
   padding: 13px 15px 12px;
   border: 1px solid rgba(103, 87, 232, 0.18);
@@ -9460,6 +9462,7 @@ body,
 
 .assistant-task-editor input[type="text"],
 .assistant-task-editor input[type="datetime-local"],
+.assistant-task-editor input[type="url"],
 .assistant-task-editor textarea {
   width: 100%;
   box-sizing: border-box;
@@ -9472,7 +9475,8 @@ body,
 }
 
 .assistant-task-editor input[type="text"],
-.assistant-task-editor input[type="datetime-local"] {
+.assistant-task-editor input[type="datetime-local"],
+.assistant-task-editor input[type="url"] {
   height: 34px;
   padding: 0 9px;
 }
@@ -9524,6 +9528,189 @@ body,
   border-color: rgba(103, 87, 232, 0.3);
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+.assistant-task-tools {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.assistant-task-tools > legend {
+  grid-column: 1 / -1;
+  margin-bottom: -2px;
+}
+
+.assistant-task-tools > section {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.assistant-task-tools > section > header {
+  min-height: 30px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.assistant-task-tools > section > header > span {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 5px;
+}
+
+.assistant-task-tools > section > header svg {
+  grid-row: 1 / 3;
+  color: var(--accent);
+}
+
+.assistant-task-tools > section > header strong {
+  font-size: 8px;
+}
+
+.assistant-task-tools > section > header small,
+.assistant-task-tools > section > p,
+.assistant-task-browser-url small {
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-task-tools > section > header > button {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-size: 7px;
+  cursor: pointer;
+}
+
+.assistant-task-file-options {
+  max-height: 104px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.assistant-task-file-options > button {
+  min-width: 0;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  align-items: center;
+  gap: 0 4px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-task-file-options > button > span {
+  grid-row: 1 / 3;
+  color: var(--accent);
+}
+
+.assistant-task-file-options strong,
+.assistant-task-file-options small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-task-file-options strong {
+  font-size: 7px;
+}
+
+.assistant-task-file-options small {
+  color: var(--muted);
+  font-size: 6px;
+}
+
+.assistant-task-file-options > button.is-selected {
+  border-color: rgba(103, 87, 232, 0.32);
+  background: var(--accent-soft);
+}
+
+.assistant-task-browser-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.assistant-task-browser-options > button {
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.assistant-task-browser-options > button > svg {
+  flex: 0 0 auto;
+}
+
+.assistant-task-browser-options > button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.assistant-task-browser-options strong {
+  color: var(--ink-soft);
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.assistant-task-browser-options small {
+  overflow: hidden;
+  font-size: 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-task-browser-options > button.is-active {
+  border-color: rgba(103, 87, 232, 0.32);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-task-browser-options > button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.assistant-task-browser-url {
+  display: block;
+  margin: 7px 0 0 !important;
+}
+
+.assistant-task-browser-url small {
+  display: block;
+  margin-top: 4px;
 }
 
 .assistant-task-editor > footer {
@@ -9692,6 +9879,24 @@ body,
   color: var(--ink-soft);
 }
 
+.assistant-task-authorizations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0 0 44px;
+}
+
+.assistant-task-authorizations > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 7px;
+}
+
 .assistant-task-error {
   display: flex;
   align-items: center;
@@ -9753,6 +9958,12 @@ body,
   background: var(--accent-soft);
   font-size: 7px;
   cursor: pointer;
+}
+
+.assistant-task-run-actions {
+  flex: 0 0 auto !important;
+  justify-content: flex-end !important;
+  gap: 4px !important;
 }
 
 .assistant-task-card > footer {
@@ -10449,6 +10660,22 @@ body,
   padding: 0 11px;
 }
 
+.assistant-browser-confirm-card.is-automatic {
+  border-color: rgba(103, 87, 232, 0.22);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(103, 87, 232, 0.09), transparent 38%),
+    rgba(249, 248, 255, 0.92);
+}
+
+.assistant-browser-confirm-card.is-automatic .assistant-browser-confirm-icon {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-browser-confirm-card.is-automatic small {
+  color: var(--accent);
+}
+
 .assistant-browser-actions {
   display: grid;
   grid-template-columns: minmax(150px, 0.5fr) minmax(0, 1fr) auto;
@@ -10703,6 +10930,7 @@ body,
 :root[data-theme="dark"] .assistant-task-card,
 :root[data-theme="dark"] .assistant-task-editor input[type="text"],
 :root[data-theme="dark"] .assistant-task-editor input[type="datetime-local"],
+:root[data-theme="dark"] .assistant-task-editor input[type="url"],
 :root[data-theme="dark"] .assistant-task-editor textarea {
   border-color: rgba(255, 255, 255, 0.09);
   background: rgba(40, 41, 49, 0.96);
@@ -10710,6 +10938,8 @@ body,
 
 :root[data-theme="dark"] .assistant-task-card > footer > button:first-child,
 :root[data-theme="dark"] .assistant-task-schedules button.is-active,
+:root[data-theme="dark"] .assistant-task-file-options > button.is-selected,
+:root[data-theme="dark"] .assistant-task-browser-options > button.is-active,
 :root[data-theme="dark"] .assistant-task-history button {
   background: rgba(103, 87, 232, 0.17);
 }
@@ -10764,6 +10994,13 @@ body,
   background:
     radial-gradient(circle at 100% 0%, rgba(223, 159, 70, 0.08), transparent 38%),
     rgba(48, 42, 33, 0.72);
+}
+
+:root[data-theme="dark"] .assistant-browser-confirm-card.is-automatic {
+  border-color: rgba(103, 87, 232, 0.22);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(103, 87, 232, 0.1), transparent 38%),
+    rgba(40, 38, 53, 0.78);
 }
 
 :root[data-theme="dark"] .assistant-browser-page > pre {
@@ -11058,7 +11295,8 @@ body,
   }
 
   .assistant-task-form-grid,
-  .assistant-task-schedules {
+  .assistant-task-schedules,
+  .assistant-task-tools {
     grid-template-columns: 1fr;
   }
 
@@ -11084,10 +11322,15 @@ body,
   }
 
   .assistant-task-plan,
+  .assistant-task-authorizations,
   .assistant-task-error,
   .assistant-task-history,
   .assistant-task-card > footer {
     margin-left: 0;
+  }
+
+  .assistant-task-browser-options {
+    grid-template-columns: 1fr;
   }
 
   .assistant-task-plan {

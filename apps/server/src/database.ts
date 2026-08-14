@@ -399,6 +399,9 @@ CREATE TABLE IF NOT EXISTS ai_assistant_tasks (
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title VARCHAR(80) NOT NULL,
   prompt TEXT NOT NULL,
+  browser_action VARCHAR(16) NOT NULL DEFAULT 'NONE'
+    CHECK (browser_action IN ('NONE', 'READ', 'SCREENSHOT')),
+  browser_url TEXT,
   schedule_type VARCHAR(12) NOT NULL
     CHECK (schedule_type IN ('ONCE', 'DAILY', 'WEEKLY')),
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -413,6 +416,31 @@ CREATE TABLE IF NOT EXISTS ai_assistant_tasks (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE ai_assistant_tasks
+  ADD COLUMN IF NOT EXISTS browser_action VARCHAR(16) NOT NULL DEFAULT 'NONE';
+ALTER TABLE ai_assistant_tasks
+  ADD COLUMN IF NOT EXISTS browser_url TEXT;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'ai_assistant_tasks_browser_action_check'
+       AND conrelid = 'ai_assistant_tasks'::regclass
+  ) THEN
+    ALTER TABLE ai_assistant_tasks
+      ADD CONSTRAINT ai_assistant_tasks_browser_action_check
+      CHECK (browser_action IN ('NONE', 'READ', 'SCREENSHOT'));
+  END IF;
+END $$;
+
+-- 自动任务只读取用户在任务定义中逐项选择的助理文件；文件从工作区移除后授权同步失效。
+CREATE TABLE IF NOT EXISTS ai_assistant_task_files (
+  task_id UUID NOT NULL REFERENCES ai_assistant_tasks(id) ON DELETE CASCADE,
+  assistant_file_id UUID NOT NULL REFERENCES ai_assistant_files(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (task_id, assistant_file_id)
+);
+
 -- 每次执行独立留痕；任务删除时历史一并删除，清空助理对话时仅解除结果消息引用。
 CREATE TABLE IF NOT EXISTS ai_assistant_task_runs (
   id UUID PRIMARY KEY,
@@ -423,9 +451,15 @@ CREATE TABLE IF NOT EXISTS ai_assistant_task_runs (
   started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   result_message_id UUID REFERENCES ai_assistant_messages(id) ON DELETE SET NULL,
+  browser_run_id UUID,
+  tool_summary JSONB NOT NULL DEFAULT '{}'::jsonb,
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE ai_assistant_task_runs ADD COLUMN IF NOT EXISTS browser_run_id UUID;
+ALTER TABLE ai_assistant_task_runs
+  ADD COLUMN IF NOT EXISTS tool_summary JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- 浏览器工具默认关闭，且按助理分别授权。页面读取是基础能力；截图和交互
 -- 需要用户额外开启，避免新建助理后就具备访问外部页面或操作表单的权限。
@@ -461,8 +495,8 @@ CREATE TABLE IF NOT EXISTS ai_assistant_browser_runs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 每一步都先以 AWAITING_CONFIRMATION 入库，再由同一用户显式确认。FILL 的
--- 实际文本只随确认请求进入内存，不写数据库；审计中只保留字符数。
+-- 手动浏览步骤先以 AWAITING_CONFIRMATION 入库，再由同一用户显式确认；自动任务
+-- 只会生成带 automatic 标记的 READ/SCREENSHOT。FILL 实际文本只进入内存。
 CREATE TABLE IF NOT EXISTS ai_assistant_browser_steps (
   id UUID PRIMARY KEY,
   run_id UUID NOT NULL REFERENCES ai_assistant_browser_runs(id) ON DELETE CASCADE,
@@ -481,6 +515,20 @@ CREATE TABLE IF NOT EXISTS ai_assistant_browser_steps (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (run_id, sequence)
 );
+
+-- 浏览器记录由用户主动删除时，任务历史保留工具摘要但不再提供失效跳转。
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'ai_assistant_task_runs_browser_run_id_fkey'
+       AND conrelid = 'ai_assistant_task_runs'::regclass
+  ) THEN
+    ALTER TABLE ai_assistant_task_runs
+      ADD CONSTRAINT ai_assistant_task_runs_browser_run_id_fkey
+      FOREIGN KEY (browser_run_id) REFERENCES ai_assistant_browser_runs(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
@@ -579,6 +627,8 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_history
   ON ai_assistant_task_runs(task_id, started_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_running
   ON ai_assistant_task_runs(started_at) WHERE status = 'RUNNING';
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_files_file
+  ON ai_assistant_task_files(assistant_file_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_browser_runs_history
   ON ai_assistant_browser_runs(assistant_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_browser_runs_active

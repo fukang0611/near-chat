@@ -524,7 +524,11 @@ export async function executeAiAssistantTask(
   assistantId: string,
   taskTitle: string,
   prompt: string,
+  fileIds: string[] = [],
+  toolContext = "",
 ) {
-  const content = `[定时任务：${taskTitle}]\n${prompt.trim()}`;
-  return generateAndSaveAssistantReply(userId, assistantId, content, false);
+  const content = [`[定时任务：${taskTitle}]`, prompt.trim(), toolContext.trim()]
+    .filter(Boolean)
+    .join("\n\n");
+  return generateAndSaveAssistantReply(userId, assistantId, content, false, fileIds);
 }

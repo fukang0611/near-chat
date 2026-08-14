@@ -34,6 +34,8 @@ interface AssistantBrowserPanelProps {
   assistant: AiAssistant;
   onNotice: (tone: "success" | "error", text: string) => void;
   onFilesChanged: () => void;
+  /** 从自动任务执行历史进入时，直接定位到对应的受控浏览器记录。 */
+  focusRunId?: string | null;
 }
 
 const RUN_STATUS: Record<
@@ -100,6 +102,7 @@ export function AssistantBrowserPanel({
   assistant,
   onNotice,
   onFilesChanged,
+  focusRunId = null,
 }: AssistantBrowserPanelProps) {
   const [permission, setPermission] = useState<AiAssistantBrowserPermission | null>(null);
   const [permissionDraft, setPermissionDraft] = useState({
@@ -135,25 +138,34 @@ export function AssistantBrowserPanel({
       });
       setRuns(runResult.runs);
       setSelectedRunId((current) =>
-        runResult.runs.some((run) => run.id === current)
-          ? current
-          : (runResult.runs[0]?.id ?? null),
+        focusRunId && runResult.runs.some((run) => run.id === focusRunId)
+          ? focusRunId
+          : runResult.runs.some((run) => run.id === current)
+            ? current
+            : (runResult.runs[0]?.id ?? null),
       );
     } catch (error) {
       onNotice("error", errorMessage(error, "浏览器工具加载失败"));
     } finally {
       setLoading(false);
     }
-  }, [assistant.id, onNotice]);
+  }, [assistant.id, focusRunId, onNotice]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (focusRunId && runs.some((run) => run.id === focusRunId)) {
+      setSelectedRunId(focusRunId);
+    }
+  }, [focusRunId, runs]);
+
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+  const automaticRun = Boolean(selectedRun?.steps.some((step) => step.input.automatic === true));
   const pendingStep = selectedRun?.steps.find((step) => step.status === "AWAITING_CONFIRMATION");
   const elementOptions = useMemo(() => {
     if (!selectedRun) return [];
@@ -484,7 +496,7 @@ export function AssistantBrowserPanel({
                     >
                       {RUN_STATUS[selectedRun.status].label}
                     </span>
-                    {!isTerminal(selectedRun.status) && (
+                    {!isTerminal(selectedRun.status) && !automaticRun && (
                       <>
                         <button
                           type="button"
@@ -530,7 +542,20 @@ export function AssistantBrowserPanel({
                   </div>
                 </header>
 
-                {pendingStep && (
+                {automaticRun && !isTerminal(selectedRun.status) && (
+                  <div className="assistant-browser-confirm-card is-automatic">
+                    <span className="assistant-browser-confirm-icon">
+                      <LoaderCircle className="spin" size={15} />
+                    </span>
+                    <div>
+                      <small>自动任务 · 已在任务定义中预授权</small>
+                      <strong>只读工具正在执行</strong>
+                      <p>本次只会打开目标页面并读取或截图，不会点击元素和填写内容。</p>
+                    </div>
+                  </div>
+                )}
+
+                {pendingStep && !automaticRun && (
                   <div className="assistant-browser-confirm-card">
                     <span className="assistant-browser-confirm-icon">
                       {actionIcon(pendingStep.action)}
@@ -564,7 +589,7 @@ export function AssistantBrowserPanel({
                   </div>
                 )}
 
-                {selectedRun.status === "ACTIVE" && !pendingStep && (
+                {selectedRun.status === "ACTIVE" && !pendingStep && !automaticRun && (
                   <div className="assistant-browser-actions">
                     <label>
                       <span>下一步</span>

@@ -381,6 +381,24 @@ export interface AiAssistantFile {
 
 export type AiAssistantTaskSchedule = "ONCE" | "DAILY" | "WEEKLY";
 export type AiAssistantTaskStatus = "NEVER" | "RUNNING" | "SUCCEEDED" | "FAILED";
+export type AiAssistantTaskBrowserAction = "NONE" | "READ" | "SCREENSHOT";
+
+export interface AiAssistantTaskToolSummary {
+  files?: {
+    ids?: string[];
+    count?: number;
+    status?: "AUTHORIZED" | "REQUESTED" | "USED" | "NOT_USED" | "FAILED_OR_ABORTED";
+  };
+  browser?: {
+    action?: AiAssistantTaskBrowserAction;
+    url?: string | null;
+    status?: "AUTHORIZED" | "REQUESTED" | "SUCCEEDED" | "NOT_USED" | "FAILED";
+    runId?: string | null;
+    artifactFileId?: string | null;
+    pageTitle?: string;
+    error?: string;
+  };
+}
 
 export interface AiAssistantTaskRun {
   id: string;
@@ -391,6 +409,8 @@ export interface AiAssistantTaskRun {
   startedAt: string;
   completedAt: string | null;
   resultMessageId: string | null;
+  browserRunId: string | null;
+  toolSummary: AiAssistantTaskToolSummary;
   errorMessage: string | null;
 }
 
@@ -400,6 +420,9 @@ export interface AiAssistantTask {
   title: string;
   prompt: string;
   scheduleType: AiAssistantTaskSchedule;
+  fileIds: string[];
+  browserAction: AiAssistantTaskBrowserAction;
+  browserUrl: string | null;
   enabled: boolean;
   nextRunAt: string | null;
   runRequested: boolean;

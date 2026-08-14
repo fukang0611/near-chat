@@ -1,8 +1,11 @@
 import {
   AlertCircle,
+  Camera,
   CalendarClock,
   CheckCircle2,
   Clock3,
+  FileText,
+  Globe2,
   History,
   LoaderCircle,
   MessageSquareText,
@@ -17,14 +20,26 @@ import {
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api, type SaveAiAssistantTaskInput } from "../api";
-import type { AiAssistant, AiAssistantTask, AiAssistantTaskSchedule } from "../types";
+import type {
+  AiAssistant,
+  AiAssistantBrowserPermission,
+  AiAssistantFile,
+  AiAssistantTask,
+  AiAssistantTaskBrowserAction,
+  AiAssistantTaskSchedule,
+} from "../types";
 import { errorMessage } from "../utils/errors";
+import { formatBytes } from "../utils/format";
 
 interface AssistantTasksPanelProps {
   assistant: AiAssistant;
+  files: AiAssistantFile[];
   refreshVersion: number;
   onNotice: (tone: "error" | "success", text: string) => void;
   onOpenMessage: (messageId: string) => void;
+  onOpenBrowserRun: (runId: string) => void;
+  onOpenBrowserSettings: () => void;
+  onOpenFiles: () => void;
 }
 
 interface TaskForm {
@@ -33,12 +48,24 @@ interface TaskForm {
   scheduleType: AiAssistantTaskSchedule;
   scheduledFor: string;
   enabled: boolean;
+  fileIds: string[];
+  browserAction: AiAssistantTaskBrowserAction;
+  browserUrl: string;
 }
 
 const SCHEDULE_META: Record<AiAssistantTaskSchedule, { label: string; detail: string }> = {
   ONCE: { label: "一次", detail: "在指定时刻执行一次" },
   DAILY: { label: "每天", detail: "从首次时间起每 24 小时" },
   WEEKLY: { label: "每周", detail: "从首次时间起每 7 天" },
+};
+
+const BROWSER_META: Record<
+  AiAssistantTaskBrowserAction,
+  { label: string; detail: string; icon: typeof Globe2 }
+> = {
+  NONE: { label: "不使用", detail: "只处理任务文字和所选文件", icon: Globe2 },
+  READ: { label: "读取页面", detail: "提取标题与可见文字", icon: Globe2 },
+  SCREENSHOT: { label: "保存截图", detail: "生成整页截图并交给助理", icon: Camera },
 };
 
 function localDateTime(value: Date | string): string {
@@ -56,6 +83,9 @@ function emptyTaskForm(): TaskForm {
     scheduleType: "ONCE",
     scheduledFor: localDateTime(scheduledFor),
     enabled: true,
+    fileIds: [],
+    browserAction: "NONE",
+    browserUrl: "",
   };
 }
 
@@ -69,6 +99,9 @@ function taskForm(task: AiAssistantTask): TaskForm {
     scheduleType: task.scheduleType,
     scheduledFor: localDateTime(editableRunAt),
     enabled: task.enabled,
+    fileIds: task.fileIds,
+    browserAction: task.browserAction,
+    browserUrl: task.browserUrl ?? "",
   };
 }
 
@@ -94,11 +127,18 @@ function runStatus(task: AiAssistantTask) {
 /** 助理任务定义和最近执行历史均由此组件维护，主对话只接收定位动作。 */
 export function AssistantTasksPanel({
   assistant,
+  files,
   refreshVersion,
   onNotice,
   onOpenMessage,
+  onOpenBrowserRun,
+  onOpenBrowserSettings,
+  onOpenFiles,
 }: AssistantTasksPanelProps) {
   const [tasks, setTasks] = useState<AiAssistantTask[]>([]);
+  const [browserPermission, setBrowserPermission] = useState<AiAssistantBrowserPermission | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<"new" | string | null>(null);
   const [form, setForm] = useState<TaskForm>(() => emptyTaskForm());
@@ -111,8 +151,14 @@ export function AssistantTasksPanel({
     const sequence = ++loadSequenceRef.current;
     setLoading(true);
     try {
-      const result = await api.aiAssistantTasks(assistant.id);
-      if (sequence === loadSequenceRef.current) setTasks(result.tasks);
+      const [taskResult, permissionResult] = await Promise.all([
+        api.aiAssistantTasks(assistant.id),
+        api.aiAssistantBrowserPermission(assistant.id),
+      ]);
+      if (sequence === loadSequenceRef.current) {
+        setTasks(taskResult.tasks);
+        setBrowserPermission(permissionResult.permission);
+      }
     } catch (error) {
       if (sequence === loadSequenceRef.current) {
         onNotice("error", errorMessage(error, "助理任务加载失败"));
@@ -158,6 +204,9 @@ export function AssistantTasksPanel({
       scheduleType: form.scheduleType,
       scheduledFor: scheduledFor.toISOString(),
       enabled: form.enabled,
+      fileIds: form.fileIds,
+      browserAction: form.browserAction,
+      browserUrl: form.browserAction === "NONE" ? null : form.browserUrl.trim(),
     };
     setBusyId(editingId);
     try {
@@ -179,6 +228,32 @@ export function AssistantTasksPanel({
       setBusyId(null);
     }
   };
+
+  const toggleFile = (fileId: string) => {
+    setForm((current) => {
+      if (current.fileIds.includes(fileId)) {
+        return { ...current, fileIds: current.fileIds.filter((id) => id !== fileId) };
+      }
+      if (current.fileIds.length >= 5) {
+        onNotice("error", "每个自动任务最多授权 5 个文件");
+        return current;
+      }
+      return { ...current, fileIds: [...current.fileIds, fileId] };
+    });
+  };
+
+  const selectBrowserAction = (action: AiAssistantTaskBrowserAction) => {
+    if (action === "READ" && !browserPermission?.enabled) return;
+    if (
+      action === "SCREENSHOT" &&
+      (!browserPermission?.enabled || !browserPermission.allowScreenshot)
+    ) {
+      return;
+    }
+    setForm((current) => ({ ...current, browserAction: action }));
+  };
+
+  const processableFiles = files.filter((file) => file.processable);
 
   const toggleTask = async (task: AiAssistantTask) => {
     if (busyId) return;
@@ -313,6 +388,98 @@ export function AssistantTasksPanel({
               ))}
             </div>
           </fieldset>
+          <fieldset className="assistant-task-tools">
+            <legend>本次任务可使用的工具</legend>
+            <section>
+              <header>
+                <span>
+                  <FileText size={14} />
+                  <strong>助理文件</strong>
+                  <small>仅会读取你在这里明确勾选的文件，最多 5 个</small>
+                </span>
+                <button type="button" onClick={onOpenFiles}>
+                  管理文件
+                </button>
+              </header>
+              {processableFiles.length > 0 ? (
+                <div className="assistant-task-file-options">
+                  {processableFiles.map((file) => (
+                    <button
+                      type="button"
+                      className={form.fileIds.includes(file.id) ? "is-selected" : ""}
+                      aria-pressed={form.fileIds.includes(file.id)}
+                      key={file.id}
+                      onClick={() => toggleFile(file.id)}
+                    >
+                      <span>
+                        {form.fileIds.includes(file.id) ? <CheckCircle2 size={13} /> : null}
+                      </span>
+                      <strong title={file.attachment.originalName}>
+                        {file.attachment.originalName}
+                      </strong>
+                      <small>{formatBytes(file.attachment.sizeBytes)}</small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p>暂无可读取的文档。可先在文件工作区添加 TXT、Markdown、PDF 或表格。</p>
+              )}
+            </section>
+            <section>
+              <header>
+                <span>
+                  <Globe2 size={14} />
+                  <strong>受控浏览器</strong>
+                  <small>自动任务只允许读取或截图，不会点击和填写</small>
+                </span>
+                <button type="button" onClick={onOpenBrowserSettings}>
+                  授权设置
+                </button>
+              </header>
+              <div className="assistant-task-browser-options">
+                {(Object.keys(BROWSER_META) as AiAssistantTaskBrowserAction[]).map((action) => {
+                  const meta = BROWSER_META[action];
+                  const Icon = meta.icon;
+                  const disabled =
+                    (action === "READ" && !browserPermission?.enabled) ||
+                    (action === "SCREENSHOT" &&
+                      (!browserPermission?.enabled || !browserPermission.allowScreenshot));
+                  return (
+                    <button
+                      type="button"
+                      className={form.browserAction === action ? "is-active" : ""}
+                      aria-pressed={form.browserAction === action}
+                      disabled={disabled}
+                      title={disabled ? "请先在浏览器工作区完成相应授权" : undefined}
+                      key={action}
+                      onClick={() => selectBrowserAction(action)}
+                    >
+                      <Icon size={14} />
+                      <span>
+                        <strong>{meta.label}</strong>
+                        <small>{meta.detail}</small>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {form.browserAction !== "NONE" && (
+                <label className="assistant-task-browser-url">
+                  <span>目标页面</span>
+                  <input
+                    type="url"
+                    value={form.browserUrl}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, browserUrl: event.target.value }))
+                    }
+                    placeholder="https://intranet.example.com/status"
+                    required
+                  />
+                  <small>为避免凭据进入任务记录，定时网址不能包含查询参数或 # 片段。</small>
+                </label>
+              )}
+            </section>
+          </fieldset>
           <footer>
             <label>
               <input
@@ -394,6 +561,25 @@ export function AssistantTasksPanel({
                       已执行 {task.runCount} 次
                     </span>
                   </div>
+                  {(task.fileIds.length > 0 || task.browserAction !== "NONE") && (
+                    <div className="assistant-task-authorizations">
+                      {task.fileIds.length > 0 && (
+                        <span>
+                          <FileText size={12} /> {task.fileIds.length} 个文件
+                        </span>
+                      )}
+                      {task.browserAction !== "NONE" && (
+                        <span>
+                          {task.browserAction === "SCREENSHOT" ? (
+                            <Camera size={12} />
+                          ) : (
+                            <Globe2 size={12} />
+                          )}
+                          {BROWSER_META[task.browserAction].label}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {task.lastError && (
                     <div className="assistant-task-error">
                       <AlertCircle size={13} />
@@ -422,15 +608,26 @@ export function AssistantTasksPanel({
                             </strong>
                             <small>{formatDateTime(run.startedAt)}</small>
                           </span>
-                          {run.resultMessageId && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenMessage(run.resultMessageId!)}
-                            >
-                              <MessageSquareText size={12} />
-                              查看结果
-                            </button>
-                          )}
+                          <span className="assistant-task-run-actions">
+                            {run.browserRunId && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenBrowserRun(run.browserRunId!)}
+                              >
+                                <Globe2 size={12} />
+                                执行记录
+                              </button>
+                            )}
+                            {run.resultMessageId && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenMessage(run.resultMessageId!)}
+                              >
+                                <MessageSquareText size={12} />
+                                查看结果
+                              </button>
+                            )}
+                          </span>
                         </div>
                       ))}
                     </div>

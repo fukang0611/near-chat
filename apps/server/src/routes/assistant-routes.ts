@@ -122,8 +122,15 @@ const taskFields = {
   scheduleType: z.enum(["ONCE", "DAILY", "WEEKLY"]),
   scheduledFor: scheduledForSchema,
   enabled: z.boolean(),
+  fileIds: z.array(idSchema).max(5, "每个任务最多选择 5 个文件").default([]),
+  browserAction: z.enum(["NONE", "READ", "SCREENSHOT"]).default("NONE"),
+  browserUrl: z.string().trim().max(2048, "页面地址过长").nullable().default(null),
 };
-const createTaskSchema = z.object(taskFields);
+const createTaskSchema = z.object(taskFields).superRefine((input, context) => {
+  if (input.browserAction !== "NONE" && !input.browserUrl) {
+    context.addIssue({ code: "custom", path: ["browserUrl"], message: "请输入目标页面地址" });
+  }
+});
 const updateTaskSchema = z
   .object({
     title: taskFields.title.optional(),
@@ -131,6 +138,9 @@ const updateTaskSchema = z
     scheduleType: taskFields.scheduleType.optional(),
     scheduledFor: taskFields.scheduledFor.optional(),
     enabled: taskFields.enabled.optional(),
+    fileIds: taskFields.fileIds.optional(),
+    browserAction: taskFields.browserAction.optional(),
+    browserUrl: taskFields.browserUrl.optional(),
   })
   .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 
