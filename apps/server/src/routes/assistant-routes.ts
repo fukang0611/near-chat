@@ -2,6 +2,16 @@ import { Router } from "express";
 import { z } from "zod";
 import { getAiCapabilities } from "../ai/ai-runtime.js";
 import {
+  confirmAiAssistantBrowserStep,
+  createAiAssistantBrowserRun,
+  deleteAiAssistantBrowserRun,
+  finishAiAssistantBrowserRun,
+  getAiAssistantBrowserPermission,
+  listAiAssistantBrowserRuns,
+  prepareAiAssistantBrowserStep,
+  updateAiAssistantBrowserPermission,
+} from "../assistant/assistant-browser-service.js";
+import {
   ASSISTANT_MESSAGE_FILE_LIMIT,
   addAiAssistantFile,
   listAiAssistantFiles,
@@ -76,6 +86,31 @@ const addAssistantFileSchema = z.object({
 const saveAssistantMessageFileSchema = z.object({
   format: z.enum(["MARKDOWN", "TEXT"]),
   name: z.string().trim().max(180, "文件名不能超过 180 个字").optional(),
+});
+const browserPermissionSchema = z.object({
+  enabled: z.boolean(),
+  allowScreenshot: z.boolean(),
+  allowInteraction: z.boolean(),
+});
+const createBrowserRunSchema = z.object({
+  goal: z.string().trim().min(1, "请输入本次浏览目标").max(500, "浏览目标不能超过 500 个字"),
+  startUrl: z.string().trim().min(1, "请输入页面地址").max(2048, "页面地址过长"),
+});
+const createBrowserStepSchema = z
+  .object({
+    action: z.enum(["READ", "SCREENSHOT", "CLICK", "FILL"]),
+    elementRef: z.string().trim().optional(),
+  })
+  .superRefine((input, context) => {
+    if ((input.action === "CLICK" || input.action === "FILL") && !input.elementRef) {
+      context.addIssue({ code: "custom", message: "请选择要操作的页面元素" });
+    }
+  });
+const confirmBrowserStepSchema = z.object({
+  value: z.string().max(2000, "单次填写不能超过 2000 个字").optional(),
+});
+const finishBrowserRunSchema = z.object({
+  outcome: z.enum(["SUCCEEDED", "CANCELLED"]),
 });
 const scheduledForSchema = z
   .string()
@@ -218,6 +253,124 @@ export function createAssistantRouter() {
         name: input.name,
       });
       response.status(201).json({ file });
+    },
+  );
+
+  router.get(
+    "/ai/assistants/:assistantId/browser/permission",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const permission = await getAiAssistantBrowserPermission(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+      );
+      response.json({ permission });
+    },
+  );
+
+  router.put(
+    "/ai/assistants/:assistantId/browser/permission",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const permission = await updateAiAssistantBrowserPermission(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        browserPermissionSchema.parse(request.body),
+      );
+      response.json({ permission });
+    },
+  );
+
+  router.get(
+    "/ai/assistants/:assistantId/browser/runs",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const runs = await listAiAssistantBrowserRuns(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+      );
+      response.json({ runs });
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/browser/runs",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const input = createBrowserRunSchema.parse(request.body);
+      const run = await createAiAssistantBrowserRun(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        input.goal,
+        input.startUrl,
+      );
+      response.status(201).json({ run });
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/browser/runs/:runId/steps",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const run = await prepareAiAssistantBrowserStep(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.runId),
+        createBrowserStepSchema.parse(request.body),
+      );
+      response.status(201).json({ run });
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/browser/runs/:runId/steps/:stepId/confirm",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const input = confirmBrowserStepSchema.parse(request.body);
+      const run = await confirmAiAssistantBrowserStep(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.runId),
+        idSchema.parse(request.params.stepId),
+        input.value,
+      );
+      response.json({ run });
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/browser/runs/:runId/finish",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const input = finishBrowserRunSchema.parse(request.body);
+      const run = await finishAiAssistantBrowserRun(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.runId),
+        input.outcome,
+      );
+      response.json({ run });
+    },
+  );
+
+  router.delete(
+    "/ai/assistants/:assistantId/browser/runs/:runId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      await deleteAiAssistantBrowserRun(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.runId),
+      );
+      response.status(204).end();
     },
   );
 

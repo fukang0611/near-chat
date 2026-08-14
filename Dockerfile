@@ -19,6 +19,10 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
+# 个人助理的受控浏览器工具只使用系统 Chromium，不下载 Playwright 自带浏览器。
+# Noto CJK 让局域网页面的中文截图在无桌面环境中仍能正确显示。
+RUN apk add --no-cache chromium nss font-noto-cjk
+
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/package.json ./apps/server/package.json

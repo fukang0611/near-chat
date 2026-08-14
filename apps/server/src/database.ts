@@ -394,6 +394,61 @@ CREATE TABLE IF NOT EXISTS ai_assistant_task_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 浏览器工具默认关闭，且按助理分别授权。页面读取是基础能力；截图和交互
+-- 需要用户额外开启，避免新建助理后就具备访问外部页面或操作表单的权限。
+CREATE TABLE IF NOT EXISTS ai_assistant_browser_permissions (
+  assistant_id UUID PRIMARY KEY REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  allow_screenshot BOOLEAN NOT NULL DEFAULT FALSE,
+  allow_interaction BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 一次运行对应一个隔离的无痕浏览器上下文。数据库只保存执行意图、页面摘要
+-- 和审计结果；Cookie、缓存及页面运行态始终留在进程内，运行结束立即销毁。
+CREATE TABLE IF NOT EXISTS ai_assistant_browser_runs (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  goal VARCHAR(500) NOT NULL,
+  start_url TEXT NOT NULL,
+  status VARCHAR(28) NOT NULL DEFAULT 'AWAITING_CONFIRMATION'
+    CHECK (status IN (
+      'AWAITING_CONFIRMATION', 'ACTIVE', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED'
+    )),
+  current_url TEXT,
+  page_title VARCHAR(500),
+  page_excerpt TEXT,
+  page_elements JSONB NOT NULL DEFAULT '[]'::jsonb,
+  opened_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 每一步都先以 AWAITING_CONFIRMATION 入库，再由同一用户显式确认。FILL 的
+-- 实际文本只随确认请求进入内存，不写数据库；审计中只保留字符数。
+CREATE TABLE IF NOT EXISTS ai_assistant_browser_steps (
+  id UUID PRIMARY KEY,
+  run_id UUID NOT NULL REFERENCES ai_assistant_browser_runs(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL CHECK (sequence > 0),
+  action VARCHAR(16) NOT NULL CHECK (action IN ('OPEN', 'READ', 'SCREENSHOT', 'CLICK', 'FILL')),
+  status VARCHAR(28) NOT NULL DEFAULT 'AWAITING_CONFIRMATION'
+    CHECK (status IN ('AWAITING_CONFIRMATION', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED')),
+  input JSONB NOT NULL DEFAULT '{}'::jsonb,
+  output JSONB NOT NULL DEFAULT '{}'::jsonb,
+  artifact_file_id UUID REFERENCES ai_assistant_files(id) ON DELETE SET NULL,
+  confirmed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  confirmed_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (run_id, sequence)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -489,6 +544,13 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_history
   ON ai_assistant_task_runs(task_id, started_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_running
   ON ai_assistant_task_runs(started_at) WHERE status = 'RUNNING';
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_browser_runs_history
+  ON ai_assistant_browser_runs(assistant_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_browser_runs_active
+  ON ai_assistant_browser_runs(updated_at)
+  WHERE status IN ('AWAITING_CONFIRMATION', 'ACTIVE');
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_browser_steps_timeline
+  ON ai_assistant_browser_steps(run_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);
@@ -523,6 +585,37 @@ export async function initializeDatabase(): Promise<void> {
   await retryUntilReady(() => pool.query("SELECT 1"));
 
   await pool.query(schema);
+
+  // 浏览器会话只存在于当前进程；异常重启后不能假装仍可继续旧页面。
+  // 尚未首次打开的待确认运行没有页面状态，可以安全保留给用户稍后确认。
+  await transaction(async (client) => {
+    const interruptedRuns = await client.query<{ id: string }>(
+      `SELECT id
+         FROM ai_assistant_browser_runs
+        WHERE opened_at IS NOT NULL
+          AND status IN ('AWAITING_CONFIRMATION', 'ACTIVE')
+        FOR UPDATE`,
+    );
+    const runIds = interruptedRuns.rows.map((run) => run.id);
+    if (runIds.length > 0) {
+      await client.query(
+        `UPDATE ai_assistant_browser_steps
+            SET status = CASE WHEN status = 'RUNNING' THEN 'FAILED' ELSE 'CANCELLED' END,
+                completed_at = COALESCE(completed_at, NOW()),
+                error_message = COALESCE(error_message, '服务重启，浏览器会话已失效')
+          WHERE run_id = ANY($1::uuid[])
+            AND status IN ('AWAITING_CONFIRMATION', 'RUNNING')`,
+        [runIds],
+      );
+      await client.query(
+        `UPDATE ai_assistant_browser_runs
+            SET status = 'EXPIRED', completed_at = NOW(), updated_at = NOW(),
+                error_message = '服务重启，浏览器会话已失效'
+          WHERE id = ANY($1::uuid[])`,
+        [runIds],
+      );
+    }
+  });
 
   // 种子账号只在首次启动时写入，已有账号的密码和资料不会被容器重启覆盖。
   const usersToSeed = config.seedDemoUsers

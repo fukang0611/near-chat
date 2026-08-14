@@ -20,6 +20,8 @@
 
 模型或 vector 初始化失败时只有知识库索引与问答降级，`/api/health/ready` 仍只检查核心 PostgreSQL 与 MinIO。
 
+受控浏览器同样默认关闭，只有用户为某个助理显式授权并逐步确认后才会启动隔离的 Chromium 会话。应用镜像已包含系统 Chromium；默认全局最多 4 个、单用户最多 2 个并发会话，空闲 15 分钟自动销毁。可通过 `AI_BROWSER_MAX_SESSIONS`、`AI_BROWSER_MAX_SESSIONS_PER_USER` 和 `AI_BROWSER_SESSION_TTL_MINUTES` 调整。开启该能力时建议保留清单中的 1 GiB 内存上限。
+
 文件治理默认配置为单用户 1 GiB 配额、未发送附件保留 24 小时、每 30 分钟清理一次。可在 `ConfigMap` 中调整 `FILE_USER_QUOTA_BYTES`、`FILE_ORPHAN_TTL_HOURS` 和 `FILE_CLEANUP_INTERVAL_MINUTES`。
 
 发送者默认可在 120 秒内撤回消息，撤回会立即阻断附件访问。可通过 `MESSAGE_RECALL_WINDOW_SECONDS` 调整时限。

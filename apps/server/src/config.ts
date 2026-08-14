@@ -88,5 +88,14 @@ export const config = {
       // 局域网单体部署以秒级轮询换取简单、可恢复的 PostgreSQL 持久调度。
       pollMs: positiveInteger("AI_ASSISTANT_TASK_POLL_MS", 1000),
     },
+    browser: {
+      // 服务镜像内置 Chromium；该变量只用于自定义基础镜像或本地开发覆盖。
+      executablePath: process.env.AI_BROWSER_EXECUTABLE_PATH?.trim() || undefined,
+      navigationTimeoutMs: positiveInteger("AI_BROWSER_NAVIGATION_TIMEOUT_MS", 20_000),
+      actionTimeoutMs: positiveInteger("AI_BROWSER_ACTION_TIMEOUT_MS", 10_000),
+      maxSessions: positiveInteger("AI_BROWSER_MAX_SESSIONS", 4),
+      maxSessionsPerUser: positiveInteger("AI_BROWSER_MAX_SESSIONS_PER_USER", 2),
+      sessionTtlMinutes: positiveInteger("AI_BROWSER_SESSION_TTL_MINUTES", 15),
+    },
   },
 };

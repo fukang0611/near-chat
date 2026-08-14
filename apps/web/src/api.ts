@@ -2,6 +2,9 @@ import type {
   AdminUser,
   AdminAiSettings,
   AiAssistant,
+  AiAssistantBrowserAction,
+  AiAssistantBrowserPermission,
+  AiAssistantBrowserRun,
   AiAssistantCategory,
   AiAssistantFile,
   AiAssistantMessage,
@@ -346,6 +349,57 @@ export const api = {
   runAiAssistantTask: (assistantId: string, taskId: string) =>
     request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks/${taskId}/run`, {
       method: "POST",
+    }),
+  aiAssistantBrowserPermission: (assistantId: string) =>
+    request<{ permission: AiAssistantBrowserPermission }>(
+      `/api/ai/assistants/${assistantId}/browser/permission`,
+    ),
+  updateAiAssistantBrowserPermission: (
+    assistantId: string,
+    input: { enabled: boolean; allowScreenshot: boolean; allowInteraction: boolean },
+  ) =>
+    request<{ permission: AiAssistantBrowserPermission }>(
+      `/api/ai/assistants/${assistantId}/browser/permission`,
+      { method: "PUT", body: JSON.stringify(input) },
+    ),
+  aiAssistantBrowserRuns: (assistantId: string) =>
+    request<{ runs: AiAssistantBrowserRun[] }>(`/api/ai/assistants/${assistantId}/browser/runs`),
+  createAiAssistantBrowserRun: (assistantId: string, goal: string, startUrl: string) =>
+    request<{ run: AiAssistantBrowserRun }>(`/api/ai/assistants/${assistantId}/browser/runs`, {
+      method: "POST",
+      body: JSON.stringify({ goal, startUrl }),
+    }),
+  prepareAiAssistantBrowserStep: (
+    assistantId: string,
+    runId: string,
+    input: { action: Exclude<AiAssistantBrowserAction, "OPEN">; elementRef?: string },
+  ) =>
+    request<{ run: AiAssistantBrowserRun }>(
+      `/api/ai/assistants/${assistantId}/browser/runs/${runId}/steps`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
+  confirmAiAssistantBrowserStep: (
+    assistantId: string,
+    runId: string,
+    stepId: string,
+    value?: string,
+  ) =>
+    request<{ run: AiAssistantBrowserRun }>(
+      `/api/ai/assistants/${assistantId}/browser/runs/${runId}/steps/${stepId}/confirm`,
+      { method: "POST", body: JSON.stringify(value === undefined ? {} : { value }) },
+    ),
+  finishAiAssistantBrowserRun: (
+    assistantId: string,
+    runId: string,
+    outcome: "SUCCEEDED" | "CANCELLED",
+  ) =>
+    request<{ run: AiAssistantBrowserRun }>(
+      `/api/ai/assistants/${assistantId}/browser/runs/${runId}/finish`,
+      { method: "POST", body: JSON.stringify({ outcome }) },
+    ),
+  deleteAiAssistantBrowserRun: (assistantId: string, runId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/browser/runs/${runId}`, {
+      method: "DELETE",
     }),
   knowledgeBases: () => request<{ knowledgeBases: KnowledgeBase[] }>("/api/knowledge-bases"),
   createKnowledgeBase: (input: { name: string; description?: string }) =>

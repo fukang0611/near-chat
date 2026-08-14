@@ -386,6 +386,69 @@ export interface AiAssistantTaskEvent {
   createdAt: string;
 }
 
+export interface AiAssistantBrowserPermission {
+  assistantId: string;
+  enabled: boolean;
+  /** 页面读取是启用工具后的基础权限，保留字段便于未来扩展策略。 */
+  allowRead: true;
+  allowScreenshot: boolean;
+  allowInteraction: boolean;
+  updatedAt: string | null;
+}
+
+export type AiAssistantBrowserAction = "OPEN" | "READ" | "SCREENSHOT" | "CLICK" | "FILL";
+export type AiAssistantBrowserRunStatus =
+  "AWAITING_CONFIRMATION" | "ACTIVE" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "EXPIRED";
+export type AiAssistantBrowserStepStatus =
+  "AWAITING_CONFIRMATION" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export interface AiAssistantBrowserElement {
+  ref: string;
+  kind: "LINK" | "BUTTON" | "INPUT" | "TEXTAREA" | "SELECT" | "EDITABLE";
+  label: string;
+  inputType: string | null;
+  href: string | null;
+  disabled: boolean;
+}
+
+export interface AiAssistantBrowserStep {
+  id: string;
+  runId: string;
+  sequence: number;
+  action: AiAssistantBrowserAction;
+  status: AiAssistantBrowserStepStatus;
+  /** FILL 仅包含元素名称与字符数，不包含用户填写的实际内容。 */
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  artifact: {
+    assistantFileId: string;
+    attachment: Attachment;
+  } | null;
+  confirmedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface AiAssistantBrowserRun {
+  id: string;
+  assistantId: string;
+  goal: string;
+  startUrl: string;
+  status: AiAssistantBrowserRunStatus;
+  currentUrl: string | null;
+  pageTitle: string | null;
+  pageExcerpt: string | null;
+  pageElements: AiAssistantBrowserElement[];
+  openedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  steps: AiAssistantBrowserStep[];
+}
+
 export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
 
 /** 消息资产中心中的附件记录，同时携带原消息定位信息。 */

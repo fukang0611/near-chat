@@ -16,6 +16,7 @@ import {
   type AiRuntimeApplyResult,
 } from "../ai/ai-runtime.js";
 import { recordAudit } from "../audit-service.js";
+import { closeAllAiAssistantBrowserSessions } from "../assistant/assistant-browser-service.js";
 import { authenticate, requireAdmin } from "../auth.js";
 import { currentUser } from "../http.js";
 import { queueAllKnowledgeDocumentsForReindex } from "../knowledge/knowledge-service.js";
@@ -63,6 +64,7 @@ async function applyAndBroadcast(
   embeddingChanged: boolean,
 ): Promise<AiRuntimeApplyResult & { reindexQueued: number }> {
   const applied = await reconfigureAiRuntime(runtime);
+  if (!runtime.enabled) await closeAllAiAssistantBrowserSessions();
   let reindexQueued = 0;
   if (embeddingChanged || applied.indexRecreated) {
     reindexQueued = await queueAllKnowledgeDocumentsForReindex();

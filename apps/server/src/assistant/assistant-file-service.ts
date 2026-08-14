@@ -422,17 +422,31 @@ export function normalizeGeneratedFileName(
   return `${base || "助理回复"}${suffix}`;
 }
 
-/** 用户明确点击“保存为文件”后才会写入 MinIO；模型本身没有文件写入权限。 */
-export async function saveAssistantMessageAsFile(input: {
+function normalizeGeneratedAssetName(requestedName: string): string {
+  const decoded = requestedName.replaceAll("\\", "/");
+  return (
+    path
+      .basename(decoded)
+      .replace(/[\u0000-\u001f\u007f\r\n]/g, "_")
+      .trim()
+      .slice(0, 220) || "助理生成文件"
+  );
+}
+
+/**
+ * 保存由用户明确触发生成的二进制文件。回复导出和浏览器截图共用这条配额、
+ * MinIO 状态与引用感知回收链路，避免不同工具各自实现一套不一致的附件语义。
+ */
+export async function saveAssistantGeneratedBuffer(input: {
   userId: string;
   assistantId: string;
-  messageId: string;
-  format: AiAssistantGeneratedFileFormat;
-  name?: string;
+  body: Buffer;
+  originalName: string;
+  contentType: string;
+  sourceMessageId?: string | null;
 }) {
-  const fileName = normalizeGeneratedFileName(input.name, input.format);
-  const contentType =
-    input.format === "MARKDOWN" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8";
+  if (input.body.length > config.fileMaxBytes) throw new ApiError(413, "生成文件超过大小限制");
+  const fileName = normalizeGeneratedAssetName(input.originalName);
   const attachmentId = randomUUID();
   const now = new Date();
   const objectKey = [
@@ -441,19 +455,18 @@ export async function saveAssistantMessageAsFile(input: {
     String(now.getUTCMonth() + 1).padStart(2, "0"),
     attachmentId,
   ].join("/");
-  let content = "";
 
   await transaction(async (client) => {
     await assertAssistantOwner(client, input.userId, input.assistantId, true);
-    const message = await client.query<{ content: string }>(
-      `SELECT content
-         FROM ai_assistant_messages
-        WHERE id = $1 AND assistant_id = $2 AND role = 'ASSISTANT'
-        FOR SHARE`,
-      [input.messageId, input.assistantId],
-    );
-    if (!message.rows[0]) throw new ApiError(404, "助理回复不存在");
-    content = message.rows[0].content;
+    if (input.sourceMessageId) {
+      const message = await client.query(
+        `SELECT 1 FROM ai_assistant_messages
+          WHERE id = $1 AND assistant_id = $2 AND role = 'ASSISTANT'
+          FOR SHARE`,
+        [input.sourceMessageId, input.assistantId],
+      );
+      if (!message.rowCount) throw new ApiError(404, "助理回复不存在");
+    }
     const fileCount = await client.query<{ total: string }>(
       `SELECT COUNT(*)::text AS total FROM ai_assistant_files WHERE assistant_id = $1`,
       [input.assistantId],
@@ -461,8 +474,6 @@ export async function saveAssistantMessageAsFile(input: {
     if (Number(fileCount.rows[0]?.total ?? 0) >= ASSISTANT_FILE_LIMIT) {
       throw new ApiError(400, `每个助理最多保存 ${ASSISTANT_FILE_LIMIT} 个文件`);
     }
-    const body = Buffer.from(content, "utf8");
-    if (body.length > config.fileMaxBytes) throw new ApiError(413, "助理回复超过文件大小限制");
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [input.userId]);
     const usage = await client.query<{ used_bytes: string }>(
       `SELECT COALESCE(SUM(size_bytes), 0)::text AS used_bytes
@@ -470,8 +481,8 @@ export async function saveAssistantMessageAsFile(input: {
         WHERE uploader_id = $1`,
       [input.userId],
     );
-    if (Number(usage.rows[0]?.used_bytes ?? 0) + body.length > config.fileUserQuotaBytes) {
-      throw new ApiError(413, "个人文件空间不足，无法保存助理回复");
+    if (Number(usage.rows[0]?.used_bytes ?? 0) + input.body.length > config.fileUserQuotaBytes) {
+      throw new ApiError(413, "个人文件空间不足，无法保存生成文件");
     }
     await client.query(
       `INSERT INTO attachments
@@ -484,30 +495,31 @@ export async function saveAssistantMessageAsFile(input: {
         config.minio.bucket,
         objectKey,
         fileName,
-        contentType,
-        body.length,
+        input.contentType,
+        input.body.length,
       ],
     );
   });
 
-  const body = Buffer.from(content, "utf8");
   try {
     await retryOperation(
       () =>
-        minio.putObject(config.minio.bucket, objectKey, body, body.length, {
-          "Content-Type": contentType,
+        minio.putObject(config.minio.bucket, objectKey, input.body, input.body.length, {
+          "Content-Type": input.contentType,
         }),
       { attempts: config.storageRetryAttempts, delayMs: 500 },
     );
     return await transaction(async (client) => {
       await assertAssistantOwner(client, input.userId, input.assistantId, true);
-      const message = await client.query(
-        `SELECT 1 FROM ai_assistant_messages
-          WHERE id = $1 AND assistant_id = $2 AND role = 'ASSISTANT'
-          FOR SHARE`,
-        [input.messageId, input.assistantId],
-      );
-      if (!message.rowCount) throw new ApiError(409, "助理回复已被清除，无法保存文件");
+      if (input.sourceMessageId) {
+        const message = await client.query(
+          `SELECT 1 FROM ai_assistant_messages
+            WHERE id = $1 AND assistant_id = $2 AND role = 'ASSISTANT'
+            FOR SHARE`,
+          [input.sourceMessageId, input.assistantId],
+        );
+        if (!message.rowCount) throw new ApiError(409, "助理回复已被清除，无法保存文件");
+      }
       const fileCount = await client.query<{ total: string }>(
         `SELECT COUNT(*)::text AS total FROM ai_assistant_files WHERE assistant_id = $1`,
         [input.assistantId],
@@ -524,7 +536,7 @@ export async function saveAssistantMessageAsFile(input: {
         `INSERT INTO ai_assistant_files
            (id, assistant_id, owner_id, attachment_id, origin, source_message_id)
          VALUES ($1, $2, $3, $4, 'GENERATED', $5)`,
-        [fileId, input.assistantId, input.userId, attachmentId, input.messageId],
+        [fileId, input.assistantId, input.userId, attachmentId, input.sourceMessageId ?? null],
       );
       const file = await findAssistantFile(input.userId, input.assistantId, fileId, client);
       if (!file) throw new ApiError(500, "助理文件保存失败");
@@ -542,4 +554,33 @@ export async function saveAssistantMessageAsFile(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+/** 用户明确点击“保存为文件”后才会写入 MinIO；模型本身没有文件写入权限。 */
+export async function saveAssistantMessageAsFile(input: {
+  userId: string;
+  assistantId: string;
+  messageId: string;
+  format: AiAssistantGeneratedFileFormat;
+  name?: string;
+}) {
+  const message = await query<{ content: string }>(
+    `SELECT message.content
+       FROM ai_assistant_messages message
+       JOIN ai_assistants assistant ON assistant.id = message.assistant_id
+      WHERE message.id = $1 AND message.assistant_id = $2
+        AND message.role = 'ASSISTANT' AND assistant.owner_id = $3`,
+    [input.messageId, input.assistantId, input.userId],
+  );
+  if (!message.rows[0]) throw new ApiError(404, "助理回复不存在");
+  const format = input.format;
+  return saveAssistantGeneratedBuffer({
+    userId: input.userId,
+    assistantId: input.assistantId,
+    body: Buffer.from(message.rows[0].content, "utf8"),
+    originalName: normalizeGeneratedFileName(input.name, format),
+    contentType:
+      format === "MARKDOWN" ? "text/markdown; charset=utf-8" : "text/plain; charset=utf-8",
+    sourceMessageId: input.messageId,
+  });
 }

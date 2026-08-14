@@ -8,6 +8,7 @@ import {
   Download,
   FolderOpen,
   FileText,
+  Globe2,
   LibraryBig,
   LoaderCircle,
   MessageSquareText,
@@ -38,6 +39,7 @@ import type {
   UserAiModels,
 } from "../types";
 import { errorMessage } from "../utils/errors";
+import { AssistantBrowserPanel } from "./AssistantBrowserPanel";
 import { AssistantFilesPanel } from "./AssistantFilesPanel";
 import { AssistantTasksPanel } from "./AssistantTasksPanel";
 
@@ -208,7 +210,9 @@ export function AssistantCenterDialog({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingText, setSendingText] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks" | "files">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks" | "files" | "browser">(
+    "chat",
+  );
   const [assistantFiles, setAssistantFiles] = useState<AiAssistantFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
@@ -765,6 +769,16 @@ export function AssistantCenterDialog({
                         <FolderOpen size={13} />
                         文件
                       </button>
+                      <button
+                        type="button"
+                        className={workspaceMode === "browser" ? "is-active" : ""}
+                        role="tab"
+                        aria-selected={workspaceMode === "browser"}
+                        onClick={() => setWorkspaceMode("browser")}
+                      >
+                        <Globe2 size={13} />
+                        浏览器
+                      </button>
                     </div>
                     <span className="assistant-model-badge">
                       <BrainCircuit size={13} />
@@ -800,6 +814,21 @@ export function AssistantCenterDialog({
                     onFileAdded={addAssistantFileToState}
                     onFileRemoved={removeAssistantFileFromState}
                     onNotice={showNotice}
+                  />
+                ) : workspaceMode === "browser" ? (
+                  <AssistantBrowserPanel
+                    assistant={selectedAssistant}
+                    onNotice={showNotice}
+                    onFilesChanged={() => {
+                      setLoadingFiles(true);
+                      void api
+                        .aiAssistantFiles(selectedAssistant.id)
+                        .then((result) => setAssistantFiles(result.files))
+                        .catch((error) =>
+                          showNotice("error", errorMessage(error, "助理文件刷新失败")),
+                        )
+                        .finally(() => setLoadingFiles(false));
+                    }}
                   />
                 ) : (
                   <>

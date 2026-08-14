@@ -13,6 +13,7 @@ import {
   loadAssistantFileContexts,
   loadAssistantMessageFileBundles,
 } from "./assistant-file-service.js";
+import { closeAiAssistantBrowserSessions } from "./assistant-browser-service.js";
 
 export const ASSISTANT_HISTORY_LIMIT = 20;
 const ASSISTANT_LIST_LIMIT = 20;
@@ -354,6 +355,7 @@ export async function deleteAiAssistant(userId: string, assistantId: string): Pr
       attachments.rows.map((row) => row.attachment_id),
     );
   });
+  await closeAiAssistantBrowserSessions(userId, assistantId);
 }
 
 export async function listAiAssistantMessages(userId: string, assistantId: string) {

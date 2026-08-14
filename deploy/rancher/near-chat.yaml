@@ -32,6 +32,12 @@ data:
   AI_KNOWLEDGE_CHUNK_SIZE: "1200"
   AI_KNOWLEDGE_CHUNK_OVERLAP: "180"
   AI_ASSISTANT_TASK_POLL_MS: "1000"
+  AI_BROWSER_EXECUTABLE_PATH: "/usr/bin/chromium"
+  AI_BROWSER_NAVIGATION_TIMEOUT_MS: "20000"
+  AI_BROWSER_ACTION_TIMEOUT_MS: "10000"
+  AI_BROWSER_MAX_SESSIONS: "4"
+  AI_BROWSER_MAX_SESSIONS_PER_USER: "2"
+  AI_BROWSER_SESSION_TTL_MINUTES: "15"
 ---
 apiVersion: v1
 kind: Secret
@@ -106,10 +112,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: "1"
-              memory: 512Mi
+              memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

@@ -6,6 +6,7 @@ import {
 } from "./ai/ai-settings-service.js";
 import { initializeAiRuntime, shutdownAiRuntime } from "./ai/ai-runtime.js";
 import { startAttachmentCleanup } from "./attachment-cleanup.js";
+import { startAssistantBrowserSessionCleanup } from "./assistant/assistant-browser-service.js";
 import { startAssistantTaskWorker } from "./assistant/assistant-task-worker.js";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
@@ -31,6 +32,7 @@ async function main() {
   }
   const stopAttachmentCleanup = startAttachmentCleanup();
   const stopKnowledgeIndexWorker = startKnowledgeIndexWorker();
+  const stopAssistantBrowserSessionCleanup = startAssistantBrowserSessionCleanup();
 
   const realtime = new RealtimeHub();
   const stopAssistantTaskWorker = startAssistantTaskWorker(realtime);
@@ -54,6 +56,7 @@ async function main() {
     stopAttachmentCleanup();
     stopKnowledgeIndexWorker();
     stopAssistantTaskWorker();
+    stopAssistantBrowserSessionCleanup();
     realtime.close();
     server.close(async () => {
       await shutdownAiRuntime().catch((error) =>
