@@ -34,7 +34,7 @@ import type {
 } from "../types";
 import { createClientMessageId } from "../utils/client-id";
 import { errorMessage } from "../utils/errors";
-import { messageSummary, toMessageReply } from "../utils/message";
+import { appendMessageDraft, messageSummary, toMessageReply } from "../utils/message";
 import { messageKindFromContentType } from "../utils/message-kind";
 import type { MessageReactionEmoji } from "../utils/reactions";
 import { isFlashRoomExpired } from "../utils/flash-room";
@@ -66,6 +66,7 @@ import { MessageComposer } from "./MessageComposer";
 import { KnowledgeBaseDialog } from "./KnowledgeBaseDialog";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageAssetsDialog } from "./MessageAssetsDialog";
+import { MessageAiActionDialog } from "./MessageAiActionDialog";
 import { MessageTimeline } from "./MessageTimeline";
 import { MessageSelectionToolbar } from "./MessageSelectionToolbar";
 import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
@@ -184,6 +185,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
+  const [aiActionMessage, setAiActionMessage] = useState<Message | null>(null);
   const [showAssistants, setShowAssistants] = useState(false);
   const [assistantRefreshVersion, setAssistantRefreshVersion] = useState(0);
   const [assistantUnreadCount, setAssistantUnreadCount] = useState(0);
@@ -196,6 +198,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     setAiCapabilities(capabilities);
     if (!capabilities.features.personalAssistants) setShowAssistants(false);
     if (!capabilities.features.knowledgeManagement) setShowKnowledge(false);
+    if (!capabilities.features.messageActions) setAiActionMessage(null);
   }, []);
   const [showTeamRadar, setShowTeamRadar] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
@@ -1708,6 +1711,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 favoriteBusyMessageIds={favoriteBusyMessageIds}
                 selectionMode={messageSelectionMode}
                 selectedMessageIds={selectedMessageIds}
+                aiActionsAvailable={Boolean(aiCapabilities?.features.messageActions)}
                 onLoadOlder={() => void loadOlderMessages()}
                 onReply={(message) => {
                   if (!selectedId) return;
@@ -1723,6 +1727,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 onRetry={retryMessage}
                 onDiscard={discardMessage}
                 onJumpToMessage={jumpToMessage}
+                onAiAction={setAiActionMessage}
               />
             </div>
 
@@ -1851,6 +1856,24 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setShowMessageAssets(false);
           }}
           onFavoriteRemoved={forgetFavorite}
+        />
+      )}
+      {aiActionMessage && aiCapabilities?.features.messageActions && (
+        <MessageAiActionDialog
+          key={aiActionMessage.id}
+          message={aiActionMessage}
+          onClose={() => setAiActionMessage(null)}
+          onApplyToDraft={(content) => {
+            const conversationId = aiActionMessage.conversationId;
+            const nextDraft = appendMessageDraft(drafts[conversationId] ?? "", content);
+            if (!nextDraft) {
+              notify("AI 结果与现有草稿合计超过 5000 字，请复制结果后分段使用", "info");
+              return false;
+            }
+            setDrafts((current) => ({ ...current, [conversationId]: nextDraft }));
+            notify("AI 结果已追加到输入框，可继续编辑后发送", "success");
+            return true;
+          }}
         />
       )}
       {showKnowledge && aiCapabilities && (

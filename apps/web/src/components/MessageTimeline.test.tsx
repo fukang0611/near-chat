@@ -61,6 +61,7 @@ function renderTimeline(messages: Message[]) {
     favoriteBusyMessageIds: new Set(),
     selectionMode: false,
     selectedMessageIds: new Set(),
+    aiActionsAvailable: false,
     onLoadOlder: vi.fn(),
     onReply: vi.fn(),
     onAnnotateImage: vi.fn(),
@@ -73,6 +74,7 @@ function renderTimeline(messages: Message[]) {
     onRetry: vi.fn(),
     onDiscard: vi.fn(),
     onJumpToMessage: vi.fn(),
+    onAiAction: vi.fn(),
   };
   return { props, user: userEvent.setup(), ...render(<MessageTimeline {...props} />) };
 }
@@ -143,6 +145,35 @@ describe("MessageTimeline", () => {
     await rendered.user.click(button);
 
     expect(props.onToggleFavorite).toHaveBeenCalledWith(favorite);
+  });
+
+  it("AI 可用时从悬浮操作栏打开快捷处理", async () => {
+    const target = message({ id: "2e1b629f-8537-430a-b3f8-eafacaf18413" });
+    const rendered = renderTimeline([target]);
+    const props = { ...rendered.props, aiActionsAvailable: true };
+    rendered.rerender(<MessageTimeline {...props} />);
+
+    await rendered.user.click(screen.getByRole("button", { name: "AI 快捷处理" }));
+    expect(props.onAiAction).toHaveBeenCalledWith(target);
+  });
+
+  it("纯图片消息不显示必然失败的 AI 入口", () => {
+    const target = message({
+      type: "IMAGE",
+      textContent: null,
+      attachments: [
+        {
+          id: "9c4445b9-7bcf-47b1-bfee-7985beb429a6",
+          originalName: "界面.png",
+          contentType: "image/png",
+          sizeBytes: 1024,
+        },
+      ],
+    });
+    const rendered = renderTimeline([target]);
+    rendered.rerender(<MessageTimeline {...rendered.props} aiActionsAvailable />);
+
+    expect(screen.queryByRole("button", { name: "AI 快捷处理" })).toBeNull();
   });
 
   it("从操作栏进入多选后点击消息区域可切换选择", async () => {

@@ -186,6 +186,7 @@ export interface AiCapabilities {
     knowledgeSearch: boolean;
     knowledgeAnswer: boolean;
     personalAssistants: boolean;
+    messageActions: boolean;
   };
   provider: {
     chatModel: string | null;
@@ -229,6 +230,26 @@ export interface UserAiModels {
   models: AiModelChoice[];
   selectedModelId: string | null;
   defaultModelId: string | null;
+}
+
+export type MessageAiAction = "SUMMARIZE" | "EXTRACT_TASKS" | "REWRITE" | "TRANSLATE" | "ANALYZE";
+
+export type MessageAiTargetLanguage = "CHINESE" | "ENGLISH";
+
+export interface MessageAiActionResult {
+  action: MessageAiAction;
+  targetLanguage: MessageAiTargetLanguage | null;
+  result: string;
+  model: AiModelChoice;
+  source: {
+    messageId: string;
+    senderName: string;
+    conversationTitle: string;
+    textPreview: string;
+    attachments: Array<Attachment & { processed: boolean }>;
+    truncated: boolean;
+  };
+  generatedAt: string;
 }
 
 export interface KnowledgeBase {

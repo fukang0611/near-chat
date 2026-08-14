@@ -31,6 +31,7 @@ const capabilities: AiCapabilities = {
     knowledgeSearch: true,
     knowledgeAnswer: true,
     personalAssistants: true,
+    messageActions: true,
   },
   provider: {
     chatModel: "gpt-test",

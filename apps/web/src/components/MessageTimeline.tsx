@@ -10,6 +10,7 @@ import {
   Reply,
   RotateCcw,
   SmilePlus,
+  Sparkles,
   Star,
   Trash2,
   X,
@@ -19,6 +20,7 @@ import type { Attachment, Conversation, Message } from "../types";
 import { isFlashRoomExpired } from "../utils/flash-room";
 import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/format";
 import { replySummary } from "../utils/message";
+import { canProcessMessageWithAi } from "../utils/message-ai";
 import {
   MESSAGE_REACTION_OPTIONS,
   reactionLabel,
@@ -42,6 +44,7 @@ interface MessageTimelineProps {
   favoriteBusyMessageIds: ReadonlySet<string>;
   selectionMode: boolean;
   selectedMessageIds: ReadonlySet<string>;
+  aiActionsAvailable: boolean;
   onLoadOlder: () => void;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
@@ -54,6 +57,7 @@ interface MessageTimelineProps {
   onRetry: (message: Message) => void;
   onDiscard: (message: Message) => void;
   onJumpToMessage: (messageId: string) => void;
+  onAiAction: (message: Message) => void;
 }
 
 function receiptText(message: Message): { label: string; read: boolean; delivered: boolean } {
@@ -85,6 +89,7 @@ interface MessageBubbleProps {
   favoriteBusy: boolean;
   selectionMode: boolean;
   selected: boolean;
+  aiActionsAvailable: boolean;
   onReply: (message: Message) => void;
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
@@ -97,6 +102,7 @@ interface MessageBubbleProps {
   onRetry: (message: Message) => void;
   onDiscard: (message: Message) => void;
   onJumpToMessage: (messageId: string) => void;
+  onAiAction: (message: Message) => void;
 }
 
 function MessageBubble({
@@ -111,6 +117,7 @@ function MessageBubble({
   favoriteBusy,
   selectionMode,
   selected,
+  aiActionsAvailable,
   onReply,
   onAnnotateImage,
   onCopy,
@@ -123,6 +130,7 @@ function MessageBubble({
   onRetry,
   onDiscard,
   onJumpToMessage,
+  onAiAction,
 }: MessageBubbleProps) {
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactingEmoji, setReactingEmoji] = useState<MessageReactionEmoji | null>(null);
@@ -355,6 +363,17 @@ function MessageBubble({
                   )}
                 </span>
               )}
+              {aiActionsAvailable && canProcessMessageWithAi(message) && (
+                <button
+                  type="button"
+                  className="message-ai-action-button"
+                  onClick={() => onAiAction(message)}
+                  title="AI 快捷处理"
+                  aria-label="AI 快捷处理"
+                >
+                  <Sparkles size={15} />
+                </button>
+              )}
               <button type="button" onClick={() => onReply(message)} title="回复" aria-label="回复">
                 <Reply size={15} />
               </button>
@@ -465,6 +484,7 @@ export function MessageTimeline({
   favoriteBusyMessageIds,
   selectionMode,
   selectedMessageIds,
+  aiActionsAvailable,
   onLoadOlder,
   onReply,
   onAnnotateImage,
@@ -477,6 +497,7 @@ export function MessageTimeline({
   onRetry,
   onDiscard,
   onJumpToMessage,
+  onAiAction,
 }: MessageTimelineProps) {
   const [now, setNow] = useState(Date.now());
   const [recallCandidateId, setRecallCandidateId] = useState<string | null>(null);
@@ -548,6 +569,7 @@ export function MessageTimeline({
               favoriteBusy={favoriteBusyMessageIds.has(message.id)}
               selectionMode={selectionMode}
               selected={selectedMessageIds.has(message.id)}
+              aiActionsAvailable={aiActionsAvailable}
               onReply={onReply}
               onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
@@ -560,6 +582,7 @@ export function MessageTimeline({
               onRetry={onRetry}
               onDiscard={onDiscard}
               onJumpToMessage={onJumpToMessage}
+              onAiAction={onAiAction}
             />
           </Fragment>
         ))

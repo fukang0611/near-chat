@@ -13,6 +13,7 @@ import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
 import { createFileRouter } from "./routes/file-routes.js";
 import { createMessageAssetsRouter } from "./routes/message-assets-routes.js";
+import { createMessageAiRouter } from "./routes/message-ai-routes.js";
 import { createKnowledgeRouter } from "./routes/knowledge-routes.js";
 import { createTeamRadarRouter } from "./routes/team-radar-routes.js";
 
@@ -51,6 +52,7 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createChatRouter(realtime));
   app.use("/api", createTeamRadarRouter(realtime));
   app.use("/api", createMessageAssetsRouter());
+  app.use("/api", createMessageAiRouter());
   app.use("/api", createKnowledgeRouter());
   app.use("/api", createAssistantRouter());
   app.use("/api", createFileRouter());

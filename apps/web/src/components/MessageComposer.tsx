@@ -21,7 +21,7 @@ import {
 } from "react";
 import type { Attachment, Message } from "../types";
 import { formatBytes } from "../utils/format";
-import { messageSummary } from "../utils/message";
+import { MAX_MESSAGE_TEXT_LENGTH, messageSummary } from "../utils/message";
 import { EmojiPicker } from "./EmojiPicker";
 import { VoicePostcardRecorder } from "./VoicePostcardRecorder";
 
@@ -205,7 +205,7 @@ export function MessageComposer({
     const nextText = `${text.slice(0, safeStart)}${emoji}${text.slice(safeEnd)}`;
 
     // 与 textarea 的 maxLength 保持一致；空间不足时不截断 Emoji，避免产生半个代理字符。
-    if (nextText.length > 5_000) return;
+    if (nextText.length > MAX_MESSAGE_TEXT_LENGTH) return;
 
     const nextPosition = safeStart + emoji.length;
     selectionRef.current = { start: nextPosition, end: nextPosition };
@@ -294,7 +294,7 @@ export function MessageComposer({
             onPaste={handlePaste}
             placeholder={`发消息给 ${peerName}`}
             rows={1}
-            maxLength={5_000}
+            maxLength={MAX_MESSAGE_TEXT_LENGTH}
             disabled={disabled}
           />
 
@@ -354,7 +354,11 @@ export function MessageComposer({
               <span>支持粘贴或拖入文件 · 最大 50 MB</span>
             </div>
             <div className="send-group">
-              {text.length > 4_500 && <small>{text.length}/5000</small>}
+              {text.length > MAX_MESSAGE_TEXT_LENGTH - 500 && (
+                <small>
+                  {text.length}/{MAX_MESSAGE_TEXT_LENGTH}
+                </small>
+              )}
               <span className="keyboard-hint">Enter 发送</span>
               <button
                 className="send-button"

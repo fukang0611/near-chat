@@ -1,5 +1,14 @@
 import type { Message, MessageReply } from "../types";
 
+export const MAX_MESSAGE_TEXT_LENGTH = 5_000;
+
+/** AI、引用等外部结果写入草稿时统一守住编辑器容量，不静默截断用户内容。 */
+export function appendMessageDraft(existing: string, addition: string): string | null {
+  const current = existing.trimEnd();
+  const next = current ? `${current}\n\n${addition}` : addition;
+  return next.length <= MAX_MESSAGE_TEXT_LENGTH ? next : null;
+}
+
 /** 为引用卡片、通知和复制操作提供一致的消息摘要。 */
 export function messageSummary(
   message: Pick<Message, "type" | "textContent" | "attachments" | "recalledAt">,

@@ -14,6 +14,9 @@ import type {
   Conversation,
   FileQuota,
   Message,
+  MessageAiAction,
+  MessageAiActionResult,
+  MessageAiTargetLanguage,
   MessageFavorite,
   MessagePage,
   KnowledgeAnswer,
@@ -228,6 +231,18 @@ export const api = {
     request<{ unreadCount: number }>(`/api/conversations/${conversationId}/read`, {
       method: "POST",
       body: JSON.stringify({ throughMessageId }),
+    }),
+  runMessageAiAction: (
+    messageId: string,
+    input: {
+      action: MessageAiAction;
+      targetLanguage?: MessageAiTargetLanguage;
+      modelId?: string;
+    },
+  ) =>
+    request<MessageAiActionResult>(`/api/messages/${messageId}/ai-actions`, {
+      method: "POST",
+      body: JSON.stringify(input),
     }),
   upload: (file: File, onProgress?: (progress: number) => void): Promise<Attachment> =>
     new Promise((resolve, reject) => {

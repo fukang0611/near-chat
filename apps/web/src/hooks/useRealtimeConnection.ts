@@ -168,6 +168,7 @@ function isAiCapabilities(value: unknown): value is AiCapabilities {
     typeof value.features.knowledgeSearch === "boolean" &&
     typeof value.features.knowledgeAnswer === "boolean" &&
     typeof value.features.personalAssistants === "boolean" &&
+    typeof value.features.messageActions === "boolean" &&
     (value.provider.chatModel === null || typeof value.provider.chatModel === "string") &&
     (value.provider.embeddingModel === null || typeof value.provider.embeddingModel === "string") &&
     typeof value.provider.embeddingDimensions === "number"

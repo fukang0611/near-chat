@@ -149,6 +149,7 @@ describe("ChatPage message scrolling", () => {
           knowledgeSearch: false,
           knowledgeAnswer: false,
           personalAssistants: false,
+          messageActions: false,
         },
         provider: { chatModel: null, embeddingModel: null, embeddingDimensions: 1536 },
       },

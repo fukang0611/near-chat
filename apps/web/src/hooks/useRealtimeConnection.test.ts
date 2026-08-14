@@ -72,6 +72,7 @@ describe("parseRealtimeEvent", () => {
         knowledgeSearch: false,
         knowledgeAnswer: false,
         personalAssistants: false,
+        messageActions: false,
       },
       provider: {
         chatModel: null,
