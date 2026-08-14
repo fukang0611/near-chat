@@ -25,6 +25,8 @@ import type {
   MessagePage,
   KnowledgeAnswer,
   KnowledgeBase,
+  KnowledgeBaseMemberDirectory,
+  KnowledgeBaseMemberRole,
   KnowledgeDocument,
   KnowledgeSearchResult,
   TeamRadar,
@@ -414,6 +416,16 @@ export const api = {
     }),
   deleteKnowledgeBase: (knowledgeBaseId: string) =>
     request<void>(`/api/knowledge-bases/${knowledgeBaseId}`, { method: "DELETE" }),
+  knowledgeBaseMembers: (knowledgeBaseId: string) =>
+    request<KnowledgeBaseMemberDirectory>(`/api/knowledge-bases/${knowledgeBaseId}/members`),
+  updateKnowledgeBaseMembers: (
+    knowledgeBaseId: string,
+    members: Array<{ userId: string; role: KnowledgeBaseMemberRole }>,
+  ) =>
+    request<KnowledgeBaseMemberDirectory>(`/api/knowledge-bases/${knowledgeBaseId}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ members }),
+    }),
   knowledgeDocuments: (knowledgeBaseId: string) =>
     request<{ documents: KnowledgeDocument[] }>(
       `/api/knowledge-bases/${knowledgeBaseId}/documents`,

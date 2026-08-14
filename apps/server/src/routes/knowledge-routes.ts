@@ -14,8 +14,10 @@ import {
   createKnowledgeBase,
   deleteKnowledgeBase,
   deleteKnowledgeDocument,
+  getKnowledgeBaseMemberDirectory,
   listKnowledgeBases,
   listKnowledgeDocuments,
+  replaceKnowledgeBaseMembers,
   reindexKnowledgeDocument,
   searchKnowledge,
   updateKnowledgeBase,
@@ -35,6 +37,21 @@ const updateBaseSchema = z
     message: "没有需要更新的内容",
   });
 const documentSchema = z.object({ attachmentId: z.string().uuid() });
+const membersSchema = z
+  .object({
+    members: z
+      .array(
+        z.object({
+          userId: z.string().uuid(),
+          role: z.enum(["VIEWER", "EDITOR"]),
+        }),
+      )
+      .max(49, "一个知识库最多共享给 49 位成员"),
+  })
+  .refine(
+    (input) => new Set(input.members.map((member) => member.userId)).size === input.members.length,
+    { message: "共享成员不能重复" },
+  );
 const searchSchema = z.object({
   query: z.string().trim().min(1, "请输入检索内容").max(1000, "检索内容过长"),
   topK: z.number().int().min(1).max(20).optional(),
@@ -103,6 +120,34 @@ export function createKnowledgeRouter() {
     );
     response.status(204).end();
   });
+
+  router.get(
+    "/knowledge-bases/:knowledgeBaseId/members",
+    authenticate,
+    async (request, response) => {
+      requireKnowledgeManagement();
+      const directory = await getKnowledgeBaseMemberDirectory(
+        currentUser(request).id,
+        idSchema.parse(request.params.knowledgeBaseId),
+      );
+      response.json(directory);
+    },
+  );
+
+  router.put(
+    "/knowledge-bases/:knowledgeBaseId/members",
+    authenticate,
+    async (request, response) => {
+      requireKnowledgeManagement();
+      const input = membersSchema.parse(request.body);
+      const directory = await replaceKnowledgeBaseMembers(
+        currentUser(request).id,
+        idSchema.parse(request.params.knowledgeBaseId),
+        input.members,
+      );
+      response.json(directory);
+    },
+  );
 
   router.get(
     "/knowledge-bases/:knowledgeBaseId/documents",

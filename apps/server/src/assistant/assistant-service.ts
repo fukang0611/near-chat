@@ -159,11 +159,16 @@ async function validateKnowledgeBases(
 ): Promise<void> {
   if (knowledgeBaseIds.length === 0) return;
   const result = await client.query<{ id: string }>(
-    `SELECT id FROM knowledge_bases WHERE owner_id = $1 AND id = ANY($2::uuid[])`,
+    `SELECT base.id
+       FROM knowledge_bases base
+       LEFT JOIN knowledge_base_members member
+         ON member.knowledge_base_id = base.id AND member.user_id = $1
+      WHERE base.id = ANY($2::uuid[])
+        AND (base.owner_id = $1 OR member.user_id = $1)`,
     [userId, knowledgeBaseIds],
   );
   if (result.rows.length !== knowledgeBaseIds.length) {
-    throw new ApiError(400, "绑定的知识库不存在或不属于当前用户");
+    throw new ApiError(400, "绑定的知识库不存在或当前用户无权访问");
   }
 }
 

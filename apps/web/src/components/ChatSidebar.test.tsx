@@ -170,7 +170,7 @@ describe("ChatSidebar", () => {
         onLogout={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("button", { name: "打开我的知识库" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "打开团队知识库" })).toBeNull();
 
     rerender(
       <ChatSidebar
@@ -201,7 +201,7 @@ describe("ChatSidebar", () => {
         onLogout={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "打开我的知识库" }));
+    await userEvent.click(screen.getByRole("button", { name: "打开团队知识库" }));
     expect(onOpenKnowledge).toHaveBeenCalledOnce();
   });
 

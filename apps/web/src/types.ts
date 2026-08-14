@@ -252,14 +252,37 @@ export interface MessageAiActionResult {
   generatedAt: string;
 }
 
+export type KnowledgeBaseAccessRole = "OWNER" | "EDITOR" | "VIEWER";
+export type KnowledgeBaseMemberRole = Exclude<KnowledgeBaseAccessRole, "OWNER">;
+
+export type KnowledgeBaseUser = Pick<
+  User,
+  "id" | "username" | "displayName" | "avatarColor" | "avatarUrl"
+>;
+
 export interface KnowledgeBase {
   id: string;
   name: string;
   description: string;
+  owner: KnowledgeBaseUser;
+  accessRole: KnowledgeBaseAccessRole;
+  memberCount: number;
   documentCount: number;
   readyDocumentCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface KnowledgeBaseMember {
+  user: KnowledgeBaseUser;
+  role: KnowledgeBaseMemberRole;
+  addedAt: string;
+}
+
+export interface KnowledgeBaseMemberDirectory {
+  owner: KnowledgeBaseUser;
+  members: KnowledgeBaseMember[];
+  candidates: KnowledgeBaseUser[];
 }
 
 export interface KnowledgeDocument {

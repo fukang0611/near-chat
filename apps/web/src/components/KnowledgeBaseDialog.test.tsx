@@ -2,7 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { AiCapabilities, KnowledgeBase, KnowledgeDocument } from "../types";
+import type {
+  AiCapabilities,
+  KnowledgeBase,
+  KnowledgeBaseMemberDirectory,
+  KnowledgeDocument,
+} from "../types";
 import { KnowledgeBaseDialog } from "./KnowledgeBaseDialog";
 
 const capabilities: AiCapabilities = {
@@ -28,6 +33,15 @@ const base: KnowledgeBase = {
   id: "11111111-1111-4111-8111-111111111111",
   name: "产品资料",
   description: "团队产品与交付手册",
+  owner: {
+    id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    username: "admin",
+    displayName: "管理员",
+    avatarColor: "#6757E8",
+    avatarUrl: null,
+  },
+  accessRole: "OWNER",
+  memberCount: 1,
   documentCount: 1,
   readyDocumentCount: 1,
   createdAt: "2026-08-14T09:00:00.000Z",
@@ -122,5 +136,71 @@ describe("KnowledgeBaseDialog", () => {
 
     await waitFor(() => expect(deleteBase).toHaveBeenCalledWith(base.id));
     expect(await screen.findByText("知识库已删除")).toBeTruthy();
+  });
+
+  it("拥有者可以添加成员并设置编辑权限", async () => {
+    const user = userEvent.setup();
+    const directory: KnowledgeBaseMemberDirectory = {
+      owner: base.owner,
+      members: [],
+      candidates: [
+        {
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          username: "alice",
+          displayName: "林小满",
+          avatarColor: "#E76F88",
+          avatarUrl: null,
+        },
+      ],
+    };
+    vi.spyOn(api, "knowledgeBaseMembers").mockResolvedValue(directory);
+    const saveMembers = vi
+      .spyOn(api, "updateKnowledgeBaseMembers")
+      .mockResolvedValue({ ...directory, members: [] });
+
+    render(<KnowledgeBaseDialog capabilities={capabilities} onClose={vi.fn()} />);
+    await screen.findByText("NearChat 使用手册.pdf");
+    await user.click(screen.getByRole("button", { name: "共享设置" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "选择共享成员" }),
+      directory.candidates[0]!.id,
+    );
+    await user.click(screen.getByRole("button", { name: "添加" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "设置 林小满 的权限" }),
+      "EDITOR",
+    );
+    await user.click(screen.getByRole("button", { name: "保存权限" }));
+
+    await waitFor(() =>
+      expect(saveMembers).toHaveBeenCalledWith(base.id, [
+        { userId: directory.candidates[0]!.id, role: "EDITOR" },
+      ]),
+    );
+    expect(await screen.findByText("共享权限已更新")).toBeTruthy();
+  });
+
+  it("查看者只能检索与打开来源，不能修改知识库和文档", async () => {
+    vi.mocked(api.knowledgeBases).mockResolvedValue({
+      knowledgeBases: [
+        {
+          ...base,
+          accessRole: "VIEWER",
+          owner: { ...base.owner, displayName: "周远", username: "bob" },
+          memberCount: 3,
+        },
+      ],
+    });
+
+    render(<KnowledgeBaseDialog capabilities={capabilities} onClose={vi.fn()} />);
+
+    expect(await screen.findByText("你拥有查看权限，可以检索、问答和打开来源文件")).toBeTruthy();
+    expect(screen.getByText("共享 · 只读")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "共享设置" })).toBeNull();
+    expect(screen.queryByTitle("编辑知识库")).toBeNull();
+    expect(screen.queryByTitle("删除知识库")).toBeNull();
+    expect(screen.queryByRole("button", { name: "添加文档" })).toBeNull();
+    expect(screen.queryByTitle("重新索引")).toBeNull();
+    expect(screen.queryByTitle("移除文档")).toBeNull();
   });
 });

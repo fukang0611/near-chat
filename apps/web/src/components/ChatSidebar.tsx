@@ -372,8 +372,8 @@ export function ChatSidebar({
               className="icon-button knowledge-trigger"
               type="button"
               onClick={onOpenKnowledge}
-              aria-label="打开我的知识库"
-              title="我的知识库"
+              aria-label="打开团队知识库"
+              title="团队知识库"
             >
               <LibraryBig size={18} />
             </button>

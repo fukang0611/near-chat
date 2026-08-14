@@ -203,7 +203,13 @@ export function createFileRouter() {
                 JOIN knowledge_bases knowledge_base
                   ON knowledge_base.id = knowledge_document.knowledge_base_id
                WHERE knowledge_document.attachment_id = $4
-                 AND knowledge_base.owner_id = $2
+                 AND (
+                   knowledge_base.owner_id = $2 OR EXISTS (
+                     SELECT 1 FROM knowledge_base_members knowledge_member
+                      WHERE knowledge_member.knowledge_base_id = knowledge_base.id
+                        AND knowledge_member.user_id = $2
+                   )
+                 )
             )
             OR EXISTS (
               SELECT 1

@@ -1220,7 +1220,7 @@ export function AssistantWorkspace({
                 {knowledgeBases.length === 0 ? (
                   <div className="assistant-knowledge-empty">
                     <LibraryBig size={16} />
-                    暂无知识库，可稍后在“我的知识库”中创建
+                    暂无知识库，可稍后在“团队知识库”中创建或接受共享
                   </div>
                 ) : (
                   <div className="assistant-knowledge-options">

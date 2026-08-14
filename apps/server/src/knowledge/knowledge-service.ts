@@ -6,20 +6,57 @@ import {
   searchKnowledgeVectors,
 } from "../ai/ai-runtime.js";
 import { stageDetachedAttachmentsForCleanup } from "../attachment-references.js";
+import { publicAvatarUrl } from "../avatar-service.js";
 import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError } from "../http.js";
 import { supportsKnowledgeDocument } from "./document-extractor.js";
 
+export type KnowledgeBaseAccessRole = "OWNER" | "EDITOR" | "VIEWER";
+export type KnowledgeBaseMemberRole = Exclude<KnowledgeBaseAccessRole, "OWNER">;
+
 interface KnowledgeBaseRow {
   id: string;
   owner_id: string;
+  owner_username: string;
+  owner_display_name: string;
+  owner_avatar_color: string;
+  owner_avatar_object_key: string | null;
+  owner_avatar_version: number;
   name: string;
   description: string;
   document_count: string;
   ready_document_count: string;
+  member_count: string;
+  access_role: KnowledgeBaseAccessRole;
   created_at: Date;
   updated_at: Date;
+}
+
+interface KnowledgeBaseAccessRow {
+  id: string;
+  owner_id: string;
+  access_role: KnowledgeBaseAccessRole | null;
+}
+
+interface KnowledgeBaseMemberRow {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_color: string;
+  avatar_object_key: string | null;
+  avatar_version: number;
+  role: KnowledgeBaseMemberRole;
+  created_at: Date;
+}
+
+interface KnowledgeBaseCandidateRow {
+  id: string;
+  username: string;
+  display_name: string;
+  avatar_color: string;
+  avatar_object_key: string | null;
+  avatar_version: number;
 }
 
 interface KnowledgeDocumentRow {
@@ -71,11 +108,126 @@ function publicKnowledgeBase(row: KnowledgeBaseRow) {
     id: row.id,
     name: row.name,
     description: row.description,
+    owner: {
+      id: row.owner_id,
+      username: row.owner_username,
+      displayName: row.owner_display_name,
+      avatarColor: row.owner_avatar_color,
+      avatarUrl: publicAvatarUrl(
+        row.owner_id,
+        row.owner_avatar_object_key,
+        row.owner_avatar_version,
+      ),
+    },
+    accessRole: row.access_role,
+    memberCount: Number(row.member_count),
     documentCount: Number(row.document_count),
     readyDocumentCount: Number(row.ready_document_count),
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
+}
+
+function publicKnowledgeUser(row: KnowledgeBaseCandidateRow) {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    avatarColor: row.avatar_color,
+    avatarUrl: publicAvatarUrl(row.id, row.avatar_object_key, row.avatar_version),
+  };
+}
+
+function publicKnowledgeMember(row: KnowledgeBaseMemberRow) {
+  return {
+    user: publicKnowledgeUser({
+      id: row.user_id,
+      username: row.username,
+      display_name: row.display_name,
+      avatar_color: row.avatar_color,
+      avatar_object_key: row.avatar_object_key,
+      avatar_version: row.avatar_version,
+    }),
+    role: row.role,
+    addedAt: row.created_at.toISOString(),
+  };
+}
+
+const accessRank: Record<KnowledgeBaseAccessRole, number> = {
+  VIEWER: 1,
+  EDITOR: 2,
+  OWNER: 3,
+};
+
+/** 角色判断保持为纯函数，路由、服务与测试共享同一权限语义。 */
+export function knowledgeRoleAllows(
+  actual: KnowledgeBaseAccessRole,
+  required: KnowledgeBaseAccessRole,
+): boolean {
+  return accessRank[actual] >= accessRank[required];
+}
+
+async function knowledgeBaseAccess(
+  userId: string,
+  knowledgeBaseId: string,
+  required: KnowledgeBaseAccessRole,
+  client?: PoolClient,
+  lock = false,
+): Promise<KnowledgeBaseAccessRow> {
+  const sql = `SELECT base.id, base.owner_id,
+            CASE WHEN base.owner_id = $2 THEN 'OWNER' ELSE member.role END AS access_role
+       FROM knowledge_bases base
+       LEFT JOIN knowledge_base_members member
+         ON member.knowledge_base_id = base.id AND member.user_id = $2
+      WHERE base.id = $1${lock ? " FOR UPDATE OF base" : ""}`;
+  const params = [knowledgeBaseId, userId];
+  const result = client
+    ? await client.query<KnowledgeBaseAccessRow>(sql, params)
+    : await query<KnowledgeBaseAccessRow>(sql, params);
+  const access = result.rows[0];
+  if (!access?.access_role) throw new ApiError(404, "知识库不存在");
+  if (!knowledgeRoleAllows(access.access_role, required)) {
+    throw new ApiError(
+      403,
+      required === "OWNER" ? "只有知识库拥有者可以执行此操作" : "该知识库只有查看权限",
+    );
+  }
+  return access;
+}
+
+const KNOWLEDGE_BASE_SELECT = `
+  SELECT base.id, base.owner_id, owner.username AS owner_username,
+         owner.display_name AS owner_display_name, owner.avatar_color AS owner_avatar_color,
+         owner.avatar_object_key AS owner_avatar_object_key,
+         owner.avatar_version AS owner_avatar_version,
+         base.name, base.description,
+         (SELECT COUNT(*)::text FROM knowledge_documents document
+           WHERE document.knowledge_base_id = base.id) AS document_count,
+         (SELECT COUNT(*)::text FROM knowledge_documents document
+           WHERE document.knowledge_base_id = base.id AND document.status = 'READY')
+           AS ready_document_count,
+         (1 + (SELECT COUNT(*) FROM knowledge_base_members shared
+                WHERE shared.knowledge_base_id = base.id))::text AS member_count,
+         CASE WHEN base.owner_id = $1 THEN 'OWNER' ELSE access.role END AS access_role,
+         base.created_at, base.updated_at
+    FROM knowledge_bases base
+    JOIN users owner ON owner.id = base.owner_id
+    LEFT JOIN knowledge_base_members access
+      ON access.knowledge_base_id = base.id AND access.user_id = $1`;
+
+async function selectKnowledgeBase(
+  userId: string,
+  knowledgeBaseId: string,
+  client?: PoolClient,
+): Promise<KnowledgeBaseRow> {
+  const sql = `${KNOWLEDGE_BASE_SELECT}
+      WHERE base.id = $2 AND (base.owner_id = $1 OR access.user_id = $1)`;
+  const params = [userId, knowledgeBaseId];
+  const result = client
+    ? await client.query<KnowledgeBaseRow>(sql, params)
+    : await query<KnowledgeBaseRow>(sql, params);
+  if (!result.rows[0]) throw new ApiError(404, "知识库不存在");
+  return result.rows[0];
 }
 
 function publicKnowledgeDocument(row: KnowledgeDocumentRow) {
@@ -113,15 +265,6 @@ function sourceFromRow(row: KnowledgeSourceRow, score: number): KnowledgeSource 
       },
     },
   };
-}
-
-async function ownedKnowledgeBase(userId: string, knowledgeBaseId: string) {
-  const result = await query<{ id: string }>(
-    `SELECT id FROM knowledge_bases WHERE id = $1 AND owner_id = $2`,
-    [knowledgeBaseId, userId],
-  );
-  if (!result.rows[0]) throw new ApiError(404, "知识库不存在");
-  return result.rows[0];
 }
 
 async function enqueueJob(
@@ -165,15 +308,8 @@ export async function queueAllKnowledgeDocumentsForReindex(): Promise<number> {
 
 export async function listKnowledgeBases(userId: string) {
   const result = await query<KnowledgeBaseRow>(
-    `SELECT base.id, base.owner_id, base.name, base.description,
-            COUNT(document.id)::text AS document_count,
-            COUNT(document.id) FILTER (WHERE document.status = 'READY')::text
-              AS ready_document_count,
-            base.created_at, base.updated_at
-       FROM knowledge_bases base
-       LEFT JOIN knowledge_documents document ON document.knowledge_base_id = base.id
-      WHERE base.owner_id = $1
-      GROUP BY base.id
+    `${KNOWLEDGE_BASE_SELECT}
+      WHERE base.owner_id = $1 OR access.user_id = $1
       ORDER BY base.updated_at DESC, base.created_at DESC`,
     [userId],
   );
@@ -185,14 +321,12 @@ export async function createKnowledgeBase(
   input: { name: string; description: string },
 ) {
   const id = randomUUID();
-  const result = await query<KnowledgeBaseRow>(
+  await query(
     `INSERT INTO knowledge_bases (id, owner_id, name, description)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, owner_id, name, description, '0'::text AS document_count,
-               '0'::text AS ready_document_count, created_at, updated_at`,
+     VALUES ($1, $2, $3, $4)`,
     [id, userId, input.name, input.description],
   );
-  return publicKnowledgeBase(result.rows[0]!);
+  return publicKnowledgeBase(await selectKnowledgeBase(userId, id));
 }
 
 export async function updateKnowledgeBase(
@@ -200,31 +334,21 @@ export async function updateKnowledgeBase(
   knowledgeBaseId: string,
   input: { name?: string; description?: string },
 ) {
-  const result = await query<KnowledgeBaseRow>(
+  await knowledgeBaseAccess(userId, knowledgeBaseId, "OWNER");
+  await query(
     `UPDATE knowledge_bases base
-        SET name = COALESCE($3, base.name),
-            description = COALESCE($4, base.description),
+        SET name = COALESCE($2, base.name),
+            description = COALESCE($3, base.description),
             updated_at = NOW()
-      WHERE base.id = $1 AND base.owner_id = $2
-      RETURNING base.id, base.owner_id, base.name, base.description,
-                (SELECT COUNT(*)::text FROM knowledge_documents WHERE knowledge_base_id = base.id)
-                  AS document_count,
-                (SELECT COUNT(*)::text FROM knowledge_documents
-                  WHERE knowledge_base_id = base.id AND status = 'READY') AS ready_document_count,
-                base.created_at, base.updated_at`,
-    [knowledgeBaseId, userId, input.name ?? null, input.description ?? null],
+      WHERE base.id = $1`,
+    [knowledgeBaseId, input.name ?? null, input.description ?? null],
   );
-  if (!result.rows[0]) throw new ApiError(404, "知识库不存在");
-  return publicKnowledgeBase(result.rows[0]);
+  return publicKnowledgeBase(await selectKnowledgeBase(userId, knowledgeBaseId));
 }
 
 export async function deleteKnowledgeBase(userId: string, knowledgeBaseId: string): Promise<void> {
   await transaction(async (client) => {
-    const base = await client.query<{ id: string }>(
-      `SELECT id FROM knowledge_bases WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
-      [knowledgeBaseId, userId],
-    );
-    if (!base.rows[0]) throw new ApiError(404, "知识库不存在");
+    await knowledgeBaseAccess(userId, knowledgeBaseId, "OWNER", client, true);
 
     const documents = await client.query<{ id: string; attachment_id: string }>(
       `SELECT id, attachment_id FROM knowledge_documents WHERE knowledge_base_id = $1`,
@@ -247,8 +371,101 @@ export async function deleteKnowledgeBase(userId: string, knowledgeBaseId: strin
   });
 }
 
+export async function getKnowledgeBaseMemberDirectory(userId: string, knowledgeBaseId: string) {
+  await knowledgeBaseAccess(userId, knowledgeBaseId, "OWNER");
+  const [base, members, candidates] = await Promise.all([
+    selectKnowledgeBase(userId, knowledgeBaseId),
+    query<KnowledgeBaseMemberRow>(
+      `SELECT member.user_id, account.username, account.display_name,
+              account.avatar_color, account.avatar_object_key, account.avatar_version,
+              member.role, member.created_at
+         FROM knowledge_base_members member
+         JOIN users account ON account.id = member.user_id
+        WHERE member.knowledge_base_id = $1 AND account.enabled = TRUE
+        ORDER BY account.display_name, account.username`,
+      [knowledgeBaseId],
+    ),
+    query<KnowledgeBaseCandidateRow>(
+      `SELECT account.id, account.username, account.display_name,
+              account.avatar_color, account.avatar_object_key, account.avatar_version
+         FROM users account
+        WHERE account.enabled = TRUE
+          AND account.id <> $2
+          AND NOT EXISTS (
+            SELECT 1 FROM knowledge_base_members member
+             WHERE member.knowledge_base_id = $1 AND member.user_id = account.id
+          )
+        ORDER BY account.display_name, account.username`,
+      [knowledgeBaseId, userId],
+    ),
+  ]);
+  return {
+    owner: publicKnowledgeBase(base).owner,
+    members: members.rows.map(publicKnowledgeMember),
+    candidates: candidates.rows.map(publicKnowledgeUser),
+  };
+}
+
+export async function replaceKnowledgeBaseMembers(
+  userId: string,
+  knowledgeBaseId: string,
+  members: Array<{ userId: string; role: KnowledgeBaseMemberRole }>,
+) {
+  await transaction(async (client) => {
+    const access = await knowledgeBaseAccess(userId, knowledgeBaseId, "OWNER", client, true);
+    const memberIds = members.map((member) => member.userId);
+    if (memberIds.includes(access.owner_id)) {
+      throw new ApiError(400, "知识库拥有者不能重复加入共享成员");
+    }
+    if (memberIds.length > 0) {
+      const accounts = await client.query<{ id: string }>(
+        `SELECT id FROM users WHERE enabled = TRUE AND id = ANY($1::uuid[])`,
+        [memberIds],
+      );
+      if (accounts.rows.length !== memberIds.length) {
+        throw new ApiError(400, "共享成员不存在或已停用");
+      }
+    }
+
+    await client.query(
+      `DELETE FROM knowledge_base_members
+        WHERE knowledge_base_id = $1
+          AND NOT (user_id = ANY($2::uuid[]))`,
+      [knowledgeBaseId, memberIds],
+    );
+    for (const member of members) {
+      await client.query(
+        `INSERT INTO knowledge_base_members
+           (knowledge_base_id, user_id, role, added_by)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (knowledge_base_id, user_id) DO UPDATE
+           SET role = EXCLUDED.role, added_by = EXCLUDED.added_by, updated_at = NOW()`,
+        [knowledgeBaseId, member.userId, member.role, userId],
+      );
+    }
+
+    // 共享被撤销后，同时解除该成员私人助理上的知识库绑定。
+    await client.query(
+      `DELETE FROM ai_assistant_knowledge_bases binding
+        USING ai_assistants assistant
+        WHERE binding.assistant_id = assistant.id
+          AND binding.knowledge_base_id = $1
+          AND assistant.owner_id <> $2
+          AND NOT EXISTS (
+            SELECT 1 FROM knowledge_base_members member
+             WHERE member.knowledge_base_id = $1 AND member.user_id = assistant.owner_id
+          )`,
+      [knowledgeBaseId, access.owner_id],
+    );
+    await client.query(`UPDATE knowledge_bases SET updated_at = NOW() WHERE id = $1`, [
+      knowledgeBaseId,
+    ]);
+  });
+  return getKnowledgeBaseMemberDirectory(userId, knowledgeBaseId);
+}
+
 export async function listKnowledgeDocuments(userId: string, knowledgeBaseId: string) {
-  await ownedKnowledgeBase(userId, knowledgeBaseId);
+  await knowledgeBaseAccess(userId, knowledgeBaseId, "VIEWER");
   const result = await query<KnowledgeDocumentRow>(
     `SELECT document.id, document.knowledge_base_id, document.attachment_id,
             document.name, document.content_type, document.size_bytes::text,
@@ -268,11 +485,7 @@ export async function addKnowledgeDocument(
   attachmentId: string,
 ) {
   return transaction(async (client) => {
-    const base = await client.query<{ id: string }>(
-      `SELECT id FROM knowledge_bases WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
-      [knowledgeBaseId, userId],
-    );
-    if (!base.rows[0]) throw new ApiError(404, "知识库不存在");
+    await knowledgeBaseAccess(userId, knowledgeBaseId, "EDITOR", client, true);
     const attachment = await client.query<{
       id: string;
       original_name: string;
@@ -332,13 +545,13 @@ export async function reindexKnowledgeDocument(
   documentId: string,
 ): Promise<void> {
   await transaction(async (client) => {
+    await knowledgeBaseAccess(userId, knowledgeBaseId, "EDITOR", client, true);
     const document = await client.query<{ id: string; status: string }>(
       `SELECT document.id, document.status
          FROM knowledge_documents document
-         JOIN knowledge_bases base ON base.id = document.knowledge_base_id
-        WHERE document.id = $1 AND document.knowledge_base_id = $2 AND base.owner_id = $3
+        WHERE document.id = $1 AND document.knowledge_base_id = $2
         FOR UPDATE OF document`,
-      [documentId, knowledgeBaseId, userId],
+      [documentId, knowledgeBaseId],
     );
     const current = document.rows[0];
     if (!current) throw new ApiError(404, "知识文档不存在");
@@ -360,13 +573,13 @@ export async function deleteKnowledgeDocument(
   documentId: string,
 ): Promise<void> {
   await transaction(async (client) => {
+    await knowledgeBaseAccess(userId, knowledgeBaseId, "EDITOR", client, true);
     const document = await client.query<{ id: string; attachment_id: string }>(
       `SELECT document.id, document.attachment_id
          FROM knowledge_documents document
-         JOIN knowledge_bases base ON base.id = document.knowledge_base_id
-        WHERE document.id = $1 AND document.knowledge_base_id = $2 AND base.owner_id = $3
+        WHERE document.id = $1 AND document.knowledge_base_id = $2
         FOR UPDATE OF document`,
-      [documentId, knowledgeBaseId, userId],
+      [documentId, knowledgeBaseId],
     );
     const current = document.rows[0];
     if (!current) throw new ApiError(404, "知识文档不存在");
@@ -405,7 +618,13 @@ async function vectorSources(
        JOIN knowledge_chunks chunk ON chunk.id = wanted.id
        JOIN knowledge_documents document ON document.id = chunk.document_id
        JOIN knowledge_bases base ON base.id = document.knowledge_base_id
-      WHERE base.id = $2 AND base.owner_id = $3 AND document.status = 'READY'
+      WHERE base.id = $2 AND document.status = 'READY'
+        AND (
+          base.owner_id = $3 OR EXISTS (
+            SELECT 1 FROM knowledge_base_members member
+             WHERE member.knowledge_base_id = base.id AND member.user_id = $3
+          )
+        )
       ORDER BY wanted.ordinal`,
     [ids, knowledgeBaseId, userId],
   );
@@ -434,7 +653,13 @@ async function keywordSources(
        FROM knowledge_chunks chunk
        JOIN knowledge_documents document ON document.id = chunk.document_id
        JOIN knowledge_bases base ON base.id = document.knowledge_base_id
-      WHERE base.id = $1 AND base.owner_id = $2 AND document.status = 'READY'
+      WHERE base.id = $1 AND document.status = 'READY'
+        AND (
+          base.owner_id = $2 OR EXISTS (
+            SELECT 1 FROM knowledge_base_members member
+             WHERE member.knowledge_base_id = base.id AND member.user_id = $2
+          )
+        )
         AND (
           chunk.text_content ILIKE $4
           OR to_tsvector('simple', chunk.text_content) @@ plainto_tsquery('simple', $3)
@@ -452,7 +677,7 @@ export async function searchKnowledge(
   text: string,
   requestedTopK = config.ai.knowledge.defaultTopK,
 ) {
-  await ownedKnowledgeBase(userId, knowledgeBaseId);
+  await knowledgeBaseAccess(userId, knowledgeBaseId, "VIEWER");
   const topK = Math.max(1, Math.min(20, requestedTopK));
   const keyword = await keywordSources(userId, knowledgeBaseId, text, topK);
   let semantic: KnowledgeSource[] = [];

@@ -206,8 +206,8 @@ CREATE TABLE IF NOT EXISTS message_attachment_links (
 
 ALTER TABLE message_favorites ADD COLUMN IF NOT EXISTS forwarded_from JSONB;
 
--- NearChat 原生知识库保留业务权限与文件关系；Mastra/pgvector 只保存可重建的向量。
--- 第一阶段知识库归创建者私有，后续共享权限可以在不改文档模型的前提下扩展。
+-- NearChat 原生知识库保留业务权限、共享成员与文件关系；Mastra/pgvector 只保存
+-- 可重建的向量，不接管成员授权。
 CREATE TABLE IF NOT EXISTS knowledge_bases (
   id UUID PRIMARY KEY,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -215,6 +215,18 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
   description VARCHAR(240) NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 团队知识库采用显式成员授权：查看者只能检索和问答，编辑者还可以维护文档；
+-- 名称、说明、共享成员和知识库生命周期始终由拥有者管理。
+CREATE TABLE IF NOT EXISTS knowledge_base_members (
+  knowledge_base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role VARCHAR(20) NOT NULL CHECK (role IN ('VIEWER', 'EDITOR')),
+  added_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (knowledge_base_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS knowledge_documents (
@@ -519,6 +531,8 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_text_search
   ON knowledge_chunks USING GIN (to_tsvector('simple', text_content));
 CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_poll
   ON knowledge_index_jobs(status, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_members_user
+  ON knowledge_base_members(user_id, knowledge_base_id);
 CREATE INDEX IF NOT EXISTS idx_ai_model_configs_enabled_updated
   ON ai_model_configs(enabled, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistants_owner_activity

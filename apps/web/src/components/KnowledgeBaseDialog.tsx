@@ -12,9 +12,12 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Share2,
   Sparkles,
   Trash2,
   Upload,
+  UserPlus,
+  UsersRound,
   X,
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -25,6 +28,9 @@ import type {
   Attachment,
   KnowledgeAnswer,
   KnowledgeBase,
+  KnowledgeBaseMember,
+  KnowledgeBaseMemberDirectory,
+  KnowledgeBaseMemberRole,
   KnowledgeDocument,
   KnowledgeSearchResult,
   KnowledgeSource,
@@ -32,6 +38,7 @@ import type {
 } from "../types";
 import { errorMessage } from "../utils/errors";
 import { formatBytes } from "../utils/format";
+import { Avatar } from "./Avatar";
 
 interface KnowledgeBaseDialogProps {
   capabilities: AiCapabilities;
@@ -48,6 +55,12 @@ const documentStatus = {
   INDEXING: { label: "正在理解", tone: "working" },
   READY: { label: "可检索", tone: "ready" },
   FAILED: { label: "索引失败", tone: "failed" },
+} as const;
+
+const accessLabel = {
+  OWNER: "我创建的",
+  EDITOR: "共享 · 可编辑",
+  VIEWER: "共享 · 只读",
 } as const;
 
 function KnowledgeSourceCard({ source, onOpen }: { source: KnowledgeSource; onOpen: () => void }) {
@@ -94,6 +107,12 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
   const [busyDocumentId, setBusyDocumentId] = useState<string | null>(null);
   const [confirmingBaseDelete, setConfirmingBaseDelete] = useState(false);
   const [confirmingDocumentDeleteId, setConfirmingDocumentDeleteId] = useState<string | null>(null);
+  const [showSharing, setShowSharing] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [savingMembers, setSavingMembers] = useState(false);
+  const [memberDirectory, setMemberDirectory] = useState<KnowledgeBaseMemberDirectory | null>(null);
+  const [draftMembers, setDraftMembers] = useState<KnowledgeBaseMember[]>([]);
+  const [candidateId, setCandidateId] = useState("");
   const [queryMode, setQueryMode] = useState<QueryMode>("SEARCH");
   const [queryText, setQueryText] = useState("");
   const [querying, setQuerying] = useState(false);
@@ -118,6 +137,12 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
   const hasPendingDocuments = documents.some(
     (document) => document.status === "QUEUED" || document.status === "INDEXING",
   );
+  const canEditDocuments = selectedBase?.accessRole !== "VIEWER";
+  const canManageBase = selectedBase?.accessRole === "OWNER";
+  const availableCandidates =
+    memberDirectory?.candidates.filter(
+      (candidate) => !draftMembers.some((member) => member.user.id === candidate.id),
+    ) ?? [];
 
   const loadBases = useCallback(async () => {
     const result = await api.knowledgeBases();
@@ -148,15 +173,20 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
       .finally(() => {
         if (active) setLoadingBases(false);
       });
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
     return () => {
       active = false;
-      window.removeEventListener("keydown", closeOnEscape);
     };
-  }, [loadBases, onClose]);
+  }, [loadBases]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (showSharing) setShowSharing(false);
+      else onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, showSharing]);
 
   useEffect(() => {
     let active = true;
@@ -180,6 +210,10 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
     setEditing(false);
     setConfirmingBaseDelete(false);
     setConfirmingDocumentDeleteId(null);
+    setShowSharing(false);
+    setMemberDirectory(null);
+    setDraftMembers([]);
+    setCandidateId("");
     if (!selectedId) return;
     void loadDocuments(selectedId).catch((error) =>
       setNotice({ tone: "error", text: errorMessage(error, "知识文档加载失败") }),
@@ -258,8 +292,61 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
     }
   };
 
+  const openSharing = async () => {
+    if (!selectedBase || selectedBase.accessRole !== "OWNER") return;
+    setShowSharing(true);
+    setLoadingMembers(true);
+    setCandidateId("");
+    try {
+      const directory = await api.knowledgeBaseMembers(selectedBase.id);
+      setMemberDirectory(directory);
+      setDraftMembers(directory.members);
+    } catch (error) {
+      setShowSharing(false);
+      setNotice({ tone: "error", text: errorMessage(error, "共享成员加载失败") });
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const addDraftMember = () => {
+    const user = availableCandidates.find((candidate) => candidate.id === candidateId);
+    if (!user) return;
+    setDraftMembers((current) => [
+      ...current,
+      { user, role: "VIEWER", addedAt: new Date().toISOString() },
+    ]);
+    setCandidateId("");
+  };
+
+  const updateDraftMemberRole = (userId: string, role: KnowledgeBaseMemberRole) => {
+    setDraftMembers((current) =>
+      current.map((member) => (member.user.id === userId ? { ...member, role } : member)),
+    );
+  };
+
+  const saveSharedMembers = async () => {
+    if (!selectedBase || savingMembers) return;
+    setSavingMembers(true);
+    try {
+      const directory = await api.updateKnowledgeBaseMembers(
+        selectedBase.id,
+        draftMembers.map((member) => ({ userId: member.user.id, role: member.role })),
+      );
+      setMemberDirectory(directory);
+      setDraftMembers(directory.members);
+      await loadBases();
+      setShowSharing(false);
+      setNotice({ tone: "success", text: "共享权限已更新" });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "共享权限保存失败") });
+    } finally {
+      setSavingMembers(false);
+    }
+  };
+
   const addDocument = async (file?: File) => {
-    if (!file || !selectedBase || uploading) return;
+    if (!file || !selectedBase || !canEditDocuments || uploading) return;
     if (file.size > MAX_FILE_BYTES) {
       setNotice({ tone: "error", text: "知识文档不能超过 500 MB" });
       return;
@@ -284,7 +371,7 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
   };
 
   const reindexDocument = async (document: KnowledgeDocument) => {
-    if (!selectedBase || busyDocumentId) return;
+    if (!selectedBase || !canEditDocuments || busyDocumentId) return;
     setBusyDocumentId(document.id);
     try {
       await api.reindexKnowledgeDocument(selectedBase.id, document.id);
@@ -298,7 +385,7 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
   };
 
   const removeDocument = async (document: KnowledgeDocument) => {
-    if (!selectedBase || busyDocumentId) return;
+    if (!selectedBase || !canEditDocuments || busyDocumentId) return;
     setBusyDocumentId(document.id);
     try {
       await api.deleteKnowledgeDocument(selectedBase.id, document.id);
@@ -372,8 +459,8 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
               <LibraryBig size={21} />
             </span>
             <span>
-              <strong>我的知识库</strong>
-              <small>原文件留在团队网络，检索结果始终附带来源</small>
+              <strong>团队知识库</strong>
+              <small>按成员共享资料，检索结果始终附带来源</small>
             </span>
           </div>
           <button type="button" className="icon-button" onClick={onClose} aria-label="关闭知识库">
@@ -396,6 +483,150 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
           >
             {notice.tone === "success" ? <Check size={15} /> : <AlertCircle size={15} />}
             {notice.text}
+          </div>
+        )}
+
+        {showSharing && selectedBase && (
+          <div
+            className="knowledge-share-layer"
+            role="presentation"
+            onPointerDown={(event) => {
+              if (event.target === event.currentTarget) setShowSharing(false);
+            }}
+          >
+            <aside className="knowledge-share-panel" role="dialog" aria-label="知识库共享设置">
+              <header>
+                <span>
+                  <UsersRound size={19} />
+                </span>
+                <div>
+                  <strong>共享“{selectedBase.name}”</strong>
+                  <small>编辑者可以维护文档，查看者只能检索和问答</small>
+                </div>
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setShowSharing(false)}
+                  aria-label="关闭共享设置"
+                >
+                  <X size={17} />
+                </button>
+              </header>
+
+              {loadingMembers ? (
+                <div className="knowledge-share-loading">
+                  <LoaderCircle size={20} className="spin" />
+                  正在读取团队成员
+                </div>
+              ) : memberDirectory ? (
+                <>
+                  <div className="knowledge-share-owner">
+                    <Avatar
+                      name={memberDirectory.owner.displayName}
+                      color={memberDirectory.owner.avatarColor}
+                      src={memberDirectory.owner.avatarUrl}
+                      size="small"
+                    />
+                    <span>
+                      <strong>{memberDirectory.owner.displayName}</strong>
+                      <small>@{memberDirectory.owner.username}</small>
+                    </span>
+                    <em>拥有者</em>
+                  </div>
+
+                  <div className="knowledge-share-add">
+                    <select
+                      aria-label="选择共享成员"
+                      value={candidateId}
+                      onChange={(event) => setCandidateId(event.target.value)}
+                      disabled={availableCandidates.length === 0}
+                    >
+                      <option value="">
+                        {availableCandidates.length > 0 ? "选择团队成员…" : "没有可添加的成员"}
+                      </option>
+                      {availableCandidates.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.displayName} · @{candidate.username}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={addDraftMember} disabled={!candidateId}>
+                      <UserPlus size={14} />
+                      添加
+                    </button>
+                  </div>
+
+                  <div className="knowledge-share-members">
+                    <div className="knowledge-share-caption">
+                      <span>已共享成员</span>
+                      <small>{draftMembers.length} 人</small>
+                    </div>
+                    {draftMembers.length === 0 ? (
+                      <div className="knowledge-share-empty">
+                        <UsersRound size={23} />
+                        <span>尚未共享给其他成员</span>
+                      </div>
+                    ) : (
+                      draftMembers.map((member) => (
+                        <div className="knowledge-share-member" key={member.user.id}>
+                          <Avatar
+                            name={member.user.displayName}
+                            color={member.user.avatarColor}
+                            src={member.user.avatarUrl}
+                            size="small"
+                          />
+                          <span>
+                            <strong>{member.user.displayName}</strong>
+                            <small>@{member.user.username}</small>
+                          </span>
+                          <select
+                            aria-label={`设置 ${member.user.displayName} 的权限`}
+                            value={member.role}
+                            onChange={(event) =>
+                              updateDraftMemberRole(
+                                member.user.id,
+                                event.target.value as KnowledgeBaseMemberRole,
+                              )
+                            }
+                          >
+                            <option value="VIEWER">查看者</option>
+                            <option value="EDITOR">编辑者</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftMembers((current) =>
+                                current.filter((item) => item.user.id !== member.user.id),
+                              )
+                            }
+                            aria-label={`移除 ${member.user.displayName}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <footer>
+                    <span>撤销共享后，对方助理中的对应知识库绑定也会自动解除。</span>
+                    <div>
+                      <button type="button" onClick={() => setShowSharing(false)}>
+                        取消
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void saveSharedMembers()}
+                        disabled={savingMembers}
+                      >
+                        {savingMembers && <LoaderCircle size={13} className="spin" />}
+                        保存权限
+                      </button>
+                    </div>
+                  </footer>
+                </>
+              ) : null}
+            </aside>
           </div>
         )}
 
@@ -470,14 +701,17 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                       <small>
                         {base.readyDocumentCount}/{base.documentCount} 份资料就绪
                       </small>
+                      <i className={`knowledge-access-tag is-${base.accessRole.toLowerCase()}`}>
+                        {accessLabel[base.accessRole]}
+                      </i>
                     </span>
                   </button>
                 ))
               )}
             </div>
             <footer>
-              <span>仅自己可见</span>
-              <small>共享知识库将在后续版本开放</small>
+              <span>精确到成员的访问权限</span>
+              <small>拥有者、编辑者与查看者各司其职</small>
             </footer>
           </aside>
 
@@ -516,49 +750,64 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                       <span>
                         <strong>{selectedBase.name}</strong>
                         <small>{selectedBase.description || "尚未添加说明"}</small>
+                        <em className="knowledge-base-owner">
+                          {selectedBase.accessRole === "OWNER"
+                            ? `由你管理 · ${selectedBase.memberCount} 位成员`
+                            : `${selectedBase.owner.displayName} 创建 · ${accessLabel[selectedBase.accessRole]}`}
+                        </em>
                       </span>
-                      <span
-                        className={`knowledge-base-actions ${confirmingBaseDelete ? "is-confirming" : ""}`}
-                      >
-                        {confirmingBaseDelete ? (
-                          <>
-                            <small>确认删除？</small>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmingBaseDelete(false)}
-                              aria-label="取消删除知识库"
-                            >
-                              <X size={14} />
-                            </button>
-                            <button
-                              type="button"
-                              className="danger"
-                              onClick={() => void removeBase()}
-                              aria-label="确认删除知识库"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => setEditing(true)}
-                              title="编辑知识库"
-                            >
-                              <Pencil size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              className="danger"
-                              onClick={() => setConfirmingBaseDelete(true)}
-                              title="删除知识库"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </>
-                        )}
-                      </span>
+                      {canManageBase && (
+                        <span
+                          className={`knowledge-base-actions ${confirmingBaseDelete ? "is-confirming" : ""}`}
+                        >
+                          {confirmingBaseDelete ? (
+                            <>
+                              <small>确认删除？</small>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingBaseDelete(false)}
+                                aria-label="取消删除知识库"
+                              >
+                                <X size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => void removeBase()}
+                                aria-label="确认删除知识库"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => void openSharing()}
+                                title="共享设置"
+                                aria-label="共享设置"
+                              >
+                                <Share2 size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditing(true)}
+                                title="编辑知识库"
+                              >
+                                <Pencil size={15} />
+                              </button>
+                              <button
+                                type="button"
+                                className="danger"
+                                onClick={() => setConfirmingBaseDelete(true)}
+                                title="删除知识库"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      )}
                     </div>
                   )}
                 </header>
@@ -566,23 +815,37 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                 <div className="knowledge-upload-row">
                   <div>
                     <strong>知识文档</strong>
-                    <small>PDF、DOCX、Markdown、JSON 与文本 · 最大 500 MB</small>
+                    <small>
+                      {canEditDocuments
+                        ? "PDF、DOCX、Markdown、JSON 与文本 · 最大 500 MB"
+                        : "你拥有查看权限，可以检索、问答和打开来源文件"}
+                    </small>
                   </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={ACCEPTED_DOCUMENTS}
-                    hidden
-                    onChange={(event) => void addDocument(event.target.files?.[0])}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={Boolean(uploading)}
-                  >
-                    {uploading ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
-                    {uploading ? `${uploading.progress}%` : "添加文档"}
-                  </button>
+                  {canEditDocuments ? (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept={ACCEPTED_DOCUMENTS}
+                        hidden
+                        onChange={(event) => void addDocument(event.target.files?.[0])}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={Boolean(uploading)}
+                      >
+                        {uploading ? (
+                          <LoaderCircle size={15} className="spin" />
+                        ) : (
+                          <Upload size={15} />
+                        )}
+                        {uploading ? `${uploading.progress}%` : "添加文档"}
+                      </button>
+                    </>
+                  ) : (
+                    <span className="knowledge-readonly-badge">只读</span>
+                  )}
                 </div>
                 {uploading && (
                   <div className="knowledge-upload-progress">
@@ -632,52 +895,55 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                             )}
                             {status.label}
                           </span>
-                          <span
-                            className={`knowledge-document-actions ${confirmingDocumentDeleteId === document.id ? "is-confirming" : ""}`}
-                          >
-                            {confirmingDocumentDeleteId === document.id ? (
-                              <>
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => setConfirmingDocumentDeleteId(null)}
-                                  aria-label={`取消移除 ${document.attachment.originalName}`}
-                                >
-                                  <X size={14} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="danger"
-                                  disabled={busy}
-                                  onClick={() => void removeDocument(document)}
-                                  aria-label={`确认移除 ${document.attachment.originalName}`}
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                {(document.status === "FAILED" || document.status === "READY") && (
+                          {canEditDocuments && (
+                            <span
+                              className={`knowledge-document-actions ${confirmingDocumentDeleteId === document.id ? "is-confirming" : ""}`}
+                            >
+                              {confirmingDocumentDeleteId === document.id ? (
+                                <>
                                   <button
                                     type="button"
                                     disabled={busy}
-                                    onClick={() => void reindexDocument(document)}
-                                    title="重新索引"
+                                    onClick={() => setConfirmingDocumentDeleteId(null)}
+                                    aria-label={`取消移除 ${document.attachment.originalName}`}
                                   >
-                                    <RefreshCw size={14} />
+                                    <X size={14} />
                                   </button>
-                                )}
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => setConfirmingDocumentDeleteId(document.id)}
-                                  title="移除文档"
-                                >
-                                  <Trash2 size={14} />
-                                </button>
-                              </>
-                            )}
-                          </span>
+                                  <button
+                                    type="button"
+                                    className="danger"
+                                    disabled={busy}
+                                    onClick={() => void removeDocument(document)}
+                                    aria-label={`确认移除 ${document.attachment.originalName}`}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  {(document.status === "FAILED" ||
+                                    document.status === "READY") && (
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => void reindexDocument(document)}
+                                      title="重新索引"
+                                    >
+                                      <RefreshCw size={14} />
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() => setConfirmingDocumentDeleteId(document.id)}
+                                    title="移除文档"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </>
+                              )}
+                            </span>
+                          )}
                         </article>
                       );
                     })
