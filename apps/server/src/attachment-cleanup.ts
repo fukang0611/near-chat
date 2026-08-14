@@ -26,6 +26,11 @@ async function claimOrphanAttachments(): Promise<CleanupAttachmentRow[]> {
               FROM message_attachment_links message_link
              WHERE message_link.attachment_id = attachments.id
           )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM knowledge_documents knowledge_document
+             WHERE knowledge_document.attachment_id = attachments.id
+          )
           AND (
             state = 'CLEANUP_FAILED'
             OR (state = 'CLEANING' AND state_updated_at < NOW() - INTERVAL '10 minutes')
@@ -66,6 +71,11 @@ export async function removeAttachmentObject(attachment: CleanupAttachmentRow): 
           SELECT 1
             FROM message_attachment_links message_link
            WHERE message_link.attachment_id = attachment.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM knowledge_documents knowledge_document
+           WHERE knowledge_document.attachment_id = attachment.id
         )`,
     [attachment.id],
   );

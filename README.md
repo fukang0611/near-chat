@@ -8,7 +8,7 @@
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6?logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
-![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)
+![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933?logo=nodedotjs&logoColor=white)
 ![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![MinIO](https://img.shields.io/badge/MinIO-Object_Storage-C72E49?logo=minio&logoColor=white)
@@ -34,6 +34,7 @@
 | 群聊管理   | 常驻群聊、限时闪聊房间、群资料、成员管理、群主转让、退出与解散                                         |
 | 使用体验   | 明亮/黑暗主题、响应式布局、今日团队雷达、头像投递、通知授权引导、桌面通知与提示音                      |
 | 桌面客户端 | Electron 系统托盘、原生通知、剪贴板接力、置顶会话浮岛与会话定位                                        |
+| AI 知识库  | NearChat 原生知识空间、MinIO 文档、异步索引、Mastra RAG、pgvector 检索、来源定位与带引用问答           |
 | 部署方式   | Docker Compose、本地 Docker 镜像、Rancher/Kubernetes 单文件清单                                        |
 
 ## 界面预览
@@ -68,9 +69,29 @@ flowchart LR
     App --> API["Express API 与实时服务"]
     API --> PG[(PostgreSQL)]
     API --> MinIO[(MinIO)]
+    API -. 可选 .-> Mastra[Mastra RAG]
+    Mastra -. Embedding / Chat .-> LLM[OpenAI 兼容模型服务]
+    Mastra -. 向量 .-> PGVector[(pgvector)]
 ```
 
-应用容器同时提供 React 页面、HTTP API 和 WebSocket 服务。PostgreSQL 保存用户、会话、消息与审计数据，MinIO 保存图片及附件；桌面客户端只负责桌面集成，不在用户电脑上运行后端或中间件。
+应用容器同时提供 React 页面、HTTP API 和 WebSocket 服务。PostgreSQL 保存用户、会话、消息与审计数据，MinIO 保存图片及附件；桌面客户端只负责桌面集成，不在用户电脑上运行后端或中间件。Mastra、pgvector 与模型服务均为可选增强层，默认关闭且不参与核心健康检查。
+
+## 可选 AI 知识库
+
+管理员可在“管理中心 → AI 设置”中即时启用或关闭 AI，无需修改配置文件或重启服务。管理员可以维护多个 OpenAI 兼容对话模型、指定唯一默认项，并单独配置全局 Embedding 服务；普通用户可在知识问答中切换自己的偏好模型，后续个人助理也复用同一个 `modelId` 路由绑定最合适的模型。
+
+知识库沿用现有账号与文件权限：原文件仍保存在 MinIO，PostgreSQL 保存知识库、来源片段、加密模型设置与持久索引任务，Mastra 负责文档切分、Embedding、pgvector 检索和带来源回答。
+
+- 支持 PDF、DOCX、Markdown、HTML、JSON、CSV 与纯文本。
+- 文档异步索引，服务重启后会继续执行，失败可在界面重试。
+- 搜索融合语义向量与本地关键词；模型服务瞬时故障时自动回退关键词结果。
+- 对话模型可配置多项且必须有一个默认项；用户偏好失效时自动回退默认模型。
+- 更换 Embedding 模型、地址、密钥或维度后，系统自动重建向量并重新排队文档。
+- 模型密钥使用 AES-256-GCM 加密落库，管理接口只返回“是否已配置”，不回显密钥。
+- 问答只使用检索到的片段，并返回原文件和片段位置。
+- 当前为个人私有知识库；共享权限、OCR 与表格结构化解析留待后续版本。
+
+AI 完全可拔插：`AI_ENABLED=false`、模型未配置、pgvector 不可用或模型服务离线时，账号、聊天、文件、收藏、通知和 Electron 客户端均照常工作。只有 AI 功能会隐藏或显示不可用状态。
 
 ## 快速体验
 
@@ -154,7 +175,7 @@ npm run desktop:make:win
 
 ## 本地开发
 
-需要 Node.js 20+ 与 Docker。
+需要 Node.js 22.13+ 与 Docker。
 
 ```bash
 docker compose up -d postgres minio
@@ -179,17 +200,23 @@ npm run smoke:phase3   # 回执、搜索、撤回与实时事件
 
 完整配置示例见 [.env.example](.env.example)。
 
-| 变量                            | 默认值          | 用途                  |
-| ------------------------------- | --------------- | --------------------- |
-| `DATABASE_URL`                  | 本地 PostgreSQL | 业务数据库连接地址    |
-| `JWT_SECRET`                    | 仅供本地开发    | 登录令牌签名密钥      |
-| `MINIO_*`                       | 本地 MinIO      | 对象存储连接与 Bucket |
-| `FILE_MAX_BYTES`                | `52428800`      | 单文件最大 50 MiB     |
-| `AVATAR_MAX_BYTES`              | `8388608`       | 用户头像最大 8 MiB    |
-| `FILE_USER_QUOTA_BYTES`         | `1073741824`    | 单用户文件配额 1 GiB  |
-| `FILE_ORPHAN_TTL_HOURS`         | `24`            | 未发送附件保留时间    |
-| `MESSAGE_RECALL_WINDOW_SECONDS` | `120`           | 消息可撤回时限        |
-| `SEED_DEMO_USERS`               | `true`          | 是否初始化演示用户    |
+| 变量                            | 默认值          | 用途                                       |
+| ------------------------------- | --------------- | ------------------------------------------ |
+| `DATABASE_URL`                  | 本地 PostgreSQL | 业务数据库连接地址                         |
+| `JWT_SECRET`                    | 仅供本地开发    | 登录令牌签名密钥                           |
+| `MINIO_*`                       | 本地 MinIO      | 对象存储连接与 Bucket                      |
+| `FILE_MAX_BYTES`                | `52428800`      | 单文件最大 50 MiB                          |
+| `AVATAR_MAX_BYTES`              | `8388608`       | 用户头像最大 8 MiB                         |
+| `FILE_USER_QUOTA_BYTES`         | `1073741824`    | 单用户文件配额 1 GiB                       |
+| `FILE_ORPHAN_TTL_HOURS`         | `24`            | 未发送附件保留时间                         |
+| `MESSAGE_RECALL_WINDOW_SECONDS` | `120`           | 消息可撤回时限                             |
+| `SEED_DEMO_USERS`               | `true`          | 是否初始化演示用户                         |
+| `AI_SETTINGS_ENCRYPTION_KEY`    | 回退到 JWT 密钥 | 模型密钥的持久加密密钥，部署后不可随意更换 |
+| `AI_ENABLED`                    | `false`         | 首次建库时的 AI 开关引导值                 |
+| `AI_BASE_URL` / `AI_API_KEY`    | 空              | 首次建库时的 OpenAI 兼容服务引导值         |
+| `AI_CHAT_MODEL`                 | 空              | 首次创建的默认对话模型                     |
+| `AI_EMBEDDING_MODEL`            | 空              | 首次创建的全局向量模型                     |
+| `AI_EMBEDDING_DIMENSIONS`       | `1536`          | 首次创建的向量输出维度                     |
 
 ## 目录结构
 
@@ -211,6 +238,7 @@ scripts/         分阶段端到端冒烟测试
 - 单文件默认上限为 50 MiB，上传流量由应用服务代理。
 - 暂不提供端到端加密、音视频通话、消息漫游同步策略或移动原生客户端。
 - 通知权限最终由浏览器或操作系统控制；局域网 HTTP 浏览器页面无法申请系统通知。
+- AI 知识库要求 PostgreSQL 安装 `vector` 扩展；未满足时仅 AI 降级，核心服务仍可用。
 
 更完整的需求边界与阶段设计见 [第一阶段整体方案](docs/phase-1-plan.md)。
 

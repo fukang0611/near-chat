@@ -1,5 +1,7 @@
 import type {
   AdminUser,
+  AdminAiSettings,
+  AiCapabilities,
   Attachment,
   AuditLog,
   ChatFileCategory,
@@ -9,8 +11,13 @@ import type {
   Message,
   MessageFavorite,
   MessagePage,
+  KnowledgeAnswer,
+  KnowledgeBase,
+  KnowledgeDocument,
+  KnowledgeSearchResult,
   TeamRadar,
   User,
+  UserAiModels,
 } from "./types";
 
 const TOKEN_KEY = "near-chat-token";
@@ -37,6 +44,29 @@ export interface CreateUserInput {
 export interface UpdateUserInput {
   enabled?: boolean;
   displayName?: string;
+}
+
+export interface UpdateAiSettingsInput {
+  enabled: boolean;
+  defaultChatModelId: string | null;
+  embeddingBaseUrl: string | null;
+  embeddingApiKey?: string | null;
+  embeddingModel: string | null;
+  embeddingDimensions: number;
+}
+
+export interface SaveAiModelInput {
+  name: string;
+  baseUrl: string | null;
+  apiKey?: string | null;
+  providerModel: string;
+  enabled: boolean;
+}
+
+export interface AdminAiMutationResponse {
+  settings: AdminAiSettings;
+  capabilities: AiCapabilities;
+  reindexQueued: number;
 }
 
 export class ApiError extends Error {
@@ -209,6 +239,54 @@ export const api = {
     }),
   deleteFile: (fileId: string) => request<void>(`/api/files/${fileId}`, { method: "DELETE" }),
   fileQuota: () => request<FileQuota>("/api/files/quota"),
+  aiCapabilities: () => request<{ capabilities: AiCapabilities }>("/api/ai/capabilities"),
+  aiModels: () => request<UserAiModels>("/api/ai/models"),
+  selectAiModel: (modelId: string | null) =>
+    request<UserAiModels>("/api/ai/preferences/model", {
+      method: "PUT",
+      body: JSON.stringify({ modelId }),
+    }),
+  knowledgeBases: () => request<{ knowledgeBases: KnowledgeBase[] }>("/api/knowledge-bases"),
+  createKnowledgeBase: (input: { name: string; description?: string }) =>
+    request<{ knowledgeBase: KnowledgeBase }>("/api/knowledge-bases", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateKnowledgeBase: (knowledgeBaseId: string, input: { name?: string; description?: string }) =>
+    request<{ knowledgeBase: KnowledgeBase }>(`/api/knowledge-bases/${knowledgeBaseId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  deleteKnowledgeBase: (knowledgeBaseId: string) =>
+    request<void>(`/api/knowledge-bases/${knowledgeBaseId}`, { method: "DELETE" }),
+  knowledgeDocuments: (knowledgeBaseId: string) =>
+    request<{ documents: KnowledgeDocument[] }>(
+      `/api/knowledge-bases/${knowledgeBaseId}/documents`,
+    ),
+  addKnowledgeDocument: (knowledgeBaseId: string, attachmentId: string) =>
+    request<{ document: KnowledgeDocument }>(`/api/knowledge-bases/${knowledgeBaseId}/documents`, {
+      method: "POST",
+      body: JSON.stringify({ attachmentId }),
+    }),
+  reindexKnowledgeDocument: (knowledgeBaseId: string, documentId: string) =>
+    request<{ queued: boolean }>(
+      `/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/reindex`,
+      { method: "POST" },
+    ),
+  deleteKnowledgeDocument: (knowledgeBaseId: string, documentId: string) =>
+    request<void>(`/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`, {
+      method: "DELETE",
+    }),
+  searchKnowledge: (knowledgeBaseId: string, query: string, topK?: number) =>
+    request<KnowledgeSearchResult>(`/api/knowledge-bases/${knowledgeBaseId}/search`, {
+      method: "POST",
+      body: JSON.stringify({ query, topK }),
+    }),
+  askKnowledge: (knowledgeBaseId: string, question: string, modelId?: string) =>
+    request<KnowledgeAnswer>(`/api/knowledge-bases/${knowledgeBaseId}/ask`, {
+      method: "POST",
+      body: JSON.stringify({ question, modelId }),
+    }),
   chatFiles: (
     options: {
       keyword?: string;
@@ -246,6 +324,27 @@ export const api = {
   },
   adminUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
   auditLogs: () => request<{ logs: AuditLog[] }>("/api/admin/audit-logs?limit=100"),
+  adminAiSettings: () =>
+    request<{ settings: AdminAiSettings; capabilities: AiCapabilities }>("/api/admin/ai-settings"),
+  updateAdminAiSettings: (input: UpdateAiSettingsInput) =>
+    request<AdminAiMutationResponse>("/api/admin/ai-settings", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  createAdminAiModel: (input: SaveAiModelInput) =>
+    request<AdminAiMutationResponse>("/api/admin/ai-models", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateAdminAiModel: (modelId: string, input: SaveAiModelInput) =>
+    request<AdminAiMutationResponse>(`/api/admin/ai-models/${modelId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteAdminAiModel: (modelId: string) =>
+    request<AdminAiMutationResponse>(`/api/admin/ai-models/${modelId}`, {
+      method: "DELETE",
+    }),
   createUser: (input: CreateUserInput) =>
     request<{ user: AdminUser }>("/api/admin/users", {
       method: "POST",

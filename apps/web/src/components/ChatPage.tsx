@@ -23,6 +23,7 @@ import {
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type {
+  AiCapabilities,
   Attachment,
   Conversation,
   Message,
@@ -60,6 +61,7 @@ import { GroupManagementDialog } from "./GroupManagementDialog";
 import { FlashRoomBadge } from "./FlashRoomBadge";
 import { ForwardMessagesDialog } from "./ForwardMessagesDialog";
 import { MessageComposer } from "./MessageComposer";
+import { KnowledgeBaseDialog } from "./KnowledgeBaseDialog";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageAssetsDialog } from "./MessageAssetsDialog";
 import { MessageTimeline } from "./MessageTimeline";
@@ -179,6 +181,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showMessageAssets, setShowMessageAssets] = useState(false);
+  const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
+  const [showKnowledge, setShowKnowledge] = useState(false);
+  const applyAiCapabilities = useCallback((capabilities: AiCapabilities) => {
+    setAiCapabilities(capabilities);
+    if (!capabilities.features.knowledgeManagement) setShowKnowledge(false);
+  }, []);
   const [showTeamRadar, setShowTeamRadar] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [contactDelivery, setContactDelivery] = useState<ContactDeliveryProgress | null>(null);
@@ -395,6 +403,20 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
 
   useEffect(() => {
     let active = true;
+    // 兼容未升级或未启用 AI 的服务端：能力探测失败不能产生聊天页错误提示。
+    void api
+      .aiCapabilities()
+      .then((result) => {
+        if (active) applyAiCapabilities(result.capabilities);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [applyAiCapabilities, user.id]);
+
+  useEffect(() => {
+    let active = true;
     void api
       .messageFavorites()
       .then((result) => {
@@ -542,6 +564,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   }, [hasMoreMessages, loadingOlder, messageCursor, notify, selectedId]);
 
   const connection = useRealtimeConnection({
+    onAiCapabilitiesChanged: applyAiCapabilities,
     onSessionInvalid: onLogout,
     onPresenceSnapshot: (onlineUserIds) => {
       const onlineIds = new Set(onlineUserIds);
@@ -1456,6 +1479,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenMessageAssets={() => setShowMessageAssets(true)}
+        aiAvailable={Boolean(aiCapabilities?.features.knowledgeManagement)}
+        onOpenKnowledge={() => setShowKnowledge(true)}
         onOpenTeamRadar={() => setShowTeamRadar(true)}
         onOpenProfile={() => setShowProfile(true)}
         onOpenAdmin={() => setShowAdmin(true)}
@@ -1697,7 +1722,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       </section>
 
       {showAdmin && (
-        <AdminPanel currentUser={user} onClose={() => setShowAdmin(false)} onNotify={notify} />
+        <AdminPanel
+          currentUser={user}
+          onClose={() => setShowAdmin(false)}
+          onNotify={notify}
+          onAiCapabilitiesChanged={applyAiCapabilities}
+        />
       )}
       {showProfile && (
         <ProfileDialog
@@ -1748,6 +1778,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setShowMessageAssets(false);
           }}
           onFavoriteRemoved={forgetFavorite}
+        />
+      )}
+      {showKnowledge && aiCapabilities && (
+        <KnowledgeBaseDialog
+          capabilities={aiCapabilities}
+          onClose={() => setShowKnowledge(false)}
         />
       )}
       {showForwardDialog && selectedMessages.length > 0 && (

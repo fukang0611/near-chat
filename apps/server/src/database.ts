@@ -206,6 +206,103 @@ CREATE TABLE IF NOT EXISTS message_attachment_links (
 
 ALTER TABLE message_favorites ADD COLUMN IF NOT EXISTS forwarded_from JSONB;
 
+-- NearChat 原生知识库保留业务权限与文件关系；Mastra/pgvector 只保存可重建的向量。
+-- 第一阶段知识库归创建者私有，后续共享权限可以在不改文档模型的前提下扩展。
+CREATE TABLE IF NOT EXISTS knowledge_bases (
+  id UUID PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(80) NOT NULL,
+  description VARCHAR(240) NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_documents (
+  id UUID PRIMARY KEY,
+  knowledge_base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  attachment_id UUID NOT NULL REFERENCES attachments(id) ON DELETE RESTRICT,
+  added_by UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(240) NOT NULL,
+  content_type TEXT NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
+    CHECK (status IN ('QUEUED', 'INDEXING', 'READY', 'FAILED')),
+  chunk_count INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (knowledge_base_id, attachment_id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+  id UUID PRIMARY KEY,
+  document_id UUID NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL,
+  text_content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (document_id, position)
+);
+
+-- 删除文档后向量清理任务仍须存活，因此 document_id 有意不设置外键。
+CREATE TABLE IF NOT EXISTS knowledge_index_jobs (
+  id UUID PRIMARY KEY,
+  document_id UUID NOT NULL,
+  action VARCHAR(20) NOT NULL CHECK (action IN ('INDEX', 'DELETE')),
+  status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
+    CHECK (status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_jobs_active
+  ON knowledge_index_jobs(document_id, action)
+  WHERE status IN ('QUEUED', 'RUNNING');
+
+-- 管理员可以维护多个 OpenAI 兼容对话模型；显示名称用于用户选择，provider_model
+-- 是实际传给兼容接口的模型标识。API Key 只保存 AES-GCM 密文。
+CREATE TABLE IF NOT EXISTS ai_model_configs (
+  id UUID PRIMARY KEY,
+  name VARCHAR(80) NOT NULL UNIQUE,
+  base_url TEXT,
+  api_key_encrypted TEXT,
+  provider_model TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- AI 设置是整个 NearChat 实例共享的单例。Embedding 保持全局唯一，确保同一向量
+-- 索引不混入不同语义空间；对话模型则通过 default_chat_model_id 指向模型目录。
+-- embedding_revision 用于判断已有向量是否由当前模型生成。
+CREATE TABLE IF NOT EXISTS ai_settings (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  default_chat_model_id UUID REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+  embedding_base_url TEXT,
+  embedding_api_key_encrypted TEXT,
+  embedding_model TEXT,
+  embedding_dimensions INTEGER NOT NULL DEFAULT 1536
+    CHECK (embedding_dimensions BETWEEN 1 AND 4000),
+  revision INTEGER NOT NULL DEFAULT 1,
+  embedding_revision INTEGER NOT NULL DEFAULT 1,
+  vector_embedding_revision INTEGER NOT NULL DEFAULT 0,
+  updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 普通用户只保存一个偏好模型；模型被删除时偏好自动移除并回退到全局默认。
+CREATE TABLE IF NOT EXISTS user_ai_preferences (
+  user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  chat_model_id UUID NOT NULL REFERENCES ai_model_configs(id) ON DELETE CASCADE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -264,6 +361,20 @@ CREATE INDEX IF NOT EXISTS idx_favorite_attachments_attachment
   ON favorite_attachments(attachment_id);
 CREATE INDEX IF NOT EXISTS idx_message_attachment_links_attachment
   ON message_attachment_links(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_bases_owner_updated
+  ON knowledge_bases(owner_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_base_created
+  ON knowledge_documents(knowledge_base_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_documents_attachment
+  ON knowledge_documents(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_document_position
+  ON knowledge_chunks(document_id, position);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_text_search
+  ON knowledge_chunks USING GIN (to_tsvector('simple', text_content));
+CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_poll
+  ON knowledge_index_jobs(status, next_attempt_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_ai_model_configs_enabled_updated
+  ON ai_model_configs(enabled, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);

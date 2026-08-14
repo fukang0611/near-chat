@@ -3,6 +3,7 @@ import {
   ClipboardPaste,
   HardDrive,
   FolderHeart,
+  LibraryBig,
   LogOut,
   MessageCircleMore,
   MoreHorizontal,
@@ -108,6 +109,8 @@ interface ChatSidebarProps {
   onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
   onOpenMessageAssets: () => void;
+  aiAvailable?: boolean;
+  onOpenKnowledge?: () => void;
   onOpenTeamRadar: () => void;
   onOpenProfile: () => void;
   onOpenAdmin: () => void;
@@ -151,6 +154,8 @@ export function ChatSidebar({
   onDropToContact,
   onCreateGroup,
   onOpenMessageAssets,
+  aiAvailable = false,
+  onOpenKnowledge,
   onOpenTeamRadar,
   onOpenProfile,
   onOpenAdmin,
@@ -330,6 +335,17 @@ export function ChatSidebar({
           >
             <FolderHeart size={18} />
           </button>
+          {aiAvailable && onOpenKnowledge && (
+            <button
+              className="icon-button knowledge-trigger"
+              type="button"
+              onClick={onOpenKnowledge}
+              aria-label="打开我的知识库"
+              title="我的知识库"
+            >
+              <LibraryBig size={18} />
+            </button>
+          )}
           <button
             className="icon-button team-radar-trigger"
             type="button"

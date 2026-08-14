@@ -125,6 +125,70 @@ describe("ChatSidebar", () => {
     expect(onOpenMessageAssets).toHaveBeenCalledOnce();
   });
 
+  it("AI 知识库启用后才显示原生入口", async () => {
+    const onOpenKnowledge = vi.fn();
+    const { rerender } = render(
+      <ChatSidebar
+        currentUser={currentUser}
+        users={[currentUser]}
+        conversations={[]}
+        selectedId={null}
+        drafts={{}}
+        pendingAttachments={{}}
+        loading={false}
+        connection="connected"
+        theme="light"
+        mode="recent"
+        contactDelivery={null}
+        contactDropBusy={false}
+        onThemeChange={vi.fn()}
+        onModeChange={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onOpenDirect={vi.fn()}
+        onDropToContact={vi.fn()}
+        onCreateGroup={vi.fn()}
+        onOpenMessageAssets={vi.fn()}
+        onOpenTeamRadar={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onOpenAdmin={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "打开我的知识库" })).toBeNull();
+
+    rerender(
+      <ChatSidebar
+        currentUser={currentUser}
+        users={[currentUser]}
+        conversations={[]}
+        selectedId={null}
+        drafts={{}}
+        pendingAttachments={{}}
+        loading={false}
+        connection="connected"
+        theme="light"
+        mode="recent"
+        contactDelivery={null}
+        contactDropBusy={false}
+        onThemeChange={vi.fn()}
+        onModeChange={vi.fn()}
+        onSelectConversation={vi.fn()}
+        onOpenDirect={vi.fn()}
+        onDropToContact={vi.fn()}
+        onCreateGroup={vi.fn()}
+        onOpenMessageAssets={vi.fn()}
+        aiAvailable
+        onOpenKnowledge={onOpenKnowledge}
+        onOpenTeamRadar={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onOpenAdmin={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "打开我的知识库" }));
+    expect(onOpenKnowledge).toHaveBeenCalledOnce();
+  });
+
   it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
     const onDropToContact = vi.fn();
     renderSidebar({

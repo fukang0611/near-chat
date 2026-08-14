@@ -1,6 +1,7 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # AI 未开启时它与普通 PostgreSQL 完全等价；开启知识库时可直接提供 vector 扩展。
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: near_chat
       POSTGRES_USER: near_chat
@@ -59,6 +60,18 @@ services:
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
       SEED_ALICE_PASSWORD: ${SEED_ALICE_PASSWORD:-alice123}
       SEED_BOB_PASSWORD: ${SEED_BOB_PASSWORD:-bob123}
+      # 仅作为首次启动引导；之后管理员可在界面中热配置并持久化。
+      AI_SETTINGS_ENCRYPTION_KEY: ${AI_SETTINGS_ENCRYPTION_KEY:-near-chat-local-dev-secret-change-before-sharing}
+      AI_ENABLED: ${AI_ENABLED:-false}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-}
+      AI_CHAT_BASE_URL: ${AI_CHAT_BASE_URL:-}
+      AI_CHAT_API_KEY: ${AI_CHAT_API_KEY:-}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
+      AI_EMBEDDING_BASE_URL: ${AI_EMBEDDING_BASE_URL:-}
+      AI_EMBEDDING_API_KEY: ${AI_EMBEDDING_API_KEY:-}
+      AI_EMBEDDING_DIMENSIONS: ${AI_EMBEDDING_DIMENSIONS:-1536}
     depends_on:
       postgres:
         condition: service_healthy

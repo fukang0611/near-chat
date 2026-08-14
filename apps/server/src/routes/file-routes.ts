@@ -196,6 +196,14 @@ export function createFileRouter() {
                   ON linked_member.conversation_id = linked_message.conversation_id
                  AND linked_member.user_id = $2
                WHERE message_link.attachment_id = $4
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM knowledge_documents knowledge_document
+                JOIN knowledge_bases knowledge_base
+                  ON knowledge_base.id = knowledge_document.knowledge_base_id
+               WHERE knowledge_document.attachment_id = $4
+                 AND knowledge_base.owner_id = $2
             )`,
       [file.message_id, user.id, file.uploader_id, file.id],
     );
@@ -239,10 +247,12 @@ export function createFileRouter() {
         `SELECT 1 FROM favorite_attachments WHERE attachment_id = $1
          UNION ALL
          SELECT 1 FROM message_attachment_links WHERE attachment_id = $1
+         UNION ALL
+         SELECT 1 FROM knowledge_documents WHERE attachment_id = $1
           LIMIT 1`,
         [fileId],
       );
-      if (referenced.rowCount) throw new ApiError(409, "已被收藏的附件不能移除");
+      if (referenced.rowCount) throw new ApiError(409, "已被消息、收藏或知识库引用的附件不能移除");
       await client.query(
         `UPDATE attachments
             SET state = 'CLEANING', state_updated_at = NOW()

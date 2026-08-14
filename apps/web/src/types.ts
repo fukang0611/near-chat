@@ -172,6 +172,108 @@ export interface FileQuota {
   remainingBytes: number;
 }
 
+export type AiRuntimeStatus =
+  "DISABLED" | "CONFIGURATION_REQUIRED" | "STARTING" | "READY" | "UNAVAILABLE";
+
+/** 服务端只返回能力与模型名称，不向浏览器暴露密钥和模型服务地址。 */
+export interface AiCapabilities {
+  enabled: boolean;
+  status: AiRuntimeStatus;
+  reason: string;
+  features: {
+    knowledgeManagement: boolean;
+    knowledgeIndexing: boolean;
+    knowledgeSearch: boolean;
+    knowledgeAnswer: boolean;
+  };
+  provider: {
+    chatModel: string | null;
+    embeddingModel: string | null;
+    embeddingDimensions: number;
+  };
+}
+
+export interface AdminAiModel {
+  id: string;
+  name: string;
+  baseUrl: string;
+  providerModel: string;
+  enabled: boolean;
+  hasApiKey: boolean;
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+/** 只有管理员可以读取服务地址；所有角色都只能看到密钥是否已配置。 */
+export interface AdminAiSettings {
+  enabled: boolean;
+  defaultChatModelId: string | null;
+  models: AdminAiModel[];
+  embeddingBaseUrl: string;
+  embeddingModel: string;
+  embeddingDimensions: number;
+  hasEmbeddingApiKey: boolean;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface AiModelChoice {
+  id: string;
+  name: string;
+  providerModel: string;
+  isDefault: boolean;
+}
+
+export interface UserAiModels {
+  models: AiModelChoice[];
+  selectedModelId: string | null;
+  defaultModelId: string | null;
+}
+
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  documentCount: number;
+  readyDocumentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeDocument {
+  id: string;
+  knowledgeBaseId: string;
+  attachment: Attachment;
+  status: "QUEUED" | "INDEXING" | "READY" | "FAILED";
+  chunkCount: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeSource {
+  chunkId: string;
+  score: number;
+  excerpt: string;
+  position: number;
+  document: {
+    id: string;
+    name: string;
+    attachment: Attachment;
+  };
+}
+
+export interface KnowledgeSearchResult {
+  mode: "HYBRID" | "KEYWORD";
+  sources: KnowledgeSource[];
+}
+
+export interface KnowledgeAnswer {
+  answer: string;
+  sources: KnowledgeSource[];
+  generatedAt: string;
+}
+
 export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
 
 /** 消息资产中心中的附件记录，同时携带原消息定位信息。 */

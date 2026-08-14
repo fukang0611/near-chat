@@ -60,4 +60,29 @@ describe("parseRealtimeEvent", () => {
       ),
     ).toBeNull();
   });
+
+  it("解析管理员热切换后的 AI 能力广播", () => {
+    const capabilities = {
+      enabled: false,
+      status: "DISABLED",
+      reason: "AI 增强能力未启用",
+      features: {
+        knowledgeManagement: false,
+        knowledgeIndexing: false,
+        knowledgeSearch: false,
+        knowledgeAnswer: false,
+      },
+      provider: {
+        chatModel: null,
+        embeddingModel: null,
+        embeddingDimensions: 1536,
+      },
+    };
+
+    expect(
+      parseRealtimeEvent(
+        JSON.stringify({ type: "ai.capabilities.changed", payload: { capabilities } }),
+      ),
+    ).toEqual({ type: "ai.capabilities.changed", payload: { capabilities } });
+  });
 });

@@ -5,12 +5,14 @@ import { pool } from "./database.js";
 import { apiErrorHandler } from "./http.js";
 import { minio } from "./minio.js";
 import { RealtimeHub } from "./realtime.js";
+import { createAdminAiRouter } from "./routes/admin-ai-routes.js";
 import { createAdminRouter } from "./routes/admin-routes.js";
 import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
 import { createFileRouter } from "./routes/file-routes.js";
 import { createMessageAssetsRouter } from "./routes/message-assets-routes.js";
+import { createKnowledgeRouter } from "./routes/knowledge-routes.js";
 import { createTeamRadarRouter } from "./routes/team-radar-routes.js";
 
 /**
@@ -48,7 +50,9 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createChatRouter(realtime));
   app.use("/api", createTeamRadarRouter(realtime));
   app.use("/api", createMessageAssetsRouter());
+  app.use("/api", createKnowledgeRouter());
   app.use("/api", createFileRouter());
+  app.use("/api", createAdminAiRouter(realtime));
   app.use("/api", createAdminRouter(realtime));
   app.use("/api", (_request, response) => {
     response.status(404).json({ message: "接口不存在" });

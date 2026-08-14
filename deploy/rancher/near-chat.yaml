@@ -23,6 +23,14 @@ data:
   STORAGE_RETRY_ATTEMPTS: "3"
   MESSAGE_RECALL_WINDOW_SECONDS: "120"
   SEED_DEMO_USERS: "false"
+  # 这些值只引导首次建库；部署后由管理员在 NearChat 界面中维护。
+  AI_ENABLED: "false"
+  AI_BASE_URL: ""
+  AI_CHAT_MODEL: ""
+  AI_EMBEDDING_MODEL: ""
+  AI_EMBEDDING_DIMENSIONS: "1536"
+  AI_KNOWLEDGE_CHUNK_SIZE: "1200"
+  AI_KNOWLEDGE_CHUNK_OVERLAP: "180"
 ---
 apiVersion: v1
 kind: Secret
@@ -36,6 +44,9 @@ stringData:
   MINIO_ACCESS_KEY: "CHANGE_ME"
   MINIO_SECRET_KEY: "CHANGE_ME"
   SEED_ADMIN_PASSWORD: "CHANGE_ME"
+  # 必须长期保持不变，否则数据库中已保存的模型密钥将无法解密。
+  AI_SETTINGS_ENCRYPTION_KEY: "CHANGE_ME"
+  AI_API_KEY: ""
 ---
 apiVersion: apps/v1
 kind: Deployment

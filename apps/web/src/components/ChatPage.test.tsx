@@ -138,6 +138,20 @@ describe("ChatPage message scrolling", () => {
       directConversation("conversation-direct"),
     ];
     vi.spyOn(api, "users").mockResolvedValue({ users: [peerUser] });
+    vi.spyOn(api, "aiCapabilities").mockResolvedValue({
+      capabilities: {
+        enabled: false,
+        status: "DISABLED",
+        reason: "AI 增强能力未启用",
+        features: {
+          knowledgeManagement: false,
+          knowledgeIndexing: false,
+          knowledgeSearch: false,
+          knowledgeAnswer: false,
+        },
+        provider: { chatModel: null, embeddingModel: null, embeddingDimensions: 1536 },
+      },
+    });
     vi.spyOn(api, "conversations").mockResolvedValue({ conversations });
     vi.spyOn(api, "messages").mockImplementation(async (conversationId) => ({
       messages: [message(conversationId, `${conversationId} 的最新消息`)],

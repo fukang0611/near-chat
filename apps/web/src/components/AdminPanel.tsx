@@ -1,5 +1,6 @@
 import {
   Activity,
+  BrainCircuit,
   Check,
   CircleOff,
   ClipboardList,
@@ -15,10 +16,11 @@ import {
 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import type { AdminUser, AuditLog, User } from "../types";
+import type { AdminUser, AiCapabilities, AuditLog, User } from "../types";
 import { formatSidebarTime } from "../utils/format";
 import { errorMessage } from "../utils/errors";
 import { Avatar } from "./Avatar";
+import { AiSettingsPanel } from "./AiSettingsPanel";
 
 type NoticeTone = "success" | "error" | "info";
 
@@ -26,10 +28,16 @@ interface AdminPanelProps {
   currentUser: User;
   onClose: () => void;
   onNotify: (message: string, tone?: NoticeTone) => void;
+  onAiCapabilitiesChanged: (capabilities: AiCapabilities) => void;
 }
 
-export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) {
-  const [view, setView] = useState<"users" | "logs">("users");
+export function AdminPanel({
+  currentUser,
+  onClose,
+  onNotify,
+  onAiCapabilitiesChanged,
+}: AdminPanelProps) {
+  const [view, setView] = useState<"users" | "ai" | "logs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -216,13 +224,17 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
     GROUP_OWNER_TRANSFER: "转让群主",
     GROUP_LEAVE: "退出群聊",
     GROUP_DISBAND: "解散群聊",
+    ADMIN_AI_SETTINGS_UPDATE: "更新 AI 设置",
+    ADMIN_AI_MODEL_CREATE: "添加 AI 模型",
+    ADMIN_AI_MODEL_UPDATE: "更新 AI 模型",
+    ADMIN_AI_MODEL_DELETE: "删除 AI 模型",
   };
 
   return (
     <div className="drawer-layer" role="presentation" onMouseDown={onClose}>
       <aside
         ref={drawerRef}
-        className="admin-drawer"
+        className={`admin-drawer ${view === "ai" ? "is-ai-view" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-drawer-title"
@@ -235,7 +247,7 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
             </span>
             <div>
               <strong id="admin-drawer-title">管理中心</strong>
-              <small>管理局域网账号、登录会话与操作记录</small>
+              <small>管理局域网账号、AI 服务与操作记录</small>
             </div>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="关闭用户管理">
@@ -244,31 +256,42 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
         </header>
 
         <div className="drawer-content">
-          <div className="admin-stats" aria-label="用户状态摘要">
-            <div>
-              <UsersRound size={17} />
-              <span>
-                <strong>{stats.total}</strong>
-                <small>全部账号</small>
-              </span>
+          {view === "users" && (
+            <div className="admin-stats" aria-label="用户状态摘要">
+              <div>
+                <UsersRound size={17} />
+                <span>
+                  <strong>{stats.total}</strong>
+                  <small>全部账号</small>
+                </span>
+              </div>
+              <div>
+                <Activity size={17} />
+                <span>
+                  <strong>{stats.online}</strong>
+                  <small>当前在线</small>
+                </span>
+              </div>
+              <div>
+                <CircleOff size={17} />
+                <span>
+                  <strong>{stats.disabled}</strong>
+                  <small>已禁用</small>
+                </span>
+              </div>
             </div>
-            <div>
-              <Activity size={17} />
-              <span>
-                <strong>{stats.online}</strong>
-                <small>当前在线</small>
-              </span>
-            </div>
-            <div>
-              <CircleOff size={17} />
-              <span>
-                <strong>{stats.disabled}</strong>
-                <small>已禁用</small>
-              </span>
-            </div>
-          </div>
+          )}
 
           <div className="admin-tabs" role="tablist" aria-label="管理中心导航">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "ai"}
+              className={view === "ai" ? "is-active" : ""}
+              onClick={() => setView("ai")}
+            >
+              <BrainCircuit size={15} /> AI 设置
+            </button>
             <button
               type="button"
               role="tab"
@@ -447,7 +470,7 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
                 )}
               </div>
             </>
-          ) : (
+          ) : view === "logs" ? (
             <div className="admin-audit-list">
               <div className="admin-list-toolbar">
                 <div className="section-caption">最近 100 条操作</div>
@@ -498,6 +521,8 @@ export function AdminPanel({ currentUser, onClose, onNotify }: AdminPanelProps) 
                 })
               )}
             </div>
+          ) : (
+            <AiSettingsPanel onNotify={onNotify} onCapabilitiesChanged={onAiCapabilitiesChanged} />
           )}
         </div>
 

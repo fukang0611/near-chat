@@ -9,6 +9,17 @@
 
 应用同时托管前端静态文件和后端接口，只需要部署一个容器。当前实时在线状态位于应用内存，因此必须保持 `replicas: 1`。
 
+原生 AI 默认关闭，不影响现有聊天部署。推荐的启用方式：
+
+1. 确认 PostgreSQL 已安装并允许创建 `vector` 扩展。
+2. 在 Secret 中设置长期不变的 `AI_SETTINGS_ENCRYPTION_KEY`。
+3. 使用管理员账号打开“管理中心 → AI 设置”，添加一个或多个 OpenAI 兼容对话模型并指定默认模型。
+4. 配置全局 Embedding 服务、模型与维度，然后开启全局 AI 开关并保存。
+
+`AI_ENABLED`、`AI_BASE_URL`、`AI_API_KEY`、`AI_CHAT_MODEL` 和 `AI_EMBEDDING_*` 只用于数据库首次初始化；管理员保存后配置持久化在 PostgreSQL 中并即时热应用，不需要重启 Pod。模型 API Key 只保存加密值且接口不会回显。
+
+模型或 vector 初始化失败时只有知识库索引与问答降级，`/api/health/ready` 仍只检查核心 PostgreSQL 与 MinIO。
+
 文件治理默认配置为单用户 1 GiB 配额、未发送附件保留 24 小时、每 30 分钟清理一次。可在 `ConfigMap` 中调整 `FILE_USER_QUOTA_BYTES`、`FILE_ORPHAN_TTL_HOURS` 和 `FILE_CLEANUP_INTERVAL_MINUTES`。
 
 发送者默认可在 120 秒内撤回消息，撤回会立即阻断附件访问。可通过 `MESSAGE_RECALL_WINDOW_SECONDS` 调整时限。

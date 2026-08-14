@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { websocketUrl } from "../api";
-import type { Message, NudgeEvent, ReceiptChange } from "../types";
+import type { AiCapabilities, Message, NudgeEvent, ReceiptChange } from "../types";
 
 export type ConnectionState = "connected" | "connecting" | "offline";
 
@@ -15,6 +15,7 @@ interface RealtimeHandlers {
   onConversationChanged: (conversationId: string) => void;
   onReceiptChanged: (receipts: ReceiptChange[]) => void;
   onNudgeReceived: (nudge: NudgeEvent) => void;
+  onAiCapabilitiesChanged?: (capabilities: AiCapabilities) => void;
 }
 
 type RealtimeEvent =
@@ -26,6 +27,7 @@ type RealtimeEvent =
   | { type: "unread.changed"; payload: { conversationId: string; unreadCount: number } }
   | { type: "conversation.changed"; payload: { conversationId: string } }
   | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } }
+  | { type: "ai.capabilities.changed"; payload: { capabilities: AiCapabilities } }
   | { type: "nudge.received"; payload: { nudge: NudgeEvent } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +131,26 @@ function isNudgeEvent(value: unknown): value is NudgeEvent {
   );
 }
 
+function isAiCapabilities(value: unknown): value is AiCapabilities {
+  if (!isRecord(value) || !isRecord(value.features) || !isRecord(value.provider)) return false;
+  return (
+    typeof value.enabled === "boolean" &&
+    (value.status === "DISABLED" ||
+      value.status === "CONFIGURATION_REQUIRED" ||
+      value.status === "STARTING" ||
+      value.status === "READY" ||
+      value.status === "UNAVAILABLE") &&
+    typeof value.reason === "string" &&
+    typeof value.features.knowledgeManagement === "boolean" &&
+    typeof value.features.knowledgeIndexing === "boolean" &&
+    typeof value.features.knowledgeSearch === "boolean" &&
+    typeof value.features.knowledgeAnswer === "boolean" &&
+    (value.provider.chatModel === null || typeof value.provider.chatModel === "string") &&
+    (value.provider.embeddingModel === null || typeof value.provider.embeddingModel === "string") &&
+    typeof value.provider.embeddingDimensions === "number"
+  );
+}
+
 export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
   try {
     const event = JSON.parse(raw) as { type?: unknown; payload?: unknown };
@@ -174,6 +196,10 @@ export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
       case "receipt.changed":
         return Array.isArray(payload.receipts) && payload.receipts.every(isReceiptChange)
           ? { type: event.type, payload: { receipts: payload.receipts } }
+          : null;
+      case "ai.capabilities.changed":
+        return isAiCapabilities(payload.capabilities)
+          ? { type: event.type, payload: { capabilities: payload.capabilities } }
           : null;
       case "nudge.received":
         return isNudgeEvent(payload) ? { type: event.type, payload: { nudge: payload } } : null;
@@ -237,6 +263,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "receipt.changed":
             current.onReceiptChanged(event.payload.receipts);
+            break;
+          case "ai.capabilities.changed":
+            current.onAiCapabilitiesChanged?.(event.payload.capabilities);
             break;
           case "nudge.received":
             current.onNudgeReceived(event.payload.nudge);
