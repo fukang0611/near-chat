@@ -48,6 +48,7 @@ import {
 } from "../utils/notifications";
 import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
+import { AssistantCenterDialog } from "./AssistantCenterDialog";
 import { Avatar } from "./Avatar";
 import { ClipboardRelayDialog, type ClipboardRelayContentKind } from "./ClipboardRelayDialog";
 import {
@@ -182,9 +183,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
+  const [showAssistants, setShowAssistants] = useState(false);
   const [showKnowledge, setShowKnowledge] = useState(false);
   const applyAiCapabilities = useCallback((capabilities: AiCapabilities) => {
     setAiCapabilities(capabilities);
+    if (!capabilities.features.personalAssistants) setShowAssistants(false);
     if (!capabilities.features.knowledgeManagement) setShowKnowledge(false);
   }, []);
   const [showTeamRadar, setShowTeamRadar] = useState(false);
@@ -1479,6 +1482,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenMessageAssets={() => setShowMessageAssets(true)}
+        assistantAvailable={Boolean(aiCapabilities?.features.personalAssistants)}
+        onOpenAssistants={() => setShowAssistants(true)}
         aiAvailable={Boolean(aiCapabilities?.features.knowledgeManagement)}
         onOpenKnowledge={() => setShowKnowledge(true)}
         onOpenTeamRadar={() => setShowTeamRadar(true)}
@@ -1784,6 +1789,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         <KnowledgeBaseDialog
           capabilities={aiCapabilities}
           onClose={() => setShowKnowledge(false)}
+        />
+      )}
+      {showAssistants && aiCapabilities && (
+        <AssistantCenterDialog
+          capabilities={aiCapabilities}
+          onClose={() => setShowAssistants(false)}
         />
       )}
       {showForwardDialog && selectedMessages.length > 0 && (

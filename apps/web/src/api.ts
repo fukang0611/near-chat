@@ -1,6 +1,9 @@
 import type {
   AdminUser,
   AdminAiSettings,
+  AiAssistant,
+  AiAssistantCategory,
+  AiAssistantMessage,
   AiCapabilities,
   Attachment,
   AuditLog,
@@ -61,6 +64,16 @@ export interface SaveAiModelInput {
   apiKey?: string | null;
   providerModel: string;
   enabled: boolean;
+}
+
+export interface SaveAiAssistantInput {
+  name: string;
+  description: string;
+  category: AiAssistantCategory;
+  instructions: string;
+  avatarColor: string;
+  modelId: string | null;
+  knowledgeBaseIds: string[];
 }
 
 export interface AdminAiMutationResponse {
@@ -245,6 +258,28 @@ export const api = {
     request<UserAiModels>("/api/ai/preferences/model", {
       method: "PUT",
       body: JSON.stringify({ modelId }),
+    }),
+  aiAssistants: () => request<{ assistants: AiAssistant[] }>("/api/ai/assistants"),
+  createAiAssistant: (input: SaveAiAssistantInput) =>
+    request<{ assistant: AiAssistant }>("/api/ai/assistants", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateAiAssistant: (assistantId: string, input: Partial<SaveAiAssistantInput>) =>
+    request<{ assistant: AiAssistant }>(`/api/ai/assistants/${assistantId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  deleteAiAssistant: (assistantId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}`, { method: "DELETE" }),
+  aiAssistantMessages: (assistantId: string) =>
+    request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`),
+  clearAiAssistantMessages: (assistantId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/messages`, { method: "DELETE" }),
+  sendAiAssistantMessage: (assistantId: string, content: string) =>
+    request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
     }),
   knowledgeBases: () => request<{ knowledgeBases: KnowledgeBase[] }>("/api/knowledge-bases"),
   createKnowledgeBase: (input: { name: string; description?: string }) =>

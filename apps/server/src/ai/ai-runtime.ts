@@ -21,6 +21,7 @@ export interface AiCapabilities {
     knowledgeIndexing: boolean;
     knowledgeSearch: boolean;
     knowledgeAnswer: boolean;
+    personalAssistants: boolean;
   };
   provider: {
     chatModel: string | null;
@@ -124,6 +125,35 @@ function clearRuntimeObjects(): PgVector | null {
   return vector;
 }
 
+function createChatAgents(settings: AiRuntimeSettings): {
+  answerAgents: Map<string, Agent>;
+  mastraAgents: Record<string, Agent>;
+  defaultAnswerModelId: string | null;
+} {
+  const answerAgents = new Map<string, Agent>();
+  const mastraAgents: Record<string, Agent> = {};
+  for (const model of settings.models.filter(chatModelConfigured)) {
+    const agent = new Agent({
+      id: `near-chat-knowledge-${model.id}`,
+      name: `NearChat 知识助理 · ${model.name}`,
+      instructions: [
+        "你是 NearChat 团队知识助理。",
+        "只根据用户消息中提供的资料片段回答，不得补造事实。",
+        "引用资料时使用 [1]、[2] 这样的编号；资料不足时直接说明。",
+        "回答应简洁、清楚，默认使用中文。",
+      ].join("\n"),
+      model: openAiProvider(model, `near-chat-chat-${model.id}`).chat(model.providerModel),
+    });
+    answerAgents.set(model.id, agent);
+    mastraAgents[`model_${model.id.replaceAll("-", "_")}`] = agent;
+  }
+  const defaultAnswerModelId =
+    (settings.defaultChatModelId && answerAgents.has(settings.defaultChatModelId)
+      ? settings.defaultChatModelId
+      : answerAgents.keys().next().value) ?? null;
+  return { answerAgents, mastraAgents, defaultAnswerModelId };
+}
+
 export class AiFeatureUnavailableError extends Error {
   constructor(message = runtime.reason) {
     super(message);
@@ -146,6 +176,8 @@ export function getAiCapabilities(): AiCapabilities {
       knowledgeIndexing: vectorReady,
       knowledgeSearch: vectorReady,
       knowledgeAnswer: vectorReady && runtime.answerAgents.size > 0,
+      personalAssistants:
+        runtime.settings.enabled && runtime.status === "READY" && runtime.answerAgents.size > 0,
     },
     provider: {
       chatModel: defaultModel?.providerModel ?? null,
@@ -174,9 +206,22 @@ async function applyRuntimeSettings(settings: AiRuntimeSettings): Promise<AiRunt
     runtime.reason = "AI 增强能力未启用";
     return { capabilities: getAiCapabilities(), indexRecreated: false };
   }
+
+  const { answerAgents, mastraAgents, defaultAnswerModelId } = createChatAgents(settings);
+  runtime.answerAgents = answerAgents;
+  runtime.defaultAnswerModelId = defaultAnswerModelId;
+  runtime.mastra = new Mastra({
+    agents: mastraAgents,
+    // NearChat 自行持久化助理消息与知识来源，不启用 Mastra 会话记忆。
+    logger: false,
+  });
+
   if (!providerConfigured(settings.embedding)) {
-    runtime.status = "CONFIGURATION_REQUIRED";
-    runtime.reason = "请先配置 Embedding 模型与 OpenAI 兼容服务";
+    runtime.status = answerAgents.size > 0 ? "READY" : "CONFIGURATION_REQUIRED";
+    runtime.reason =
+      answerAgents.size > 0
+        ? `个人助理已就绪，可使用 ${answerAgents.size} 个对话模型；知识库需配置 Embedding`
+        : "请先配置可用的对话模型或 Embedding 模型";
     return { capabilities: getAiCapabilities(), indexRecreated: false };
   }
 
@@ -222,32 +267,8 @@ async function applyRuntimeSettings(settings: AiRuntimeSettings): Promise<AiRunt
     const embeddingModel = openAiProvider(settings.embedding, "near-chat-embedding").embedding(
       settings.embedding.model,
     );
-    const answerAgents = new Map<string, Agent>();
-    const mastraAgents: Record<string, Agent> = {};
-    for (const model of settings.models.filter(chatModelConfigured)) {
-      const agent = new Agent({
-        id: `near-chat-knowledge-${model.id}`,
-        name: `NearChat 知识助理 · ${model.name}`,
-        instructions: [
-          "你是 NearChat 团队知识助理。",
-          "只根据用户消息中提供的资料片段回答，不得补造事实。",
-          "引用资料时使用 [1]、[2] 这样的编号；资料不足时直接说明。",
-          "回答应简洁、清楚，默认使用中文。",
-        ].join("\n"),
-        model: openAiProvider(model, `near-chat-chat-${model.id}`).chat(model.providerModel),
-      });
-      answerAgents.set(model.id, agent);
-      mastraAgents[`model_${model.id.replaceAll("-", "_")}`] = agent;
-    }
-    const defaultAnswerModelId =
-      (settings.defaultChatModelId && answerAgents.has(settings.defaultChatModelId)
-        ? settings.defaultChatModelId
-        : answerAgents.keys().next().value) ?? null;
-
     runtime.vector = vector;
     runtime.embeddingModel = embeddingModel;
-    runtime.answerAgents = answerAgents;
-    runtime.defaultAnswerModelId = defaultAnswerModelId;
     runtime.mastra = new Mastra({
       vectors: { knowledgeVector: vector },
       agents: mastraAgents,
@@ -264,9 +285,14 @@ async function applyRuntimeSettings(settings: AiRuntimeSettings): Promise<AiRunt
     );
   } catch (error) {
     await initializingVector?.disconnect().catch(() => undefined);
-    clearRuntimeObjects();
-    runtime.status = "UNAVAILABLE";
-    runtime.reason = "AI 服务暂时不可用，聊天功能不受影响";
+    runtime.vector = null;
+    runtime.embeddingModel = null;
+    runtime.mastra = new Mastra({ agents: mastraAgents, logger: false });
+    runtime.status = answerAgents.size > 0 ? "READY" : "UNAVAILABLE";
+    runtime.reason =
+      answerAgents.size > 0
+        ? `个人助理已就绪，可使用 ${answerAgents.size} 个对话模型；知识库向量服务暂不可用`
+        : "AI 服务暂时不可用，聊天功能不受影响";
     console.warn("NearChat AI runtime unavailable; core chat remains active:", error);
   }
   return { capabilities: getAiCapabilities(), indexRecreated };
@@ -377,6 +403,50 @@ export function generateKnowledgeAnswer(prompt: string, modelId?: string): Promi
     }
     const result = await agent.generate(prompt);
     return result.text.trim();
+  });
+}
+
+export type PersonalAssistantMessage =
+  { role: "user"; content: string } | { role: "assistant"; content: string };
+
+/**
+ * 个人助理按请求动态组合角色说明，但仍复用管理员配置的 OpenAI 兼容模型。
+ * 会话历史由 NearChat 数据库维护，避免运行时重载造成上下文丢失。
+ */
+export function generatePersonalAssistantReply(input: {
+  assistantId: string;
+  assistantName: string;
+  instructions: string;
+  modelId: string;
+  messages: PersonalAssistantMessage[];
+}): Promise<string> {
+  return serialized(async () => {
+    if (!getAiCapabilities().features.personalAssistants) {
+      throw new AiFeatureUnavailableError("个人助理尚未就绪，请检查 AI 对话模型配置");
+    }
+    const model = runtime.settings.models.find(
+      (candidate) => candidate.id === input.modelId && chatModelConfigured(candidate),
+    );
+    if (!model) throw new AiFeatureUnavailableError("所选对话模型当前不可用");
+
+    const agent = new Agent({
+      id: `near-chat-assistant-${input.assistantId}`,
+      name: input.assistantName,
+      instructions: [
+        "你是 NearChat 中由当前用户创建的私人智能助理。",
+        "默认使用中文，表达清楚、自然，并严格遵循下方角色说明。",
+        "你目前没有执行外部操作、浏览网页、发送消息或修改文件的工具；不得声称已经完成这些动作。",
+        "不确定的信息应明确说明，不得捏造用户、团队或系统内部数据。",
+        "",
+        "角色说明：",
+        input.instructions,
+      ].join("\n"),
+      model: openAiProvider(model, `near-chat-assistant-${model.id}`).chat(model.providerModel),
+    });
+    const result = await agent.generate(input.messages);
+    const text = result.text.trim();
+    if (!text) throw new Error("模型未返回有效文本");
+    return text;
   });
 }
 

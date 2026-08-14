@@ -7,6 +7,7 @@ import { minio } from "./minio.js";
 import { RealtimeHub } from "./realtime.js";
 import { createAdminAiRouter } from "./routes/admin-ai-routes.js";
 import { createAdminRouter } from "./routes/admin-routes.js";
+import { createAssistantRouter } from "./routes/assistant-routes.js";
 import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
@@ -51,6 +52,7 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createTeamRadarRouter(realtime));
   app.use("/api", createMessageAssetsRouter());
   app.use("/api", createKnowledgeRouter());
+  app.use("/api", createAssistantRouter());
   app.use("/api", createFileRouter());
   app.use("/api", createAdminAiRouter(realtime));
   app.use("/api", createAdminRouter(realtime));

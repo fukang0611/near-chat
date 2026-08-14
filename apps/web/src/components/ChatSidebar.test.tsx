@@ -189,6 +189,15 @@ describe("ChatSidebar", () => {
     expect(onOpenKnowledge).toHaveBeenCalledOnce();
   });
 
+  it("个人助理能力就绪后显示独立入口", async () => {
+    const onOpenAssistants = vi.fn();
+    renderSidebar({ assistantAvailable: true, onOpenAssistants });
+
+    await userEvent.click(screen.getByRole("button", { name: "打开智能助理" }));
+
+    expect(onOpenAssistants).toHaveBeenCalledOnce();
+  });
+
   it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
     const onDropToContact = vi.fn();
     renderSidebar({

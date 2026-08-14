@@ -1,5 +1,6 @@
 import {
   AppWindow,
+  Bot,
   ClipboardPaste,
   HardDrive,
   FolderHeart,
@@ -109,6 +110,8 @@ interface ChatSidebarProps {
   onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
   onOpenMessageAssets: () => void;
+  assistantAvailable?: boolean;
+  onOpenAssistants?: () => void;
   aiAvailable?: boolean;
   onOpenKnowledge?: () => void;
   onOpenTeamRadar: () => void;
@@ -154,6 +157,8 @@ export function ChatSidebar({
   onDropToContact,
   onCreateGroup,
   onOpenMessageAssets,
+  assistantAvailable = false,
+  onOpenAssistants,
   aiAvailable = false,
   onOpenKnowledge,
   onOpenTeamRadar,
@@ -335,6 +340,17 @@ export function ChatSidebar({
           >
             <FolderHeart size={18} />
           </button>
+          {assistantAvailable && onOpenAssistants && (
+            <button
+              className="icon-button assistant-trigger"
+              type="button"
+              onClick={onOpenAssistants}
+              aria-label="打开智能助理"
+              title="智能助理"
+            >
+              <Bot size={18} />
+            </button>
+          )}
           {aiAvailable && onOpenKnowledge && (
             <button
               className="icon-button knowledge-trigger"

@@ -303,6 +303,41 @@ CREATE TABLE IF NOT EXISTS user_ai_preferences (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 个人智能助理由用户自行创建和管理。model_id 为空时跟随用户偏好或全局默认，
+-- 模型被删除时自动回退，不让助理配置阻塞核心聊天功能。
+CREATE TABLE IF NOT EXISTS ai_assistants (
+  id UUID PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(80) NOT NULL,
+  description VARCHAR(240) NOT NULL DEFAULT '',
+  category VARCHAR(24) NOT NULL DEFAULT 'GENERAL'
+    CHECK (category IN ('GENERAL', 'WRITING', 'ANALYSIS', 'PLANNING')),
+  instructions TEXT NOT NULL,
+  avatar_color VARCHAR(20) NOT NULL DEFAULT '#6757E8',
+  model_id UUID REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 一个助理可以组合用户自己的多个知识库；知识库删除后只解除绑定。
+CREATE TABLE IF NOT EXISTS ai_assistant_knowledge_bases (
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  knowledge_base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+  PRIMARY KEY (assistant_id, knowledge_base_id)
+);
+
+-- 第一阶段每个助理维护一条独立持久时间线。后续若需要多线程会话，可在本表前
+-- 增加 thread_id，而不改变助理配置与模型绑定。
+CREATE TABLE IF NOT EXISTS ai_assistant_messages (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  role VARCHAR(12) NOT NULL CHECK (role IN ('USER', 'ASSISTANT')),
+  content TEXT NOT NULL,
+  model_id UUID REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+  sources JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -375,6 +410,10 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_poll
   ON knowledge_index_jobs(status, next_attempt_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_ai_model_configs_enabled_updated
   ON ai_model_configs(enabled, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistants_owner_activity
+  ON ai_assistants(owner_id, updated_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_timeline
+  ON ai_assistant_messages(assistant_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);

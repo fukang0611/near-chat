@@ -14,6 +14,7 @@ const capabilities: AiCapabilities = {
     knowledgeIndexing: true,
     knowledgeSearch: true,
     knowledgeAnswer: true,
+    personalAssistants: true,
   },
   provider: {
     chatModel: "gpt-4.1-mini",

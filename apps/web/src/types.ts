@@ -185,6 +185,7 @@ export interface AiCapabilities {
     knowledgeIndexing: boolean;
     knowledgeSearch: boolean;
     knowledgeAnswer: boolean;
+    personalAssistants: boolean;
   };
   provider: {
     chatModel: string | null;
@@ -272,6 +273,34 @@ export interface KnowledgeAnswer {
   answer: string;
   sources: KnowledgeSource[];
   generatedAt: string;
+}
+
+export type AiAssistantCategory = "GENERAL" | "WRITING" | "ANALYSIS" | "PLANNING";
+
+export interface AiAssistant {
+  id: string;
+  name: string;
+  description: string;
+  category: AiAssistantCategory;
+  instructions: string;
+  avatarColor: string;
+  modelId: string | null;
+  model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
+  knowledgeBaseIds: string[];
+  messageCount: number;
+  lastMessageAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAssistantMessage {
+  id: string;
+  assistantId: string;
+  role: "USER" | "ASSISTANT";
+  content: string;
+  model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
+  sources: KnowledgeSource[];
+  createdAt: string;
 }
 
 export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
