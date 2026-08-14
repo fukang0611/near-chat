@@ -49,7 +49,7 @@ import {
 } from "../utils/notifications";
 import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
-import { AssistantCenterDialog } from "./AssistantCenterDialog";
+import { AssistantWorkspace, type AssistantDirectorySnapshot } from "./AssistantWorkspace";
 import { Avatar } from "./Avatar";
 import { ClipboardRelayDialog, type ClipboardRelayContentKind } from "./ClipboardRelayDialog";
 import {
@@ -186,7 +186,13 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
   const [aiActionMessage, setAiActionMessage] = useState<Message | null>(null);
-  const [showAssistants, setShowAssistants] = useState(false);
+  const [assistantDirectory, setAssistantDirectory] = useState<AssistantDirectorySnapshot>({
+    assistants: [],
+    loading: true,
+  });
+  const [selectedAssistantId, setSelectedAssistantId] = useState<string | null>(null);
+  const [assistantDetailOpen, setAssistantDetailOpen] = useState(false);
+  const [assistantCreateRequestVersion, setAssistantCreateRequestVersion] = useState(0);
   const [assistantRefreshVersion, setAssistantRefreshVersion] = useState(0);
   const [assistantUnreadCount, setAssistantUnreadCount] = useState(0);
   const [assistantTarget, setAssistantTarget] = useState<{
@@ -196,7 +202,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showKnowledge, setShowKnowledge] = useState(false);
   const applyAiCapabilities = useCallback((capabilities: AiCapabilities) => {
     setAiCapabilities(capabilities);
-    if (!capabilities.features.personalAssistants) setShowAssistants(false);
+    if (!capabilities.features.personalAssistants) {
+      setSidebarMode((current) => (current === "assistants" ? "recent" : current));
+      setAssistantDetailOpen(false);
+      setAssistantTarget(null);
+    }
     if (!capabilities.features.knowledgeManagement) setShowKnowledge(false);
     if (!capabilities.features.messageActions) setAiActionMessage(null);
   }, []);
@@ -231,6 +241,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     selectedConversation?.expiresAt,
     conversationClock,
   );
+  const assistantsAvailable = Boolean(aiCapabilities?.features.personalAssistants);
+  const assistantMode = sidebarMode === "assistants" && assistantsAvailable;
+  const hasActiveSelection = assistantMode ? assistantDetailOpen : Boolean(selectedConversation);
   const text = selectedId ? (drafts[selectedId] ?? "") : "";
   const pendingAttachment = selectedId ? (pendingAttachments[selectedId] ?? null) : null;
   const replyingTo = selectedId ? (replyTargets[selectedId] ?? null) : null;
@@ -271,6 +284,33 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   }, [conversations, users]);
   const sending = selectedOutbox.some((message) => message.deliveryState === "SENDING");
   const activeUpload = uploadState?.conversationId === selectedId ? uploadState : null;
+
+  const handleSidebarModeChange = useCallback((mode: SidebarMode) => {
+    setSidebarMode(mode);
+    if (mode !== "assistants") return;
+    setAssistantTarget(null);
+    setAssistantUnreadCount(0);
+    setAssistantDetailOpen(false);
+  }, []);
+
+  const openAssistant = useCallback((assistantId: string) => {
+    setSelectedAssistantId(assistantId);
+    setAssistantTarget(null);
+    setAssistantUnreadCount(0);
+    setAssistantDetailOpen(true);
+  }, []);
+
+  const syncSelectedAssistant = useCallback((assistantId: string | null) => {
+    setSelectedAssistantId(assistantId);
+    if (!assistantId) setAssistantDetailOpen(false);
+  }, []);
+
+  const requestAssistantCreate = useCallback(() => {
+    setAssistantTarget(null);
+    setAssistantUnreadCount(0);
+    setAssistantDetailOpen(true);
+    setAssistantCreateRequestVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     if (showGroupManagement && selectedConversation?.type !== "GROUP") {
@@ -317,13 +357,16 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         if (conversationId.startsWith("assistant:")) {
           const [, assistantId, messageId] = conversationId.split(":");
           if (assistantId) {
+            setSelectedAssistantId(assistantId);
             setAssistantTarget({ assistantId, messageId: messageId || null });
             setAssistantUnreadCount(0);
-            setShowAssistants(true);
+            setAssistantDetailOpen(true);
+            setSidebarMode("assistants");
           }
           return;
         }
         setSelectedId(conversationId);
+        setSidebarMode("recent");
       }),
     [],
   );
@@ -589,7 +632,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     onAiCapabilitiesChanged: applyAiCapabilities,
     onAssistantTaskCompleted: (event: AiAssistantTaskEvent) => {
       setAssistantRefreshVersion((current) => current + 1);
-      const activelyViewingAssistants = showAssistants && document.visibilityState === "visible";
+      const activelyViewingAssistants =
+        sidebarMode === "assistants" && document.visibilityState === "visible";
       if (!activelyViewingAssistants) {
         setAssistantUnreadCount((current) => Math.min(99, current + 1));
       }
@@ -624,9 +668,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           });
           notification.onclick = () => {
             window.focus();
+            setSelectedAssistantId(event.assistantId);
             setAssistantTarget({ assistantId: event.assistantId, messageId: event.messageId });
             setAssistantUnreadCount(0);
-            setShowAssistants(true);
+            setAssistantDetailOpen(true);
+            setSidebarMode("assistants");
             notification.close();
           };
         } catch {
@@ -770,6 +816,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               notification.onclick = () => {
                 window.focus();
                 setSelectedId(incoming.conversationId);
+                setSidebarMode("recent");
                 notification.close();
               };
             } catch {
@@ -864,6 +911,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           notification.onclick = () => {
             window.focus();
             setSelectedId(nudge.conversationId);
+            setSidebarMode("recent");
             notification.close();
           };
         } catch {
@@ -1523,7 +1571,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   };
 
   return (
-    <main className={`app-frame ${selectedConversation ? "has-selection" : ""}`}>
+    <main
+      className={`app-frame ${hasActiveSelection ? "has-selection" : ""} ${assistantMode ? "is-assistant-mode" : ""}`}
+    >
       <ChatSidebar
         currentUser={user}
         users={users}
@@ -1538,7 +1588,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         contactDelivery={contactDelivery}
         contactDropBusy={Boolean(contactDelivery) || Boolean(uploadState)}
         onThemeChange={onThemeChange}
-        onModeChange={setSidebarMode}
+        onModeChange={handleSidebarModeChange}
         onSelectConversation={(conversationId) => {
           messageTargetRef.current = null;
           setHighlightedMessageId(null);
@@ -1550,11 +1600,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onOpenMessageAssets={() => setShowMessageAssets(true)}
         assistantAvailable={Boolean(aiCapabilities?.features.personalAssistants)}
         assistantUnreadCount={assistantUnreadCount}
-        onOpenAssistants={() => {
-          setAssistantTarget(null);
-          setAssistantUnreadCount(0);
-          setShowAssistants(true);
-        }}
+        assistants={assistantDirectory.assistants}
+        assistantsLoading={assistantDirectory.loading}
+        selectedAssistantId={selectedAssistantId}
+        onSelectAssistant={openAssistant}
+        onCreateAssistant={requestAssistantCreate}
         aiAvailable={Boolean(aiCapabilities?.features.knowledgeManagement)}
         onOpenKnowledge={() => setShowKnowledge(true)}
         onOpenTeamRadar={() => setShowTeamRadar(true)}
@@ -1587,6 +1637,21 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           users={clipboardRelayUsers}
           onSend={sendClipboardRelay}
           onDismiss={() => setClipboardRelayPayload(null)}
+        />
+      )}
+
+      {assistantsAvailable && aiCapabilities && (
+        <AssistantWorkspace
+          capabilities={aiCapabilities}
+          selectedId={selectedAssistantId}
+          onSelectedIdChange={syncSelectedAssistant}
+          onDirectoryChange={setAssistantDirectory}
+          onMobileBack={() => setAssistantDetailOpen(false)}
+          initialMessageId={
+            assistantTarget?.assistantId === selectedAssistantId ? assistantTarget.messageId : null
+          }
+          refreshVersion={assistantRefreshVersion}
+          createRequestVersion={assistantCreateRequestVersion}
         />
       )}
 
@@ -1880,18 +1945,6 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         <KnowledgeBaseDialog
           capabilities={aiCapabilities}
           onClose={() => setShowKnowledge(false)}
-        />
-      )}
-      {showAssistants && aiCapabilities && (
-        <AssistantCenterDialog
-          capabilities={aiCapabilities}
-          initialAssistantId={assistantTarget?.assistantId}
-          initialMessageId={assistantTarget?.messageId}
-          refreshVersion={assistantRefreshVersion}
-          onClose={() => {
-            setShowAssistants(false);
-            setAssistantTarget(null);
-          }}
         />
       )}
       {showForwardDialog && selectedMessages.length > 0 && (

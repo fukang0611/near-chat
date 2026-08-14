@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { Conversation, Message, MessageFavorite, User } from "../types";
+import type { AiAssistant, Conversation, Message, MessageFavorite, User } from "../types";
 import { ChatPage } from "./ChatPage";
 
 vi.mock("../hooks/useRealtimeConnection", () => ({
@@ -362,6 +362,78 @@ describe("ChatPage message scrolling", () => {
 
     expect(nudgeConversation).toHaveBeenCalledWith("conversation-direct");
     expect(await screen.findByText("已敲了敲 周远")).toBeTruthy();
+  });
+
+  it("将智能助理作为与会话并列的主工作区打开", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    const smartAssistant = {
+      id: "assistant-analysis",
+      name: "分析搭档",
+      description: "帮我理清复杂信息",
+      category: "ANALYSIS",
+      instructions: "先归纳事实，再给出判断。",
+      avatarColor: "#2F9D83",
+      modelId: null,
+      model: null,
+      knowledgeBaseIds: [],
+      messageCount: 0,
+      lastMessageAt: null,
+      createdAt: "2026-08-14T08:00:00.000Z",
+      updatedAt: "2026-08-14T08:00:00.000Z",
+    } satisfies AiAssistant;
+    vi.mocked(api.aiCapabilities).mockResolvedValueOnce({
+      capabilities: {
+        enabled: true,
+        status: "READY",
+        reason: "AI 已就绪",
+        features: {
+          knowledgeManagement: true,
+          knowledgeIndexing: true,
+          knowledgeSearch: true,
+          knowledgeAnswer: true,
+          personalAssistants: true,
+          messageActions: true,
+        },
+        provider: {
+          chatModel: "gpt-test",
+          embeddingModel: "embedding-test",
+          embeddingDimensions: 1024,
+        },
+      },
+    });
+    vi.spyOn(api, "aiAssistants").mockResolvedValue({ assistants: [smartAssistant] });
+    vi.spyOn(api, "aiModels").mockResolvedValue({
+      models: [],
+      selectedModelId: null,
+      defaultModelId: null,
+    });
+    vi.spyOn(api, "knowledgeBases").mockResolvedValue({ knowledgeBases: [] });
+    vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
+    vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
+
+    const { container } = render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: "助理" }));
+    expect(container.querySelector(".app-frame")?.classList.contains("is-assistant-mode")).toBe(
+      true,
+    );
+    await user.click(await screen.findByRole("button", { name: /分析搭档/ }));
+
+    expect(await screen.findByPlaceholderText("给 分析搭档 发消息")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "智能助理工作区" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "智能助理" })).toBeNull();
   });
 
   it("接收 Electron 剪贴板事件并在确认目标后复用标准发送链路", async () => {

@@ -8,6 +8,7 @@ import {
   LogOut,
   MessageCircleMore,
   MoreHorizontal,
+  Plus,
   Radar,
   Radio,
   Search,
@@ -29,15 +30,16 @@ import {
   useState,
 } from "react";
 import type { ConnectionState } from "../hooks/useRealtimeConnection";
-import type { Attachment, Conversation, User } from "../types";
+import type { AiAssistant, Attachment, Conversation, User } from "../types";
 import { formatConversationPreview, formatSidebarTime } from "../utils/format";
 import type { ThemeMode } from "../utils/theme";
 import { Avatar } from "./Avatar";
+import { ASSISTANT_CATEGORY_META, AssistantAvatar, formatAssistantTime } from "./AssistantIdentity";
 import { FlashRoomBadge } from "./FlashRoomBadge";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserStatusBubble } from "./UserStatusBubble";
 
-export type SidebarMode = "recent" | "people";
+export type SidebarMode = "recent" | "people" | "assistants";
 
 /** 联系人头像接收的原始投递内容；校验与真正发送由聊天页统一编排。 */
 export type ContactDropPayload = { kind: "files"; files: File[] } | { kind: "text"; text: string };
@@ -112,7 +114,11 @@ interface ChatSidebarProps {
   onOpenMessageAssets: () => void;
   assistantAvailable?: boolean;
   assistantUnreadCount?: number;
-  onOpenAssistants?: () => void;
+  assistants?: AiAssistant[];
+  assistantsLoading?: boolean;
+  selectedAssistantId?: string | null;
+  onSelectAssistant?: (assistantId: string) => void;
+  onCreateAssistant?: () => void;
   aiAvailable?: boolean;
   onOpenKnowledge?: () => void;
   onOpenTeamRadar: () => void;
@@ -160,7 +166,11 @@ export function ChatSidebar({
   onOpenMessageAssets,
   assistantAvailable = false,
   assistantUnreadCount = 0,
-  onOpenAssistants,
+  assistants = [],
+  assistantsLoading = false,
+  selectedAssistantId = null,
+  onSelectAssistant,
+  onCreateAssistant,
   aiAvailable = false,
   onOpenKnowledge,
   onOpenTeamRadar,
@@ -314,8 +324,23 @@ export function ChatSidebar({
     );
   }, [conversations, search]);
 
+  const filteredAssistants = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return assistants.filter(
+      (assistant) =>
+        !keyword ||
+        assistant.name.toLowerCase().includes(keyword) ||
+        assistant.description.toLowerCase().includes(keyword) ||
+        ASSISTANT_CATEGORY_META[assistant.category].label.includes(keyword),
+    );
+  }, [assistants, search]);
+
   const onlineCount = users.filter((item) => item.online).length;
   const unreadTotal = conversations.reduce((sum, item) => sum + item.unreadCount, 0);
+  const changeMode = (nextMode: SidebarMode) => {
+    setSearch("");
+    onModeChange(nextMode);
+  };
 
   return (
     <aside className="sidebar">
@@ -342,26 +367,6 @@ export function ChatSidebar({
           >
             <FolderHeart size={18} />
           </button>
-          {assistantAvailable && onOpenAssistants && (
-            <button
-              className="icon-button assistant-trigger"
-              type="button"
-              onClick={onOpenAssistants}
-              aria-label={
-                assistantUnreadCount > 0
-                  ? `打开智能助理，${assistantUnreadCount} 条任务提醒`
-                  : "打开智能助理"
-              }
-              title="智能助理"
-            >
-              <Bot size={18} />
-              {assistantUnreadCount > 0 && (
-                <b className="assistant-trigger-badge">
-                  {assistantUnreadCount > 9 ? "9+" : assistantUnreadCount}
-                </b>
-              )}
-            </button>
-          )}
           {aiAvailable && onOpenKnowledge && (
             <button
               className="icon-button knowledge-trigger"
@@ -491,10 +496,14 @@ export function ChatSidebar({
       </header>
 
       <div className="sidebar-main">
-        <div className="segmented-control" role="tablist" aria-label="消息导航">
+        <div
+          className={`segmented-control ${assistantAvailable ? "has-assistants" : ""}`}
+          role="tablist"
+          aria-label="主工作区导航"
+        >
           <button
             className={mode === "recent" ? "is-active" : ""}
-            onClick={() => onModeChange("recent")}
+            onClick={() => changeMode("recent")}
             type="button"
             role="tab"
             aria-selected={mode === "recent"}
@@ -507,7 +516,7 @@ export function ChatSidebar({
           </button>
           <button
             className={mode === "people" ? "is-active" : ""}
-            onClick={() => onModeChange("people")}
+            onClick={() => changeMode("people")}
             type="button"
             role="tab"
             aria-selected={mode === "people"}
@@ -515,15 +524,37 @@ export function ChatSidebar({
             <UsersRound size={16} />
             联系人
           </button>
+          {assistantAvailable && (
+            <button
+              className={mode === "assistants" ? "is-active" : ""}
+              onClick={() => changeMode("assistants")}
+              type="button"
+              role="tab"
+              aria-selected={mode === "assistants"}
+            >
+              <Bot size={16} />
+              助理
+              {assistantUnreadCount > 0 && (
+                <b className="segment-badge">
+                  {assistantUnreadCount > 9 ? "9+" : assistantUnreadCount}
+                </b>
+              )}
+            </button>
+          )}
         </div>
 
         <label className="search-box">
           <Search size={16} />
           <input
+            type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder={mode === "recent" ? "搜索会话" : "搜索联系人"}
-            aria-label={mode === "recent" ? "搜索会话" : "搜索联系人"}
+            placeholder={
+              mode === "recent" ? "搜索会话" : mode === "people" ? "搜索联系人" : "搜索智能助理"
+            }
+            aria-label={
+              mode === "recent" ? "搜索会话" : mode === "people" ? "搜索联系人" : "搜索智能助理"
+            }
           />
           {search && (
             <button type="button" onClick={() => setSearch("")} aria-label="清除搜索">
@@ -533,19 +564,79 @@ export function ChatSidebar({
         </label>
 
         <div className="list-heading">
-          <span>{mode === "recent" ? "最近会话" : "全部联系人"}</span>
+          <span>
+            {mode === "recent" ? "最近会话" : mode === "people" ? "全部联系人" : "我的助理"}
+          </span>
           <span className="list-heading-actions">
             <small>
-              {mode === "recent" ? `${filteredConversations.length} 个` : `${onlineCount} 在线`}
+              {mode === "recent"
+                ? `${filteredConversations.length} 个`
+                : mode === "people"
+                  ? `${onlineCount} 在线`
+                  : `${filteredAssistants.length} 个`}
             </small>
-            <button type="button" onClick={onCreateGroup} aria-label="创建群聊" title="创建群聊">
-              <UserRoundPlus size={15} />
-            </button>
+            {mode === "assistants" ? (
+              <button
+                type="button"
+                onClick={onCreateAssistant}
+                aria-label="创建智能助理"
+                title="创建智能助理"
+              >
+                <Plus size={15} />
+              </button>
+            ) : (
+              <button type="button" onClick={onCreateGroup} aria-label="创建群聊" title="创建群聊">
+                <UserRoundPlus size={15} />
+              </button>
+            )}
           </span>
         </div>
 
         <div className="contact-list">
-          {loading ? (
+          {mode === "assistants" ? (
+            assistantsLoading ? (
+              <SidebarSkeleton />
+            ) : filteredAssistants.length > 0 ? (
+              filteredAssistants.map((assistant) => (
+                <button
+                  type="button"
+                  className={`conversation-item assistant-sidebar-item ${selectedAssistantId === assistant.id ? "is-selected" : ""}`}
+                  key={assistant.id}
+                  onClick={() => onSelectAssistant?.(assistant.id)}
+                  aria-current={selectedAssistantId === assistant.id ? "page" : undefined}
+                >
+                  <AssistantAvatar assistant={assistant} />
+                  <span className="conversation-copy">
+                    <span>
+                      <strong>{assistant.name}</strong>
+                      <time>{formatAssistantTime(assistant.lastMessageAt)}</time>
+                    </span>
+                    <span>
+                      <small>
+                        {assistant.messageCount > 0
+                          ? `${assistant.messageCount} 条消息`
+                          : assistant.description ||
+                            ASSISTANT_CATEGORY_META[assistant.category].detail}
+                      </small>
+                    </span>
+                  </span>
+                </button>
+              ))
+            ) : (
+              <div className="list-empty assistant-directory-empty">
+                <span className="empty-icon">
+                  <Bot size={22} />
+                </span>
+                <span>{search ? "没有匹配的助理" : "还没有智能助理"}</span>
+                <small>{search ? "换个关键词试试" : "为常用任务创建一个专属搭档"}</small>
+                {!search && (
+                  <button type="button" onClick={onCreateAssistant}>
+                    创建第一个助理
+                  </button>
+                )}
+              </div>
+            )
+          ) : loading ? (
             <SidebarSkeleton />
           ) : mode === "recent" ? (
             filteredConversations.length > 0 ? (

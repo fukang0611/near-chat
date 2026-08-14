@@ -375,6 +375,7 @@ export function AssistantBrowserPanel({
           className="assistant-browser-permission-save"
           disabled={savingPermission}
           onClick={() => void savePermission()}
+          title="保存浏览器工具授权"
         >
           {savingPermission ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}
           保存授权

@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import type {
@@ -9,7 +10,7 @@ import type {
   AiAssistantTask,
   AiCapabilities,
 } from "../types";
-import { AssistantCenterDialog } from "./AssistantCenterDialog";
+import { AssistantWorkspace } from "./AssistantWorkspace";
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -74,7 +75,40 @@ const workspaceFile: AiAssistantFile = {
   createdAt: "2026-08-14T08:30:00.000Z",
 };
 
-describe("AssistantCenterDialog", () => {
+function AssistantWorkspaceHarness() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  return (
+    <AssistantWorkspace
+      capabilities={capabilities}
+      selectedId={selectedId}
+      onSelectedIdChange={setSelectedId}
+      onDirectoryChange={() => undefined}
+      onMobileBack={() => undefined}
+    />
+  );
+}
+
+function SwitchingAssistantWorkspaceHarness({ assistants }: { assistants: AiAssistant[] }) {
+  const [selectedId, setSelectedId] = useState<string | null>(assistants[0]?.id ?? null);
+  return (
+    <>
+      {assistants.map((item) => (
+        <button type="button" key={item.id} onClick={() => setSelectedId(item.id)}>
+          切换到 {item.name}
+        </button>
+      ))}
+      <AssistantWorkspace
+        capabilities={capabilities}
+        selectedId={selectedId}
+        onSelectedIdChange={setSelectedId}
+        onDirectoryChange={() => undefined}
+        onMobileBack={() => undefined}
+      />
+    </>
+  );
+}
+
+describe("AssistantWorkspace", () => {
   beforeEach(() => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
@@ -88,7 +122,25 @@ describe("AssistantCenterDialog", () => {
     vi.spyOn(api, "aiAssistantTasks").mockResolvedValue({ tasks: [] });
   });
 
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("工作区通知会在阅读时间结束后自动收起", async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.aiAssistants).mockRejectedValueOnce(new Error("浏览器工具授权保存失败"));
+
+    render(<AssistantWorkspaceHarness />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("alert").textContent).toContain("浏览器工具授权保存失败");
+
+    act(() => vi.advanceTimersByTime(6_000));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 
   it("加载独立助理时间线并发送一轮真实 API 对话", async () => {
     const user = userEvent.setup();
@@ -115,7 +167,7 @@ describe("AssistantCenterDialog", () => {
     ];
     vi.spyOn(api, "sendAiAssistantMessage").mockResolvedValue({ messages: resultMessages });
 
-    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
+    render(<AssistantWorkspaceHarness />);
     const composer = await screen.findByPlaceholderText("给 分析搭档 发消息");
     await user.type(composer, "帮我分析这件事");
     await user.click(screen.getByRole("button", { name: "发送给智能助理" }));
@@ -126,6 +178,51 @@ describe("AssistantCenterDialog", () => {
     expect(await screen.findByText("可以，先从已知事实开始。")).toBeTruthy();
   });
 
+  it("作为主工作区渲染并提供移动端返回入口", async () => {
+    const onMobileBack = vi.fn();
+
+    render(
+      <AssistantWorkspace
+        capabilities={capabilities}
+        selectedId={assistant.id}
+        onSelectedIdChange={() => undefined}
+        onDirectoryChange={() => undefined}
+        onMobileBack={onMobileBack}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "智能助理工作区" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "智能助理" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "返回助理列表" }));
+    expect(onMobileBack).toHaveBeenCalledOnce();
+  });
+
+  it("切换助理时分别保留尚未发送的草稿", async () => {
+    const user = userEvent.setup();
+    const planningAssistant: AiAssistant = {
+      ...assistant,
+      id: "12121212-1212-4121-8121-121212121212",
+      name: "计划管家",
+      category: "PLANNING",
+    };
+    vi.mocked(api.aiAssistants).mockResolvedValueOnce({
+      assistants: [assistant, planningAssistant],
+    });
+
+    render(<SwitchingAssistantWorkspaceHarness assistants={[assistant, planningAssistant]} />);
+    const analysisComposer = await screen.findByPlaceholderText("给 分析搭档 发消息");
+    await user.type(analysisComposer, "分析草稿");
+
+    await user.click(screen.getByRole("button", { name: "切换到 计划管家" }));
+    const planningComposer = await screen.findByPlaceholderText("给 计划管家 发消息");
+    await user.type(planningComposer, "规划草稿");
+
+    await user.click(screen.getByRole("button", { name: "切换到 分析搭档" }));
+    expect(
+      ((await screen.findByPlaceholderText("给 分析搭档 发消息")) as HTMLTextAreaElement).value,
+    ).toBe("分析草稿");
+  });
+
   it("无助理时可从预设打开配置并创建", async () => {
     const user = userEvent.setup();
     vi.mocked(api.aiAssistants).mockResolvedValueOnce({ assistants: [] });
@@ -133,8 +230,8 @@ describe("AssistantCenterDialog", () => {
       assistant: { ...assistant, name: "项目分析师" },
     });
 
-    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
-    await user.click(await screen.findByRole("button", { name: /创建第一个助理/ }));
+    render(<AssistantWorkspaceHarness />);
+    await user.click(await screen.findByRole("button", { name: /随身助理/ }));
     const nameInput = screen.getByRole("textbox", { name: "名称" });
     await user.clear(nameInput);
     await user.type(nameInput, "项目分析师");
@@ -176,7 +273,7 @@ describe("AssistantCenterDialog", () => {
     ];
     vi.spyOn(api, "sendAiAssistantMessage").mockResolvedValue({ messages: resultMessages });
 
-    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
+    render(<AssistantWorkspaceHarness />);
     await user.click(await screen.findByRole("button", { name: "引用助理文件" }));
     await user.click(await screen.findByText("项目计划.md"));
     await user.type(screen.getByPlaceholderText("给 分析搭档 发消息"), "提炼计划中的负责人");
@@ -218,7 +315,7 @@ describe("AssistantCenterDialog", () => {
     vi.mocked(api.aiAssistantFiles).mockResolvedValueOnce({ files: [workspaceFile] });
     vi.spyOn(api, "saveAiAssistantMessageFile").mockResolvedValue({ file: generatedFile });
 
-    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
+    render(<AssistantWorkspaceHarness />);
     await screen.findByText(reply.content);
     await user.click(screen.getByRole("button", { name: "将这条回复保存为文件" }));
     const nameInput = screen.getByRole("textbox", { name: "文件名" });
@@ -263,7 +360,7 @@ describe("AssistantCenterDialog", () => {
     };
     vi.spyOn(api, "createAiAssistantTask").mockResolvedValue({ task });
 
-    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
+    render(<AssistantWorkspaceHarness />);
     await user.click(await screen.findByRole("tab", { name: "任务" }));
     await user.click(await screen.findByRole("button", { name: /创建第一个任务/ }));
     await user.type(screen.getByRole("textbox", { name: "任务名称" }), task.title);

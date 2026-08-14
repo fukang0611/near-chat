@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { User } from "../types";
+import type { AiAssistant, User } from "../types";
 import { ChatSidebar } from "./ChatSidebar";
 
 const currentUser: User = {
@@ -37,6 +37,22 @@ const peer: User = {
   avatarUrl: null,
   online: true,
   role: "USER",
+};
+
+const assistant: AiAssistant = {
+  id: "assistant-analysis",
+  name: "分析搭档",
+  description: "帮我理清复杂信息",
+  category: "ANALYSIS",
+  instructions: "先归纳事实，再给出判断。",
+  avatarColor: "#2F9D83",
+  modelId: null,
+  model: null,
+  knowledgeBaseIds: [],
+  messageCount: 3,
+  lastMessageAt: "2026-08-14T08:00:00.000Z",
+  createdAt: "2026-08-14T08:00:00.000Z",
+  updatedAt: "2026-08-14T08:00:00.000Z",
 };
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof ChatSidebar>> = {}) {
@@ -190,12 +206,38 @@ describe("ChatSidebar", () => {
   });
 
   it("个人助理能力就绪后显示独立入口", async () => {
-    const onOpenAssistants = vi.fn();
-    renderSidebar({ assistantAvailable: true, onOpenAssistants });
+    const onModeChange = vi.fn();
+    renderSidebar({ assistantAvailable: true, onModeChange });
 
-    await userEvent.click(screen.getByRole("button", { name: "打开智能助理" }));
+    await userEvent.click(screen.getByRole("tab", { name: "助理" }));
 
-    expect(onOpenAssistants).toHaveBeenCalledOnce();
+    expect(onModeChange).toHaveBeenCalledWith("assistants");
+  });
+
+  it("助理目录支持搜索、选中和创建", async () => {
+    const user = userEvent.setup();
+    const onSelectAssistant = vi.fn();
+    const onCreateAssistant = vi.fn();
+    renderSidebar({
+      assistantAvailable: true,
+      assistants: [assistant],
+      selectedAssistantId: assistant.id,
+      mode: "assistants",
+      onSelectAssistant,
+      onCreateAssistant,
+    });
+
+    const assistantItem = screen.getByRole("button", { name: /分析搭档/ });
+    expect(assistantItem.getAttribute("aria-current")).toBe("page");
+    await user.click(assistantItem);
+    expect(onSelectAssistant).toHaveBeenCalledWith(assistant.id);
+
+    await user.type(screen.getByRole("searchbox", { name: "搜索智能助理" }), "不存在");
+    expect(screen.getByText("没有匹配的助理")).toBeTruthy();
+
+    await user.clear(screen.getByRole("searchbox", { name: "搜索智能助理" }));
+    await user.click(screen.getByRole("button", { name: "创建智能助理" }));
+    expect(onCreateAssistant).toHaveBeenCalledOnce();
   });
 
   it("拖入文本时即时标记联系人，松开后交给聊天页投递", () => {
