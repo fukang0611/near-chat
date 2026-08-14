@@ -8,6 +8,7 @@ import type {
   AiAssistantCategory,
   AiAssistantFile,
   AiAssistantMessage,
+  AiAssistantReminder,
   AiAssistantTask,
   AiAssistantTaskSchedule,
   AiAssistantThread,
@@ -100,6 +101,13 @@ export interface SaveAiAssistantTaskInput {
   /** 自动任务仅支持无副作用的页面读取和截图。 */
   browserAction: "NONE" | "READ" | "SCREENSHOT";
   browserUrl: string | null;
+}
+
+export interface SaveAiAssistantReminderInput {
+  threadId: string;
+  title: string;
+  note: string;
+  scheduledAt: string;
 }
 
 export interface AdminAiMutationResponse {
@@ -375,6 +383,28 @@ export const api = {
     request<{ tasks: AiAssistantTask[] }>(
       `/api/ai/assistants/${assistantId}/tasks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`,
     ),
+  aiAssistantSchedule: (assistantId: string) =>
+    request<{ tasks: AiAssistantTask[]; reminders: AiAssistantReminder[] }>(
+      `/api/ai/assistants/${assistantId}/schedule`,
+    ),
+  createAiAssistantReminder: (assistantId: string, input: SaveAiAssistantReminderInput) =>
+    request<{ reminder: AiAssistantReminder }>(`/api/ai/assistants/${assistantId}/reminders`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateAiAssistantReminder: (
+    assistantId: string,
+    reminderId: string,
+    input: Partial<Omit<SaveAiAssistantReminderInput, "threadId">> & { completed?: boolean },
+  ) =>
+    request<{ reminder: AiAssistantReminder }>(
+      `/api/ai/assistants/${assistantId}/reminders/${reminderId}`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  deleteAiAssistantReminder: (assistantId: string, reminderId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/reminders/${reminderId}`, {
+      method: "DELETE",
+    }),
   createAiAssistantTask: (assistantId: string, input: SaveAiAssistantTaskInput) =>
     request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks`, {
       method: "POST",

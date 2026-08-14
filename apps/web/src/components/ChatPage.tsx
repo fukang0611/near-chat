@@ -23,6 +23,7 @@ import {
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type {
+  AiAssistantReminderEvent,
   AiAssistantTaskEvent,
   AiCapabilities,
   Attachment,
@@ -199,6 +200,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     assistantId: string;
     threadId: string | null;
     messageId: string | null;
+    workspaceMode: "chat" | "schedule";
   } | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
   const applyAiCapabilities = useCallback((capabilities: AiCapabilities) => {
@@ -359,7 +361,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           const [, assistantId, messageId] = conversationId.split(":");
           if (assistantId) {
             setSelectedAssistantId(assistantId);
-            setAssistantTarget({ assistantId, threadId: null, messageId: messageId || null });
+            setAssistantTarget({
+              assistantId,
+              threadId: null,
+              messageId: messageId || null,
+              workspaceMode: "chat",
+            });
             setAssistantUnreadCount(0);
             setAssistantDetailOpen(true);
             setSidebarMode("assistants");
@@ -370,7 +377,28 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           const [, assistantId, threadId] = conversationId.split(":");
           if (assistantId && threadId) {
             setSelectedAssistantId(assistantId);
-            setAssistantTarget({ assistantId, threadId, messageId: null });
+            setAssistantTarget({
+              assistantId,
+              threadId,
+              messageId: null,
+              workspaceMode: "chat",
+            });
+            setAssistantUnreadCount(0);
+            setAssistantDetailOpen(true);
+            setSidebarMode("assistants");
+          }
+          return;
+        }
+        if (conversationId.startsWith("assistant-schedule:")) {
+          const [, assistantId, threadId] = conversationId.split(":");
+          if (assistantId && threadId) {
+            setSelectedAssistantId(assistantId);
+            setAssistantTarget({
+              assistantId,
+              threadId,
+              messageId: null,
+              workspaceMode: "schedule",
+            });
             setAssistantUnreadCount(0);
             setAssistantDetailOpen(true);
             setSidebarMode("assistants");
@@ -687,6 +715,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               assistantId: event.assistantId,
               threadId: event.threadId,
               messageId: event.messageId,
+              workspaceMode: "chat",
             });
             setAssistantUnreadCount(0);
             setAssistantDetailOpen(true);
@@ -695,6 +724,53 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           };
         } catch {
           // 浏览器或操作系统临时拒绝通知时，站内角标和提示仍然可用。
+        }
+      }
+    },
+    onAssistantReminderDue: (event: AiAssistantReminderEvent) => {
+      setAssistantRefreshVersion((current) => current + 1);
+      const activelyViewingAssistants =
+        sidebarMode === "assistants" && document.visibilityState === "visible";
+      if (!activelyViewingAssistants) {
+        setAssistantUnreadCount((current) => Math.min(99, current + 1));
+      }
+      notify(`提醒：${event.title}`, "success");
+
+      const preferences = notificationPreferencesRef.current;
+      if (!activelyViewingAssistants && preferences.sound) {
+        void playMessageSound().catch(() => undefined);
+      }
+      if (!preferences.desktop || activelyViewingAssistants) return;
+
+      const title = `${event.assistantName} · 提醒到期`;
+      const body = event.note ? `${event.title}：${event.note}` : event.title;
+      const target = `assistant-schedule:${event.assistantId}:${event.threadId}`;
+      if (window.nearChatDesktop) {
+        void window.nearChatDesktop
+          .showNotification({ title, body, conversationId: target })
+          .catch(() => undefined);
+      } else if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          const notification = new Notification(title, {
+            body,
+            tag: `near-chat:assistant-reminder:${event.reminderId}`,
+          });
+          notification.onclick = () => {
+            window.focus();
+            setSelectedAssistantId(event.assistantId);
+            setAssistantTarget({
+              assistantId: event.assistantId,
+              threadId: event.threadId,
+              messageId: null,
+              workspaceMode: "schedule",
+            });
+            setAssistantUnreadCount(0);
+            setAssistantDetailOpen(true);
+            setSidebarMode("assistants");
+            notification.close();
+          };
+        } catch {
+          // 权限或系统服务不可用时，到期状态仍保留在日程中心。
         }
       }
     },
@@ -1670,6 +1746,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           }
           initialThreadId={
             assistantTarget?.assistantId === selectedAssistantId ? assistantTarget.threadId : null
+          }
+          initialWorkspaceMode={
+            assistantTarget?.assistantId === selectedAssistantId
+              ? assistantTarget.workspaceMode
+              : null
           }
           refreshVersion={assistantRefreshVersion}
           createRequestVersion={assistantCreateRequestVersion}

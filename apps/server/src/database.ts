@@ -531,6 +531,22 @@ CREATE TABLE IF NOT EXISTS ai_assistant_task_runs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 用户提醒与模型任务共享助理和线程导航，但本身不调用模型。notified_at 只表示
+-- 到期事件已送达在线客户端；推迟后会清空，以便在新的时间点再次提醒。
+CREATE TABLE IF NOT EXISTS ai_assistant_reminders (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  thread_id UUID NOT NULL REFERENCES ai_assistant_threads(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(80) NOT NULL,
+  note VARCHAR(500) NOT NULL DEFAULT '',
+  scheduled_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  notified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 ALTER TABLE ai_assistant_task_runs ADD COLUMN IF NOT EXISTS browser_run_id UUID;
 ALTER TABLE ai_assistant_task_runs
   ADD COLUMN IF NOT EXISTS tool_summary JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -686,6 +702,9 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistant_threads_directory
   ON ai_assistant_threads(assistant_id, archived, updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_thread_timeline
   ON ai_assistant_messages(thread_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_reminders_due
+  ON ai_assistant_reminders(owner_id, scheduled_at, id)
+  WHERE completed_at IS NULL AND notified_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_assistant_created
   ON ai_assistant_files(assistant_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_attachment

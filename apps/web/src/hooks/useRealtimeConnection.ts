@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { websocketUrl } from "../api";
 import type {
+  AiAssistantReminderEvent,
   AiAssistantTaskEvent,
   AiCapabilities,
   Message,
@@ -22,6 +23,7 @@ interface RealtimeHandlers {
   onReceiptChanged: (receipts: ReceiptChange[]) => void;
   onNudgeReceived: (nudge: NudgeEvent) => void;
   onAssistantTaskCompleted?: (event: AiAssistantTaskEvent) => void;
+  onAssistantReminderDue?: (event: AiAssistantReminderEvent) => void;
   onAiCapabilitiesChanged?: (capabilities: AiCapabilities) => void;
 }
 
@@ -36,6 +38,7 @@ type RealtimeEvent =
   | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } }
   | { type: "ai.capabilities.changed"; payload: { capabilities: AiCapabilities } }
   | { type: "assistant.task.completed"; payload: { task: AiAssistantTaskEvent } }
+  | { type: "assistant.reminder.due"; payload: { reminder: AiAssistantReminderEvent } }
   | { type: "nudge.received"; payload: { nudge: NudgeEvent } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -154,6 +157,20 @@ function isAssistantTaskEvent(value: unknown): value is AiAssistantTaskEvent {
   );
 }
 
+function isAssistantReminderEvent(value: unknown): value is AiAssistantReminderEvent {
+  return (
+    isRecord(value) &&
+    typeof value.reminderId === "string" &&
+    typeof value.assistantId === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.assistantName === "string" &&
+    typeof value.title === "string" &&
+    typeof value.note === "string" &&
+    typeof value.scheduledAt === "string" &&
+    typeof value.createdAt === "string"
+  );
+}
+
 function isAiCapabilities(value: unknown): value is AiCapabilities {
   if (!isRecord(value) || !isRecord(value.features) || !isRecord(value.provider)) return false;
   return (
@@ -232,6 +249,10 @@ export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
         return isAssistantTaskEvent(payload)
           ? { type: event.type, payload: { task: payload } }
           : null;
+      case "assistant.reminder.due":
+        return isAssistantReminderEvent(payload)
+          ? { type: event.type, payload: { reminder: payload } }
+          : null;
       default:
         return null;
     }
@@ -301,6 +322,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "assistant.task.completed":
             current.onAssistantTaskCompleted?.(event.payload.task);
+            break;
+          case "assistant.reminder.due":
+            current.onAssistantReminderDue?.(event.payload.reminder);
             break;
         }
       };

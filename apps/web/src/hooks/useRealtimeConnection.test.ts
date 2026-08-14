@@ -105,4 +105,21 @@ describe("parseRealtimeEvent", () => {
       parseRealtimeEvent(JSON.stringify({ type: "assistant.task.completed", payload: task })),
     ).toEqual({ type: "assistant.task.completed", payload: { task } });
   });
+
+  it("解析助理提醒到期事件", () => {
+    const reminder = {
+      reminderId: "reminder-one",
+      assistantId: "assistant-one",
+      threadId: "thread-one",
+      assistantName: "计划管家",
+      title: "准备周会",
+      note: "带上项目进展",
+      scheduledAt: "2026-08-15T10:00:00.000Z",
+      createdAt: "2026-08-15T10:00:00.100Z",
+    };
+
+    expect(
+      parseRealtimeEvent(JSON.stringify({ type: "assistant.reminder.due", payload: reminder })),
+    ).toEqual({ type: "assistant.reminder.due", payload: { reminder } });
+  });
 });

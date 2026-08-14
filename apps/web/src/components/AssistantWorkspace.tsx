@@ -2,6 +2,7 @@ import {
   ArchiveRestore,
   ArrowUp,
   BrainCircuit,
+  CalendarDays,
   CalendarClock,
   Check,
   ChevronLeft,
@@ -47,6 +48,7 @@ import {
 } from "./AssistantIdentity";
 import { AssistantTasksPanel } from "./AssistantTasksPanel";
 import { AssistantThreadBar } from "./AssistantThreadBar";
+import { AssistantSchedulePanel } from "./AssistantSchedulePanel";
 
 export interface AssistantDirectorySnapshot {
   assistants: AiAssistant[];
@@ -61,6 +63,7 @@ interface AssistantWorkspaceProps {
   onMobileBack: () => void;
   initialMessageId?: string | null;
   initialThreadId?: string | null;
+  initialWorkspaceMode?: "chat" | "schedule" | null;
   refreshVersion?: number;
   createRequestVersion?: number;
 }
@@ -174,6 +177,7 @@ export function AssistantWorkspace({
   onMobileBack,
   initialMessageId = null,
   initialThreadId = null,
+  initialWorkspaceMode = null,
   refreshVersion = 0,
   createRequestVersion = 0,
 }: AssistantWorkspaceProps) {
@@ -194,9 +198,9 @@ export function AssistantWorkspace({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [sendingText, setSendingText] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks" | "files" | "browser">(
-    "chat",
-  );
+  const [workspaceMode, setWorkspaceMode] = useState<
+    "chat" | "tasks" | "schedule" | "files" | "browser"
+  >("chat");
   const [assistantFiles, setAssistantFiles] = useState<AiAssistantFile[]>([]);
   const [browserFocusRunId, setBrowserFocusRunId] = useState<string | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -361,7 +365,7 @@ export function AssistantWorkspace({
   useEffect(() => {
     if ((!initialMessageId && !initialThreadId) || !selectedId) return () => undefined;
     let active = true;
-    setWorkspaceMode("chat");
+    setWorkspaceMode(initialWorkspaceMode ?? "chat");
     const location = initialThreadId
       ? Promise.resolve({ threadId: initialThreadId })
       : api.aiAssistantMessageLocation(selectedId, initialMessageId!);
@@ -378,7 +382,7 @@ export function AssistantWorkspace({
     return () => {
       active = false;
     };
-  }, [initialMessageId, initialThreadId, selectedId]);
+  }, [initialMessageId, initialThreadId, initialWorkspaceMode, selectedId]);
 
   useEffect(() => {
     if (selectedThread?.archived) setShowArchivedThreads(true);
@@ -926,6 +930,16 @@ export function AssistantWorkspace({
                     </button>
                     <button
                       type="button"
+                      className={workspaceMode === "schedule" ? "is-active" : ""}
+                      role="tab"
+                      aria-selected={workspaceMode === "schedule"}
+                      onClick={() => setWorkspaceMode("schedule")}
+                    >
+                      <CalendarDays size={13} />
+                      日程
+                    </button>
+                    <button
+                      type="button"
                       className={workspaceMode === "files" ? "is-active" : ""}
                       role="tab"
                       aria-selected={workspaceMode === "files"}
@@ -1002,6 +1016,22 @@ export function AssistantWorkspace({
                     setWorkspaceMode("browser");
                   }}
                   onOpenFiles={() => setWorkspaceMode("files")}
+                />
+              ) : workspaceMode === "schedule" ? (
+                <AssistantSchedulePanel
+                  assistant={selectedAssistant}
+                  threads={threads}
+                  selectedThreadId={selectedThread.id}
+                  refreshVersion={refreshVersion}
+                  onNotice={showNotice}
+                  onOpenThread={(threadId) => {
+                    selectThread(threadId);
+                    setWorkspaceMode("chat");
+                  }}
+                  onOpenTask={(threadId) => {
+                    selectThread(threadId);
+                    setWorkspaceMode("tasks");
+                  }}
                 />
               ) : workspaceMode === "files" ? (
                 <AssistantFilesPanel

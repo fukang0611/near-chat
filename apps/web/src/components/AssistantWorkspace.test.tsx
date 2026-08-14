@@ -147,6 +147,7 @@ describe("AssistantWorkspace", () => {
     vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
     vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
     vi.spyOn(api, "aiAssistantTasks").mockResolvedValue({ tasks: [] });
+    vi.spyOn(api, "aiAssistantSchedule").mockResolvedValue({ tasks: [], reminders: [] });
     vi.spyOn(api, "aiAssistantBrowserPermission").mockResolvedValue({
       permission: {
         assistantId: assistant.id,
@@ -239,6 +240,16 @@ describe("AssistantWorkspace", () => {
     expect(screen.queryByRole("dialog", { name: "智能助理" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "返回助理列表" }));
     expect(onMobileBack).toHaveBeenCalledOnce();
+  });
+
+  it("从主导航进入助理日程中心", async () => {
+    const user = userEvent.setup();
+
+    render(<AssistantWorkspaceHarness />);
+    await user.click(await screen.findByRole("tab", { name: "日程" }));
+
+    expect(await screen.findByRole("region", { name: "日程与提醒中心" })).toBeTruthy();
+    expect(api.aiAssistantSchedule).toHaveBeenCalledWith(assistant.id);
   });
 
   it("切换助理时分别保留尚未发送的草稿", async () => {

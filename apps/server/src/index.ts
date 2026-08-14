@@ -7,6 +7,7 @@ import {
 import { initializeAiRuntime, shutdownAiRuntime } from "./ai/ai-runtime.js";
 import { startAttachmentCleanup } from "./attachment-cleanup.js";
 import { startAssistantBrowserSessionCleanup } from "./assistant/assistant-browser-service.js";
+import { startAssistantReminderWorker } from "./assistant/assistant-reminder-worker.js";
 import { startAssistantTaskWorker } from "./assistant/assistant-task-worker.js";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
@@ -36,6 +37,7 @@ async function main() {
 
   const realtime = new RealtimeHub();
   const stopAssistantTaskWorker = startAssistantTaskWorker(realtime);
+  const stopAssistantReminderWorker = startAssistantReminderWorker(realtime);
   realtime.onUserOnline(async (userId) => {
     const changes = await markPendingMessagesDelivered(userId);
     await broadcastReceiptChanges(realtime, changes);
@@ -56,6 +58,7 @@ async function main() {
     stopAttachmentCleanup();
     stopKnowledgeIndexWorker();
     stopAssistantTaskWorker();
+    stopAssistantReminderWorker();
     stopAssistantBrowserSessionCleanup();
     realtime.close();
     server.close(async () => {

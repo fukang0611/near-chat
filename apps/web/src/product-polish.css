@@ -9525,6 +9525,653 @@ body,
   }
 }
 
+/* 助理日程与提醒 ------------------------------------------------------- */
+.assistant-schedule-panel {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 92% 2%, rgba(230, 164, 67, 0.08), transparent 28%),
+    rgba(248, 248, 250, 0.72);
+}
+
+.assistant-schedule-heading {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.assistant-schedule-heading > div,
+.assistant-schedule-heading > div:first-child > span:last-child,
+.assistant-schedule-heading > div:last-child,
+.assistant-schedule-summary,
+.assistant-schedule-view-switch {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.assistant-schedule-heading > div:first-child {
+  gap: 10px;
+}
+
+.assistant-schedule-heading > div:first-child > span:last-child {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assistant-schedule-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.assistant-schedule-heading small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.assistant-schedule-mark {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgba(207, 143, 48, 0.14);
+  border-radius: 12px;
+  color: #b67721;
+  background: rgba(255, 244, 221, 0.9);
+}
+
+.assistant-schedule-heading > div:last-child {
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.assistant-schedule-summary {
+  gap: 4px;
+}
+
+.assistant-schedule-summary b,
+.assistant-schedule-summary i {
+  padding: 4px 6px;
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 580;
+  white-space: nowrap;
+}
+
+.assistant-schedule-summary b {
+  color: #b64b59;
+  background: rgba(212, 84, 100, 0.08);
+}
+
+.assistant-schedule-view-switch {
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.assistant-schedule-view-switch button,
+.assistant-schedule-create {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.assistant-schedule-view-switch button {
+  padding: 0 7px;
+}
+
+.assistant-schedule-view-switch button.is-active {
+  color: var(--accent);
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(40, 41, 50, 0.07);
+}
+
+.assistant-schedule-create {
+  padding: 0 10px;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 7px 16px rgba(103, 87, 232, 0.16);
+}
+
+.assistant-reminder-editor {
+  display: grid;
+  grid-template-columns:
+    minmax(140px, 1.1fr) minmax(175px, 0.9fr) minmax(130px, 0.8fr) minmax(190px, 1.2fr)
+    auto;
+  align-items: end;
+  gap: 8px;
+  padding: 10px 18px 12px;
+  border-bottom: 1px solid rgba(103, 87, 232, 0.12);
+  background: rgba(246, 244, 255, 0.76);
+  animation: assistant-materialize 160ms ease-out both;
+}
+
+.assistant-reminder-editor > header {
+  display: none;
+}
+
+.assistant-reminder-editor label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.assistant-reminder-editor label > span {
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.assistant-reminder-editor label > span small {
+  color: var(--faint);
+  font-size: 7px;
+}
+
+.assistant-reminder-editor input,
+.assistant-reminder-editor select {
+  width: 100%;
+  height: 34px;
+  min-width: 0;
+  box-sizing: border-box;
+  outline: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 9px;
+}
+
+.assistant-reminder-editor input {
+  padding: 0 9px;
+}
+
+.assistant-reminder-editor select {
+  padding: 0 7px;
+}
+
+.assistant-reminder-editor input:focus,
+.assistant-reminder-editor select:focus {
+  border-color: rgba(103, 87, 232, 0.46);
+  box-shadow: 0 0 0 3px rgba(103, 87, 232, 0.07);
+}
+
+.assistant-reminder-editor > button[type="submit"] {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.assistant-reminder-editor > button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.assistant-schedule-calendar {
+  margin: 12px 18px 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 10px 28px rgba(38, 40, 50, 0.04);
+}
+
+.assistant-schedule-calendar > header {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 28px 28px minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+
+.assistant-schedule-calendar > header strong {
+  grid-column: 3;
+  grid-row: 1;
+  padding-left: 5px;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.assistant-schedule-calendar > header button {
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.assistant-schedule-calendar > header button:nth-of-type(1) {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.assistant-schedule-calendar > header button:nth-of-type(2) {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.assistant-schedule-calendar > header button:last-child {
+  grid-column: 4;
+  padding: 0 9px;
+}
+
+.assistant-calendar-weekdays,
+.assistant-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.assistant-calendar-weekdays span {
+  padding: 4px 0 5px;
+  color: var(--faint);
+  font-size: 7px;
+  text-align: center;
+}
+
+.assistant-calendar-grid {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.assistant-calendar-grid > button {
+  min-width: 0;
+  min-height: 44px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+}
+
+.assistant-calendar-grid > button:nth-child(7n) {
+  border-right: 0;
+}
+
+.assistant-calendar-grid > button:nth-last-child(-n + 7) {
+  border-bottom: 0;
+}
+
+.assistant-calendar-grid > button:hover,
+.assistant-calendar-grid > button.is-selected {
+  background: rgba(103, 87, 232, 0.065);
+}
+
+.assistant-calendar-grid > button.is-selected {
+  box-shadow: inset 0 0 0 1px rgba(103, 87, 232, 0.32);
+}
+
+.assistant-calendar-grid > button.is-outside {
+  color: var(--faint);
+  background: rgba(246, 246, 248, 0.6);
+}
+
+.assistant-calendar-grid > button > span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.assistant-calendar-grid > button.is-today > span {
+  color: #fff;
+  background: var(--accent);
+}
+
+.assistant-calendar-grid > button > i {
+  height: 4px;
+  display: flex;
+  gap: 2px;
+}
+
+.assistant-calendar-grid > button > i b {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.assistant-calendar-grid > button > i b.is-reminder {
+  background: #d79230;
+}
+
+.assistant-calendar-grid > button > i b.is-due {
+  background: var(--danger);
+}
+
+.assistant-calendar-grid > button > i b.is-completed,
+.assistant-calendar-grid > button > i b.is-paused {
+  background: var(--faint);
+}
+
+.assistant-calendar-grid > button > small {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  color: var(--faint);
+  font-size: 6px;
+}
+
+.assistant-schedule-list {
+  min-height: 0;
+  overflow: auto;
+  flex: 1;
+  padding: 14px clamp(18px, 4vw, 54px) 22px;
+}
+
+.assistant-schedule-day {
+  width: min(820px, 100%);
+  margin: 0 auto 18px;
+}
+
+.assistant-schedule-day > header {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.assistant-schedule-day > header strong {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.assistant-schedule-day > header span {
+  color: var(--faint);
+  font-size: 7px;
+}
+
+.assistant-schedule-day > div {
+  overflow: visible;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 8px 24px rgba(38, 40, 50, 0.035);
+}
+
+.assistant-schedule-entry {
+  min-height: 76px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--line);
+}
+
+.assistant-schedule-entry:last-child {
+  border-bottom: 0;
+}
+
+.assistant-schedule-entry.is-completed {
+  opacity: 0.64;
+}
+
+.assistant-schedule-entry.is-due::before {
+  width: 3px;
+  position: absolute;
+  top: 13px;
+  bottom: 13px;
+  left: -1px;
+  border-radius: 0 4px 4px 0;
+  background: var(--danger);
+  content: "";
+}
+
+.assistant-schedule-entry-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-schedule-entry.is-reminder .assistant-schedule-entry-icon {
+  color: #b87822;
+  background: rgba(215, 153, 53, 0.1);
+}
+
+.assistant-schedule-entry-copy {
+  min-width: 0;
+}
+
+.assistant-schedule-entry-copy > header,
+.assistant-schedule-entry-copy > footer,
+.assistant-schedule-entry-actions {
+  display: flex;
+  align-items: center;
+}
+
+.assistant-schedule-entry-copy > header {
+  gap: 7px;
+}
+
+.assistant-schedule-entry-copy > header strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-schedule-entry-copy > header span {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  font-size: 6px;
+}
+
+.assistant-schedule-entry-copy > p {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-schedule-entry-copy > footer {
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.assistant-schedule-entry-copy > footer span,
+.assistant-schedule-entry-copy > footer button,
+.assistant-schedule-entry-copy > footer b {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--faint);
+  background: var(--surface-soft);
+  font-size: 7px;
+  font-weight: 560;
+  text-decoration: none;
+}
+
+.assistant-schedule-entry-copy > footer button {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.assistant-schedule-entry-copy > footer b {
+  color: var(--danger);
+  background: rgba(212, 84, 100, 0.08);
+}
+
+.assistant-schedule-entry.is-completed .assistant-schedule-entry-copy > footer b,
+.assistant-schedule-entry.is-paused .assistant-schedule-entry-copy > footer b {
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.assistant-schedule-entry-actions {
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.assistant-schedule-entry-actions > button,
+.assistant-reminder-snooze > button {
+  width: 29px;
+  height: 29px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.assistant-schedule-entry-actions > button:hover:not(:disabled),
+.assistant-reminder-snooze > button:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-schedule-entry-actions button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.assistant-reminder-snooze {
+  position: relative;
+}
+
+.assistant-reminder-snooze > span {
+  width: max-content;
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 5px);
+  right: 0;
+  display: none;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 12px 30px rgba(35, 36, 46, 0.14);
+}
+
+.assistant-reminder-snooze:hover > span,
+.assistant-reminder-snooze:focus-within > span {
+  display: flex;
+}
+
+.assistant-reminder-snooze > span button,
+.assistant-reminder-delete-confirm button {
+  min-height: 25px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--ink-soft);
+  background: var(--surface-soft);
+  font-size: 7px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.assistant-reminder-delete-confirm {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.assistant-reminder-delete-confirm button:last-child {
+  color: #fff;
+  background: var(--danger);
+}
+
+.assistant-schedule-empty {
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.assistant-schedule-empty > span {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: var(--online);
+  background: rgba(46, 175, 125, 0.09);
+}
+
+.assistant-schedule-empty strong {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.assistant-schedule-empty small {
+  color: var(--faint);
+  font-size: 8px;
+}
+
 .assistant-task-workspace {
   min-height: 0;
   overflow: hidden;
@@ -11144,6 +11791,8 @@ body,
 }
 
 :root[data-theme="dark"] .assistant-view-switch,
+:root[data-theme="dark"] .assistant-schedule-panel,
+:root[data-theme="dark"] .assistant-schedule-heading,
 :root[data-theme="dark"] .assistant-task-workspace,
 :root[data-theme="dark"] .assistant-files-panel,
 :root[data-theme="dark"] .assistant-files-toolbar,
@@ -11155,6 +11804,42 @@ body,
 :root[data-theme="dark"] .assistant-task-editor > header button,
 :root[data-theme="dark"] .assistant-task-editor > footer button {
   background: rgba(255, 255, 255, 0.035);
+}
+
+:root[data-theme="dark"] .assistant-schedule-panel {
+  background:
+    radial-gradient(circle at 92% 2%, rgba(223, 159, 70, 0.07), transparent 28%),
+    rgba(29, 30, 36, 0.88);
+}
+
+:root[data-theme="dark"] .assistant-schedule-mark {
+  border-color: rgba(223, 159, 70, 0.14);
+  color: #d2a25d;
+  background: rgba(223, 159, 70, 0.08);
+}
+
+:root[data-theme="dark"] .assistant-schedule-view-switch button.is-active,
+:root[data-theme="dark"] .assistant-reminder-editor,
+:root[data-theme="dark"] .assistant-schedule-calendar,
+:root[data-theme="dark"] .assistant-schedule-day > div,
+:root[data-theme="dark"] .assistant-reminder-snooze > span {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(40, 41, 49, 0.96);
+}
+
+:root[data-theme="dark"] .assistant-reminder-editor input,
+:root[data-theme="dark"] .assistant-reminder-editor select {
+  border-color: rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+:root[data-theme="dark"] .assistant-calendar-grid > button.is-outside {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+:root[data-theme="dark"] .assistant-calendar-grid > button:hover,
+:root[data-theme="dark"] .assistant-calendar-grid > button.is-selected {
+  background: rgba(125, 109, 245, 0.12);
 }
 
 :root[data-theme="dark"] .assistant-view-switch button.is-active,
@@ -11278,6 +11963,43 @@ body,
 }
 
 @media (max-width: 900px) {
+  .assistant-reminder-editor {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .assistant-reminder-editor > header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--ink-soft);
+    font-size: 9px;
+    font-weight: 650;
+  }
+
+  .assistant-reminder-editor > header > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .assistant-reminder-editor > header button {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: var(--surface-soft);
+    cursor: pointer;
+  }
+
+  .assistant-reminder-editor > button[type="submit"] {
+    grid-column: 2;
+    justify-self: end;
+  }
+
   .assistant-browser-permission {
     grid-template-columns: minmax(150px, 0.7fr) minmax(280px, 1.4fr);
   }
@@ -11290,6 +12012,55 @@ body,
 }
 
 @media (max-width: 760px) {
+  .assistant-schedule-heading {
+    min-height: 62px;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+
+  .assistant-schedule-heading > div:first-child {
+    gap: 7px;
+  }
+
+  .assistant-schedule-mark {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+  }
+
+  .assistant-schedule-heading small,
+  .assistant-schedule-summary i:last-child {
+    display: none;
+  }
+
+  .assistant-schedule-heading > div:last-child {
+    gap: 4px;
+  }
+
+  .assistant-schedule-calendar {
+    margin: 9px 10px 0;
+  }
+
+  .assistant-schedule-list {
+    padding: 10px 10px 18px;
+  }
+
+  .assistant-schedule-entry {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .assistant-schedule-entry-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+
+  .assistant-schedule-entry-actions {
+    grid-column: 2;
+    justify-content: flex-end;
+  }
+
   .assistant-notice {
     top: 72px;
     right: 10px;
@@ -11358,6 +12129,74 @@ body,
 }
 
 @media (max-width: 560px) {
+  .assistant-schedule-heading > div:first-child > span:last-child,
+  .assistant-schedule-summary {
+    display: none;
+  }
+
+  .assistant-schedule-view-switch button,
+  .assistant-schedule-create {
+    width: 30px;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .assistant-reminder-editor {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .assistant-reminder-editor > header,
+  .assistant-reminder-editor > button[type="submit"] {
+    grid-column: 1;
+  }
+
+  .assistant-reminder-editor > button[type="submit"] {
+    width: 100%;
+  }
+
+  .assistant-schedule-calendar {
+    margin: 8px 8px 0;
+    padding: 6px;
+    border-radius: 12px;
+  }
+
+  .assistant-schedule-calendar > header {
+    grid-template-columns: 28px minmax(105px, 1fr) 28px auto;
+  }
+
+  .assistant-schedule-calendar > header strong {
+    grid-column: 2;
+  }
+
+  .assistant-schedule-calendar > header button:nth-of-type(2) {
+    grid-column: 3;
+  }
+
+  .assistant-calendar-grid > button {
+    min-height: 38px;
+    padding: 4px 3px;
+  }
+
+  .assistant-calendar-weekdays span,
+  .assistant-calendar-grid > button > span {
+    font-size: 7px;
+  }
+
+  .assistant-schedule-list {
+    padding: 8px 8px 16px;
+  }
+
+  .assistant-schedule-day {
+    margin-bottom: 12px;
+  }
+
+  .assistant-schedule-entry-copy > footer span,
+  .assistant-schedule-entry-copy > footer button,
+  .assistant-schedule-entry-copy > footer b {
+    padding: 0 5px;
+  }
+
   .assistant-view-switch {
     max-width: min(100%, 250px);
     overflow-x: auto;

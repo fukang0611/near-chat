@@ -462,6 +462,35 @@ export interface AiAssistantTaskEvent {
   createdAt: string;
 }
 
+export type AiAssistantReminderStatus = "PENDING" | "DUE" | "COMPLETED";
+
+export interface AiAssistantReminder {
+  id: string;
+  assistantId: string;
+  threadId: string;
+  threadTitle: string;
+  threadArchived: boolean;
+  title: string;
+  note: string;
+  scheduledAt: string;
+  status: AiAssistantReminderStatus;
+  completedAt: string | null;
+  notifiedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiAssistantReminderEvent {
+  reminderId: string;
+  assistantId: string;
+  threadId: string;
+  assistantName: string;
+  title: string;
+  note: string;
+  scheduledAt: string;
+  createdAt: string;
+}
+
 export interface AiAssistantBrowserPermission {
   assistantId: string;
   enabled: boolean;

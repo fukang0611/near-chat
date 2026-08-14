@@ -19,6 +19,12 @@ import {
   saveAssistantMessageAsFile,
 } from "../assistant/assistant-file-service.js";
 import {
+  createAiAssistantReminder,
+  deleteAiAssistantReminder,
+  listAiAssistantReminders,
+  updateAiAssistantReminder,
+} from "../assistant/assistant-reminder-service.js";
+import {
   clearAiAssistantMessages,
   createAiAssistant,
   deleteAiAssistant,
@@ -132,6 +138,20 @@ const scheduledForSchema = z
   .string()
   .datetime({ offset: true, message: "执行时间格式不正确" })
   .transform((value) => new Date(value));
+const createReminderSchema = z.object({
+  threadId: idSchema,
+  title: z.string().trim().min(1, "请输入提醒名称").max(80, "提醒名称不能超过 80 个字"),
+  note: z.string().trim().max(500, "提醒备注不能超过 500 个字").default(""),
+  scheduledAt: scheduledForSchema,
+});
+const updateReminderSchema = z
+  .object({
+    title: createReminderSchema.shape.title.optional(),
+    note: createReminderSchema.shape.note.optional(),
+    scheduledAt: scheduledForSchema.optional(),
+    completed: z.boolean().optional(),
+  })
+  .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 const taskFields = {
   threadId: idSchema.optional(),
   title: z.string().trim().min(1, "请输入任务名称").max(80, "任务名称不能超过 80 个字"),
@@ -518,6 +538,56 @@ export function createAssistantRouter() {
     );
     response.json({ tasks });
   });
+
+  router.get("/ai/assistants/:assistantId/schedule", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const userId = currentUser(request).id;
+    const assistantId = idSchema.parse(request.params.assistantId);
+    const [tasks, reminders] = await Promise.all([
+      listAiAssistantTasks(userId, assistantId),
+      listAiAssistantReminders(userId, assistantId),
+    ]);
+    response.json({ tasks, reminders });
+  });
+
+  router.post("/ai/assistants/:assistantId/reminders", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const reminder = await createAiAssistantReminder(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+      createReminderSchema.parse(request.body),
+    );
+    response.status(201).json({ reminder });
+  });
+
+  router.patch(
+    "/ai/assistants/:assistantId/reminders/:reminderId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const reminder = await updateAiAssistantReminder(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.reminderId),
+        updateReminderSchema.parse(request.body),
+      );
+      response.json({ reminder });
+    },
+  );
+
+  router.delete(
+    "/ai/assistants/:assistantId/reminders/:reminderId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      await deleteAiAssistantReminder(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.reminderId),
+      );
+      response.status(204).end();
+    },
+  );
 
   router.post("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
     requirePersonalAssistants();
