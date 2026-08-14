@@ -4,6 +4,8 @@ import type {
   AiAssistant,
   AiAssistantCategory,
   AiAssistantMessage,
+  AiAssistantTask,
+  AiAssistantTaskSchedule,
   AiCapabilities,
   Attachment,
   AuditLog,
@@ -74,6 +76,14 @@ export interface SaveAiAssistantInput {
   avatarColor: string;
   modelId: string | null;
   knowledgeBaseIds: string[];
+}
+
+export interface SaveAiAssistantTaskInput {
+  title: string;
+  prompt: string;
+  scheduleType: AiAssistantTaskSchedule;
+  scheduledFor: string;
+  enabled: boolean;
 }
 
 export interface AdminAiMutationResponse {
@@ -280,6 +290,28 @@ export const api = {
     request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    }),
+  aiAssistantTasks: (assistantId: string) =>
+    request<{ tasks: AiAssistantTask[] }>(`/api/ai/assistants/${assistantId}/tasks`),
+  createAiAssistantTask: (assistantId: string, input: SaveAiAssistantTaskInput) =>
+    request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateAiAssistantTask: (
+    assistantId: string,
+    taskId: string,
+    input: Partial<SaveAiAssistantTaskInput>,
+  ) =>
+    request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  deleteAiAssistantTask: (assistantId: string, taskId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/tasks/${taskId}`, { method: "DELETE" }),
+  runAiAssistantTask: (assistantId: string, taskId: string) =>
+    request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks/${taskId}/run`, {
+      method: "POST",
     }),
   knowledgeBases: () => request<{ knowledgeBases: KnowledgeBase[] }>("/api/knowledge-bases"),
   createKnowledgeBase: (input: { name: string; description?: string }) =>

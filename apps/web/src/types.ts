@@ -303,6 +303,51 @@ export interface AiAssistantMessage {
   createdAt: string;
 }
 
+export type AiAssistantTaskSchedule = "ONCE" | "DAILY" | "WEEKLY";
+export type AiAssistantTaskStatus = "NEVER" | "RUNNING" | "SUCCEEDED" | "FAILED";
+
+export interface AiAssistantTaskRun {
+  id: string;
+  taskId: string;
+  trigger: "SCHEDULED" | "MANUAL";
+  status: Exclude<AiAssistantTaskStatus, "NEVER">;
+  scheduledFor: string;
+  startedAt: string;
+  completedAt: string | null;
+  resultMessageId: string | null;
+  errorMessage: string | null;
+}
+
+export interface AiAssistantTask {
+  id: string;
+  assistantId: string;
+  title: string;
+  prompt: string;
+  scheduleType: AiAssistantTaskSchedule;
+  enabled: boolean;
+  nextRunAt: string | null;
+  runRequested: boolean;
+  lastRunAt: string | null;
+  lastStatus: AiAssistantTaskStatus;
+  lastError: string | null;
+  runCount: number;
+  recentRuns: AiAssistantTaskRun[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 助理后台任务完成后通过 WebSocket 送达，仅包含展示与定位所需的信息。 */
+export interface AiAssistantTaskEvent {
+  taskId: string;
+  assistantId: string;
+  assistantName: string;
+  taskTitle: string;
+  status: "SUCCEEDED" | "FAILED";
+  messageId: string | null;
+  preview: string;
+  createdAt: string;
+}
+
 export type ChatFileCategory = "ALL" | "IMAGE" | "AUDIO" | "FILE";
 
 /** 消息资产中心中的附件记录，同时携带原消息定位信息。 */

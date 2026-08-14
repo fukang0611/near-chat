@@ -84,5 +84,9 @@ export const config = {
       pollMs: positiveInteger("AI_KNOWLEDGE_POLL_MS", 3000),
       defaultTopK: positiveInteger("AI_KNOWLEDGE_TOP_K", 8),
     },
+    assistantTasks: {
+      // 局域网单体部署以秒级轮询换取简单、可恢复的 PostgreSQL 持久调度。
+      pollMs: positiveInteger("AI_ASSISTANT_TASK_POLL_MS", 1000),
+    },
   },
 };

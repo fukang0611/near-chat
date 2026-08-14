@@ -72,6 +72,7 @@ services:
       AI_EMBEDDING_BASE_URL: ${AI_EMBEDDING_BASE_URL:-}
       AI_EMBEDDING_API_KEY: ${AI_EMBEDDING_API_KEY:-}
       AI_EMBEDDING_DIMENSIONS: ${AI_EMBEDDING_DIMENSIONS:-1536}
+      AI_ASSISTANT_TASK_POLL_MS: ${AI_ASSISTANT_TASK_POLL_MS:-1000}
     depends_on:
       postgres:
         condition: service_healthy

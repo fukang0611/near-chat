@@ -23,6 +23,7 @@ import {
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type {
+  AiAssistantTaskEvent,
   AiCapabilities,
   Attachment,
   Conversation,
@@ -184,6 +185,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
   const [showAssistants, setShowAssistants] = useState(false);
+  const [assistantRefreshVersion, setAssistantRefreshVersion] = useState(0);
+  const [assistantUnreadCount, setAssistantUnreadCount] = useState(0);
+  const [assistantTarget, setAssistantTarget] = useState<{
+    assistantId: string;
+    messageId: string | null;
+  } | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
   const applyAiCapabilities = useCallback((capabilities: AiCapabilities) => {
     setAiCapabilities(capabilities);
@@ -304,6 +311,15 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     () =>
       window.nearChatDesktop?.onNotificationClick((conversationId) => {
         window.focus();
+        if (conversationId.startsWith("assistant:")) {
+          const [, assistantId, messageId] = conversationId.split(":");
+          if (assistantId) {
+            setAssistantTarget({ assistantId, messageId: messageId || null });
+            setAssistantUnreadCount(0);
+            setShowAssistants(true);
+          }
+          return;
+        }
         setSelectedId(conversationId);
       }),
     [],
@@ -568,6 +584,53 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
 
   const connection = useRealtimeConnection({
     onAiCapabilitiesChanged: applyAiCapabilities,
+    onAssistantTaskCompleted: (event: AiAssistantTaskEvent) => {
+      setAssistantRefreshVersion((current) => current + 1);
+      const activelyViewingAssistants = showAssistants && document.visibilityState === "visible";
+      if (!activelyViewingAssistants) {
+        setAssistantUnreadCount((current) => Math.min(99, current + 1));
+      }
+
+      const succeeded = event.status === "SUCCEEDED";
+      notify(
+        succeeded
+          ? `${event.assistantName} 已完成“${event.taskTitle}”`
+          : `“${event.taskTitle}”执行失败`,
+        succeeded ? "success" : "error",
+      );
+      const preferences = notificationPreferencesRef.current;
+      if (!activelyViewingAssistants && preferences.sound) {
+        void playMessageSound().catch(() => undefined);
+      }
+      if (!preferences.desktop || activelyViewingAssistants) return;
+
+      const title = `${event.assistantName} · ${succeeded ? "任务完成" : "任务失败"}`;
+      const body = succeeded
+        ? `${event.taskTitle}：${event.preview || "结果已写入助理对话"}`
+        : `${event.taskTitle}：${event.preview || "请打开助理中心查看"}`;
+      const target = `assistant:${event.assistantId}:${event.messageId ?? ""}`;
+      if (window.nearChatDesktop) {
+        void window.nearChatDesktop
+          .showNotification({ title, body, conversationId: target })
+          .catch(() => undefined);
+      } else if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          const notification = new Notification(title, {
+            body,
+            tag: `near-chat:assistant-task:${event.taskId}`,
+          });
+          notification.onclick = () => {
+            window.focus();
+            setAssistantTarget({ assistantId: event.assistantId, messageId: event.messageId });
+            setAssistantUnreadCount(0);
+            setShowAssistants(true);
+            notification.close();
+          };
+        } catch {
+          // 浏览器或操作系统临时拒绝通知时，站内角标和提示仍然可用。
+        }
+      }
+    },
     onSessionInvalid: onLogout,
     onPresenceSnapshot: (onlineUserIds) => {
       const onlineIds = new Set(onlineUserIds);
@@ -1483,7 +1546,12 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenMessageAssets={() => setShowMessageAssets(true)}
         assistantAvailable={Boolean(aiCapabilities?.features.personalAssistants)}
-        onOpenAssistants={() => setShowAssistants(true)}
+        assistantUnreadCount={assistantUnreadCount}
+        onOpenAssistants={() => {
+          setAssistantTarget(null);
+          setAssistantUnreadCount(0);
+          setShowAssistants(true);
+        }}
         aiAvailable={Boolean(aiCapabilities?.features.knowledgeManagement)}
         onOpenKnowledge={() => setShowKnowledge(true)}
         onOpenTeamRadar={() => setShowTeamRadar(true)}
@@ -1794,7 +1862,13 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       {showAssistants && aiCapabilities && (
         <AssistantCenterDialog
           capabilities={aiCapabilities}
-          onClose={() => setShowAssistants(false)}
+          initialAssistantId={assistantTarget?.assistantId}
+          initialMessageId={assistantTarget?.messageId}
+          refreshVersion={assistantRefreshVersion}
+          onClose={() => {
+            setShowAssistants(false);
+            setAssistantTarget(null);
+          }}
         />
       )}
       {showForwardDialog && selectedMessages.length > 0 && (

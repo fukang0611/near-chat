@@ -86,4 +86,21 @@ describe("parseRealtimeEvent", () => {
       ),
     ).toEqual({ type: "ai.capabilities.changed", payload: { capabilities } });
   });
+
+  it("解析助理后台任务完成事件", () => {
+    const task = {
+      taskId: "task-one",
+      assistantId: "assistant-one",
+      assistantName: "分析搭档",
+      taskTitle: "每日摘要",
+      status: "SUCCEEDED",
+      messageId: "message-one",
+      preview: "今天完成了三项工作。",
+      createdAt: "2026-08-14T10:00:00.000Z",
+    };
+
+    expect(
+      parseRealtimeEvent(JSON.stringify({ type: "assistant.task.completed", payload: task })),
+    ).toEqual({ type: "assistant.task.completed", payload: { task } });
+  });
 });

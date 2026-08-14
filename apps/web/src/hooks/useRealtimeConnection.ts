@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { websocketUrl } from "../api";
-import type { AiCapabilities, Message, NudgeEvent, ReceiptChange } from "../types";
+import type {
+  AiAssistantTaskEvent,
+  AiCapabilities,
+  Message,
+  NudgeEvent,
+  ReceiptChange,
+} from "../types";
 
 export type ConnectionState = "connected" | "connecting" | "offline";
 
@@ -15,6 +21,7 @@ interface RealtimeHandlers {
   onConversationChanged: (conversationId: string) => void;
   onReceiptChanged: (receipts: ReceiptChange[]) => void;
   onNudgeReceived: (nudge: NudgeEvent) => void;
+  onAssistantTaskCompleted?: (event: AiAssistantTaskEvent) => void;
   onAiCapabilitiesChanged?: (capabilities: AiCapabilities) => void;
 }
 
@@ -28,6 +35,7 @@ type RealtimeEvent =
   | { type: "conversation.changed"; payload: { conversationId: string } }
   | { type: "receipt.changed"; payload: { receipts: ReceiptChange[] } }
   | { type: "ai.capabilities.changed"; payload: { capabilities: AiCapabilities } }
+  | { type: "assistant.task.completed"; payload: { task: AiAssistantTaskEvent } }
   | { type: "nudge.received"; payload: { nudge: NudgeEvent } };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -131,6 +139,20 @@ function isNudgeEvent(value: unknown): value is NudgeEvent {
   );
 }
 
+function isAssistantTaskEvent(value: unknown): value is AiAssistantTaskEvent {
+  return (
+    isRecord(value) &&
+    typeof value.taskId === "string" &&
+    typeof value.assistantId === "string" &&
+    typeof value.assistantName === "string" &&
+    typeof value.taskTitle === "string" &&
+    (value.status === "SUCCEEDED" || value.status === "FAILED") &&
+    (value.messageId === null || typeof value.messageId === "string") &&
+    typeof value.preview === "string" &&
+    typeof value.createdAt === "string"
+  );
+}
+
 function isAiCapabilities(value: unknown): value is AiCapabilities {
   if (!isRecord(value) || !isRecord(value.features) || !isRecord(value.provider)) return false;
   return (
@@ -204,6 +226,10 @@ export function parseRealtimeEvent(raw: string): RealtimeEvent | null {
           : null;
       case "nudge.received":
         return isNudgeEvent(payload) ? { type: event.type, payload: { nudge: payload } } : null;
+      case "assistant.task.completed":
+        return isAssistantTaskEvent(payload)
+          ? { type: event.type, payload: { task: payload } }
+          : null;
       default:
         return null;
     }
@@ -270,6 +296,9 @@ export function useRealtimeConnection(handlers: RealtimeHandlers): ConnectionSta
             break;
           case "nudge.received":
             current.onNudgeReceived(event.payload.nudge);
+            break;
+          case "assistant.task.completed":
+            current.onAssistantTaskCompleted?.(event.payload.task);
             break;
         }
       };

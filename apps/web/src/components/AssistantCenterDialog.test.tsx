@@ -1,8 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { AiAssistant, AiAssistantMessage, AiCapabilities } from "../types";
+import type { AiAssistant, AiAssistantMessage, AiAssistantTask, AiCapabilities } from "../types";
 import { AssistantCenterDialog } from "./AssistantCenterDialog";
 
 const assistant: AiAssistant = {
@@ -62,6 +62,7 @@ describe("AssistantCenterDialog", () => {
     vi.spyOn(api, "aiModels").mockResolvedValue(modelResult);
     vi.spyOn(api, "knowledgeBases").mockResolvedValue({ knowledgeBases: [] });
     vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
+    vi.spyOn(api, "aiAssistantTasks").mockResolvedValue({ tasks: [] });
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -121,5 +122,52 @@ describe("AssistantCenterDialog", () => {
         expect.objectContaining({ name: "项目分析师", category: "GENERAL", modelId: null }),
       ),
     );
+  });
+
+  it("可以在助理内创建一次性后台任务", async () => {
+    const user = userEvent.setup();
+    const scheduledFor = new Date(Date.now() + 30 * 60_000);
+    const local = new Date(scheduledFor.getTime() - scheduledFor.getTimezoneOffset() * 60_000)
+      .toISOString()
+      .slice(0, 19);
+    const task: AiAssistantTask = {
+      id: "55555555-5555-4555-8555-555555555555",
+      assistantId: assistant.id,
+      title: "整理项目摘要",
+      prompt: "总结今天的重要进展和待办。",
+      scheduleType: "ONCE",
+      enabled: true,
+      nextRunAt: scheduledFor.toISOString(),
+      runRequested: false,
+      lastRunAt: null,
+      lastStatus: "NEVER",
+      lastError: null,
+      runCount: 0,
+      recentRuns: [],
+      createdAt: "2026-08-14T08:00:00.000Z",
+      updatedAt: "2026-08-14T08:00:00.000Z",
+    };
+    vi.spyOn(api, "createAiAssistantTask").mockResolvedValue({ task });
+
+    render(<AssistantCenterDialog capabilities={capabilities} onClose={vi.fn()} />);
+    await user.click(await screen.findByRole("tab", { name: "任务" }));
+    await user.click(await screen.findByRole("button", { name: /创建第一个任务/ }));
+    await user.type(screen.getByRole("textbox", { name: "任务名称" }), task.title);
+    await user.type(screen.getByRole("textbox", { name: "交给助理的任务内容" }), task.prompt);
+    fireEvent.change(screen.getByLabelText("首次执行"), { target: { value: local } });
+    await user.click(screen.getByRole("button", { name: "保存任务" }));
+
+    await waitFor(() =>
+      expect(api.createAiAssistantTask).toHaveBeenCalledWith(
+        assistant.id,
+        expect.objectContaining({
+          title: task.title,
+          prompt: task.prompt,
+          scheduleType: "ONCE",
+          enabled: true,
+        }),
+      ),
+    );
+    expect(await screen.findByText(task.title)).toBeTruthy();
   });
 });

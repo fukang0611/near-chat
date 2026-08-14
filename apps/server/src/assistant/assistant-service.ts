@@ -368,20 +368,28 @@ async function assistantSources(
     .slice(0, ASSISTANT_SOURCE_LIMIT);
 }
 
-export async function sendAiAssistantMessage(userId: string, assistantId: string, content: string) {
+async function generateAndSaveAssistantReply(
+  userId: string,
+  assistantId: string,
+  content: string,
+  includeHistory: boolean,
+) {
   const assistant = await selectAssistant(userId, assistantId);
   const modelId = await resolveUserAiModelId(userId, assistant.model_id ?? undefined);
   if (!modelId) throw new ApiError(503, "当前没有可用的对话模型");
 
-  const historyResult = await query<Pick<AssistantMessageRow, "role" | "content">>(
-    `SELECT role, content
-       FROM ai_assistant_messages
-      WHERE assistant_id = $1
-      ORDER BY created_at DESC, id DESC
-      LIMIT $2`,
-    [assistantId, ASSISTANT_HISTORY_LIMIT],
-  );
-  const history = historyResult.rows.reverse();
+  const history = includeHistory
+    ? (
+        await query<Pick<AssistantMessageRow, "role" | "content">>(
+          `SELECT role, content
+             FROM ai_assistant_messages
+            WHERE assistant_id = $1
+            ORDER BY created_at DESC, id DESC
+            LIMIT $2`,
+          [assistantId, ASSISTANT_HISTORY_LIMIT],
+        )
+      ).rows.reverse()
+    : [];
   const sources = await assistantSources(userId, assistant.knowledge_base_ids, content);
   const reply = await generatePersonalAssistantReply({
     assistantId,
@@ -391,7 +399,7 @@ export async function sendAiAssistantMessage(userId: string, assistantId: string
     messages: buildAssistantConversation(history, content, sources),
   });
 
-  return transaction(async (client) => {
+  const messages = await transaction(async (client) => {
     // 生成期间用户可能删除助理；写入前重新校验，避免留下孤立消息。
     await selectAssistant(userId, assistantId, client, true);
     const userMessageId = randomUUID();
@@ -428,4 +436,23 @@ export async function sendAiAssistantMessage(userId: string, assistantId: string
     );
     return messages.rows.map(publicMessage);
   });
+  return { assistantName: assistant.name, messages };
+}
+
+export async function sendAiAssistantMessage(userId: string, assistantId: string, content: string) {
+  return (await generateAndSaveAssistantReply(userId, assistantId, content, true)).messages;
+}
+
+/**
+ * 定时任务复用与手动对话完全相同的模型、角色和知识库路径，但不携带旧对话，
+ * 避免历史闲聊让周期任务在不同日期产生不可解释的上下文漂移。
+ */
+export async function executeAiAssistantTask(
+  userId: string,
+  assistantId: string,
+  taskTitle: string,
+  prompt: string,
+) {
+  const content = `[定时任务：${taskTitle}]\n${prompt.trim()}`;
+  return generateAndSaveAssistantReply(userId, assistantId, content, false);
 }

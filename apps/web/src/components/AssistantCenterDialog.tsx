@@ -2,6 +2,7 @@ import {
   ArrowUp,
   Bot,
   BrainCircuit,
+  CalendarClock,
   Check,
   ChevronRight,
   FileText,
@@ -19,7 +20,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, type SaveAiAssistantInput } from "../api";
 import type {
@@ -32,10 +33,14 @@ import type {
   UserAiModels,
 } from "../types";
 import { errorMessage } from "../utils/errors";
+import { AssistantTasksPanel } from "./AssistantTasksPanel";
 
 interface AssistantCenterDialogProps {
   capabilities: AiCapabilities;
   onClose: () => void;
+  initialAssistantId?: string | null;
+  initialMessageId?: string | null;
+  refreshVersion?: number;
 }
 
 interface AssistantPreset extends SaveAiAssistantInput {
@@ -154,9 +159,15 @@ function emptyForm(preset = ASSISTANT_PRESETS[0]!): SaveAiAssistantInput {
 
 /**
  * 私人助理工作台：NearChat 保存角色、模型选择、资料绑定和对话历史，Mastra
- * 只参与单次生成。当前阶段刻意不展示尚未接入的工具与自动执行能力。
+ * 只参与单次生成。自动任务使用 PostgreSQL 持久调度并把结果写回同一时间线。
  */
-export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenterDialogProps) {
+export function AssistantCenterDialog({
+  capabilities,
+  onClose,
+  initialAssistantId = null,
+  initialMessageId = null,
+  refreshVersion = 0,
+}: AssistantCenterDialogProps) {
   const [assistants, setAssistants] = useState<AiAssistant[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiAssistantMessage[]>([]);
@@ -170,6 +181,9 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingText, setSendingText] = useState<string | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks">("chat");
+  const [messageLoadVersion, setMessageLoadVersion] = useState(0);
+  const [targetMessageId, setTargetMessageId] = useState<string | null>(initialMessageId);
   const [editorMode, setEditorMode] = useState<"create" | "edit" | null>(null);
   const [form, setForm] = useState<SaveAiAssistantInput>(() => emptyForm());
   const [saving, setSaving] = useState(false);
@@ -184,6 +198,9 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
     [assistants, selectedId],
   );
   const defaultModel = models.models.find((model) => model.id === models.selectedModelId) ?? null;
+  const showNotice = useCallback((tone: "error" | "success", text: string) => {
+    setNotice({ tone, text });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -193,7 +210,12 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
         setAssistants(assistantResult.assistants);
         setModels(modelResult);
         setKnowledgeBases(knowledgeResult.knowledgeBases);
-        setSelectedId(assistantResult.assistants[0]?.id ?? null);
+        const requested = assistantResult.assistants.some(
+          (assistant) => assistant.id === initialAssistantId,
+        )
+          ? initialAssistantId
+          : null;
+        setSelectedId(requested ?? assistantResult.assistants[0]?.id ?? null);
       })
       .catch((error) => {
         if (active) setNotice({ tone: "error", text: errorMessage(error, "智能助理加载失败") });
@@ -204,7 +226,25 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialAssistantId]);
+
+  useEffect(() => {
+    if (refreshVersion === 0) return;
+    void api
+      .aiAssistants()
+      .then((result) => setAssistants(result.assistants))
+      .catch(() => undefined);
+  }, [refreshVersion]);
+
+  useEffect(() => {
+    if (!initialAssistantId) return;
+    setSelectedId(initialAssistantId);
+    if (initialMessageId) {
+      setWorkspaceMode("chat");
+      setTargetMessageId(initialMessageId);
+      setMessageLoadVersion((current) => current + 1);
+    }
+  }, [initialAssistantId, initialMessageId]);
 
   useEffect(() => {
     let active = true;
@@ -227,11 +267,31 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
     return () => {
       active = false;
     };
-  }, [selectedId]);
+  }, [messageLoadVersion, refreshVersion, selectedId]);
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages, sendingText, selectedId]);
+
+  useEffect(() => {
+    if (!targetMessageId || loadingMessages || workspaceMode !== "chat") return;
+    const frame = window.requestAnimationFrame(() => {
+      document
+        .getElementById(`assistant-message-${targetMessageId}`)
+        ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+    const timer = window.setTimeout(() => setTargetMessageId(null), 2600);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [loadingMessages, messages, targetMessageId, workspaceMode]);
+
+  const openTaskMessage = useCallback((messageId: string) => {
+    setWorkspaceMode("chat");
+    setTargetMessageId(messageId);
+    setMessageLoadVersion((current) => current + 1);
+  }, []);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -489,7 +549,7 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
                   <Sparkles size={30} />
                 </span>
                 <h2>给每类工作一个合适的搭档</h2>
-                <p>从一个轻量角色开始，之后再逐步接入任务、文件工具和自动化能力。</p>
+                <p>从一个轻量角色开始，再为它安排自动任务、模型和个人知识资料。</p>
                 <div className="assistant-preset-grid">
                   {ASSISTANT_PRESETS.map((preset) => (
                     <button type="button" key={preset.category} onClick={() => openCreate(preset)}>
@@ -519,6 +579,28 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
                     </span>
                   </div>
                   <div>
+                    <div className="assistant-view-switch" role="tablist" aria-label="助理工作区">
+                      <button
+                        type="button"
+                        className={workspaceMode === "chat" ? "is-active" : ""}
+                        role="tab"
+                        aria-selected={workspaceMode === "chat"}
+                        onClick={() => setWorkspaceMode("chat")}
+                      >
+                        <MessageSquareText size={13} />
+                        对话
+                      </button>
+                      <button
+                        type="button"
+                        className={workspaceMode === "tasks" ? "is-active" : ""}
+                        role="tab"
+                        aria-selected={workspaceMode === "tasks"}
+                        onClick={() => setWorkspaceMode("tasks")}
+                      >
+                        <CalendarClock size={13} />
+                        任务
+                      </button>
+                    </div>
                     <span className="assistant-model-badge">
                       <BrainCircuit size={13} />
                       {selectedAssistant.model?.name ?? defaultModel?.name ?? "跟随默认模型"}
@@ -526,136 +608,153 @@ export function AssistantCenterDialog({ capabilities, onClose }: AssistantCenter
                     <button type="button" onClick={openEdit} aria-label="编辑助理">
                       <Settings2 size={17} />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmClear(true)}
-                      aria-label="清空对话"
-                      disabled={messages.length === 0}
-                    >
-                      <MoreHorizontal size={18} />
-                    </button>
+                    {workspaceMode === "chat" && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmClear(true)}
+                        aria-label="清空对话"
+                        disabled={messages.length === 0}
+                      >
+                        <MoreHorizontal size={18} />
+                      </button>
+                    )}
                   </div>
                 </header>
-                {confirmClear && (
-                  <div className="assistant-inline-confirm">
-                    <span>清空与 {selectedAssistant.name} 的全部对话？</span>
-                    <button type="button" onClick={() => setConfirmClear(false)}>
-                      取消
-                    </button>
-                    <button type="button" onClick={() => void clearMessages()}>
-                      清空
-                    </button>
-                  </div>
-                )}
-                <div className="assistant-message-scroll">
-                  {loadingMessages ? (
-                    <div className="assistant-message-loading">
-                      <LoaderCircle className="spin" size={22} />
-                      正在读取对话
-                    </div>
-                  ) : messages.length === 0 && !sendingText ? (
-                    <div className="assistant-conversation-empty">
-                      <AssistantAvatar assistant={selectedAssistant} size="large" />
-                      <h3>我是 {selectedAssistant.name}</h3>
-                      <p>{selectedAssistant.instructions}</p>
-                      <div>
-                        <span>{CATEGORY_META[selectedAssistant.category].label}</span>
-                        <span>
-                          {selectedAssistant.knowledgeBaseIds.length > 0
-                            ? `已连接 ${selectedAssistant.knowledgeBaseIds.length} 个知识库`
-                            : "未连接知识库"}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="assistant-message-list">
-                      {messages.map((message) => (
-                        <article
-                          className={`assistant-message ${message.role === "USER" ? "is-user" : "is-assistant"}`}
-                          key={message.id}
-                        >
-                          {message.role === "ASSISTANT" && (
-                            <AssistantAvatar assistant={selectedAssistant} />
-                          )}
-                          <div>
-                            <p>{message.content}</p>
-                            {message.sources.length > 0 && (
-                              <footer>
-                                {message.sources.map((source) => (
-                                  <SourceChip
-                                    key={source.chunkId}
-                                    source={source}
-                                    onOpen={() => void openSource(source)}
-                                  />
-                                ))}
-                              </footer>
-                            )}
-                            <small>
-                              {new Intl.DateTimeFormat("zh-CN", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              }).format(new Date(message.createdAt))}
-                              {message.role === "ASSISTANT" && message.model
-                                ? ` · ${message.model.name}`
-                                : ""}
-                            </small>
-                          </div>
-                        </article>
-                      ))}
-                      {sendingText && (
-                        <>
-                          <article className="assistant-message is-user is-pending">
-                            <div>
-                              <p>{sendingText}</p>
-                            </div>
-                          </article>
-                          <article className="assistant-message is-assistant is-thinking">
-                            <AssistantAvatar assistant={selectedAssistant} />
-                            <div>
-                              <span>
-                                <i />
-                                <i />
-                                <i />
-                              </span>
-                              <small>{selectedAssistant.name} 正在思考</small>
-                            </div>
-                          </article>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  <div ref={messageEndRef} />
-                </div>
-                <form className="assistant-composer" onSubmit={(event) => void sendMessage(event)}>
-                  <textarea
-                    ref={composerRef}
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        void sendMessage();
-                      }
-                    }}
-                    placeholder={`给 ${selectedAssistant.name} 发消息`}
-                    rows={2}
-                    maxLength={4000}
-                    disabled={Boolean(sendingText)}
+                {workspaceMode === "tasks" ? (
+                  <AssistantTasksPanel
+                    assistant={selectedAssistant}
+                    refreshVersion={refreshVersion}
+                    onNotice={showNotice}
+                    onOpenMessage={openTaskMessage}
                   />
-                  <footer>
-                    <span>
-                      <MessageSquareText size={13} />
-                      Enter 发送 · Shift + Enter 换行
-                    </span>
-                    <button
-                      type="submit"
-                      disabled={!draft.trim() || Boolean(sendingText)}
-                      aria-label="发送给智能助理"
+                ) : (
+                  <>
+                    {confirmClear && (
+                      <div className="assistant-inline-confirm">
+                        <span>清空与 {selectedAssistant.name} 的全部对话？</span>
+                        <button type="button" onClick={() => setConfirmClear(false)}>
+                          取消
+                        </button>
+                        <button type="button" onClick={() => void clearMessages()}>
+                          清空
+                        </button>
+                      </div>
+                    )}
+                    <div className="assistant-message-scroll">
+                      {loadingMessages ? (
+                        <div className="assistant-message-loading">
+                          <LoaderCircle className="spin" size={22} />
+                          正在读取对话
+                        </div>
+                      ) : messages.length === 0 && !sendingText ? (
+                        <div className="assistant-conversation-empty">
+                          <AssistantAvatar assistant={selectedAssistant} size="large" />
+                          <h3>我是 {selectedAssistant.name}</h3>
+                          <p>{selectedAssistant.instructions}</p>
+                          <div>
+                            <span>{CATEGORY_META[selectedAssistant.category].label}</span>
+                            <span>
+                              {selectedAssistant.knowledgeBaseIds.length > 0
+                                ? `已连接 ${selectedAssistant.knowledgeBaseIds.length} 个知识库`
+                                : "未连接知识库"}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="assistant-message-list">
+                          {messages.map((message) => (
+                            <article
+                              id={`assistant-message-${message.id}`}
+                              className={`assistant-message ${message.role === "USER" ? "is-user" : "is-assistant"} ${targetMessageId === message.id ? "is-highlighted" : ""}`}
+                              key={message.id}
+                            >
+                              {message.role === "ASSISTANT" && (
+                                <AssistantAvatar assistant={selectedAssistant} />
+                              )}
+                              <div>
+                                <p>{message.content}</p>
+                                {message.sources.length > 0 && (
+                                  <footer>
+                                    {message.sources.map((source) => (
+                                      <SourceChip
+                                        key={source.chunkId}
+                                        source={source}
+                                        onOpen={() => void openSource(source)}
+                                      />
+                                    ))}
+                                  </footer>
+                                )}
+                                <small>
+                                  {new Intl.DateTimeFormat("zh-CN", {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  }).format(new Date(message.createdAt))}
+                                  {message.role === "ASSISTANT" && message.model
+                                    ? ` · ${message.model.name}`
+                                    : ""}
+                                </small>
+                              </div>
+                            </article>
+                          ))}
+                          {sendingText && (
+                            <>
+                              <article className="assistant-message is-user is-pending">
+                                <div>
+                                  <p>{sendingText}</p>
+                                </div>
+                              </article>
+                              <article className="assistant-message is-assistant is-thinking">
+                                <AssistantAvatar assistant={selectedAssistant} />
+                                <div>
+                                  <span>
+                                    <i />
+                                    <i />
+                                    <i />
+                                  </span>
+                                  <small>{selectedAssistant.name} 正在思考</small>
+                                </div>
+                              </article>
+                            </>
+                          )}
+                        </div>
+                      )}
+                      <div ref={messageEndRef} />
+                    </div>
+                    <form
+                      className="assistant-composer"
+                      onSubmit={(event) => void sendMessage(event)}
                     >
-                      <Send size={17} />
-                    </button>
-                  </footer>
-                </form>
+                      <textarea
+                        ref={composerRef}
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void sendMessage();
+                          }
+                        }}
+                        placeholder={`给 ${selectedAssistant.name} 发消息`}
+                        rows={2}
+                        maxLength={4000}
+                        disabled={Boolean(sendingText)}
+                      />
+                      <footer>
+                        <span>
+                          <MessageSquareText size={13} />
+                          Enter 发送 · Shift + Enter 换行
+                        </span>
+                        <button
+                          type="submit"
+                          disabled={!draft.trim() || Boolean(sendingText)}
+                          aria-label="发送给智能助理"
+                        >
+                          <Send size={17} />
+                        </button>
+                      </footer>
+                    </form>
+                  </>
+                )}
               </>
             )}
           </main>

@@ -338,6 +338,42 @@ CREATE TABLE IF NOT EXISTS ai_assistant_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 助理任务以 next_run_at 表示下一次计划执行，以 run_requested_at 表示不改变
+-- 原计划的“立即执行”请求。调度状态与任务定义同表，便于列表页一次读取。
+CREATE TABLE IF NOT EXISTS ai_assistant_tasks (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(80) NOT NULL,
+  prompt TEXT NOT NULL,
+  schedule_type VARCHAR(12) NOT NULL
+    CHECK (schedule_type IN ('ONCE', 'DAILY', 'WEEKLY')),
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  next_run_at TIMESTAMPTZ,
+  run_requested_at TIMESTAMPTZ,
+  last_run_at TIMESTAMPTZ,
+  last_status VARCHAR(12) NOT NULL DEFAULT 'NEVER'
+    CHECK (last_status IN ('NEVER', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+  last_error TEXT,
+  run_count INTEGER NOT NULL DEFAULT 0 CHECK (run_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 每次执行独立留痕；任务删除时历史一并删除，清空助理对话时仅解除结果消息引用。
+CREATE TABLE IF NOT EXISTS ai_assistant_task_runs (
+  id UUID PRIMARY KEY,
+  task_id UUID NOT NULL REFERENCES ai_assistant_tasks(id) ON DELETE CASCADE,
+  trigger VARCHAR(12) NOT NULL CHECK (trigger IN ('SCHEDULED', 'MANUAL')),
+  status VARCHAR(12) NOT NULL CHECK (status IN ('RUNNING', 'SUCCEEDED', 'FAILED')),
+  scheduled_for TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at TIMESTAMPTZ,
+  result_message_id UUID REFERENCES ai_assistant_messages(id) ON DELETE SET NULL,
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY,
   actor_id UUID REFERENCES users(id) ON DELETE SET NULL,
@@ -414,6 +450,17 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistants_owner_activity
   ON ai_assistants(owner_id, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_timeline
   ON ai_assistant_messages(assistant_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_tasks_assistant_updated
+  ON ai_assistant_tasks(assistant_id, updated_at DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_tasks_due
+  ON ai_assistant_tasks(next_run_at, run_requested_at)
+  WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_tasks_requested
+  ON ai_assistant_tasks(run_requested_at) WHERE run_requested_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_history
+  ON ai_assistant_task_runs(task_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_task_runs_running
+  ON ai_assistant_task_runs(started_at) WHERE status = 'RUNNING';
 CREATE INDEX IF NOT EXISTS idx_receipts_user_pending
   ON message_receipts(user_id, delivered_at) WHERE delivered_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_receipts_message ON message_receipts(message_id);

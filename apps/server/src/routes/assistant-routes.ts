@@ -10,6 +10,13 @@ import {
   sendAiAssistantMessage,
   updateAiAssistant,
 } from "../assistant/assistant-service.js";
+import {
+  createAiAssistantTask,
+  deleteAiAssistantTask,
+  listAiAssistantTasks,
+  requestAiAssistantTaskRun,
+  updateAiAssistantTask,
+} from "../assistant/assistant-task-service.js";
 import { authenticate } from "../auth.js";
 import { ApiError, currentUser } from "../http.js";
 
@@ -50,6 +57,27 @@ const updateAssistantSchema = z
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1, "请输入消息").max(4000, "消息不能超过 4000 个字"),
 });
+const scheduledForSchema = z
+  .string()
+  .datetime({ offset: true, message: "执行时间格式不正确" })
+  .transform((value) => new Date(value));
+const taskFields = {
+  title: z.string().trim().min(1, "请输入任务名称").max(80, "任务名称不能超过 80 个字"),
+  prompt: z.string().trim().min(1, "请输入任务内容").max(6000, "任务内容不能超过 6000 个字"),
+  scheduleType: z.enum(["ONCE", "DAILY", "WEEKLY"]),
+  scheduledFor: scheduledForSchema,
+  enabled: z.boolean(),
+};
+const createTaskSchema = z.object(taskFields);
+const updateTaskSchema = z
+  .object({
+    title: taskFields.title.optional(),
+    prompt: taskFields.prompt.optional(),
+    scheduleType: taskFields.scheduleType.optional(),
+    scheduledFor: taskFields.scheduledFor.optional(),
+    enabled: taskFields.enabled.optional(),
+  })
+  .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 
 function requirePersonalAssistants(): void {
   if (!getAiCapabilities().features.personalAssistants) {
@@ -119,6 +147,68 @@ export function createAssistantRouter() {
     );
     response.status(201).json({ messages });
   });
+
+  router.get("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const tasks = await listAiAssistantTasks(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+    );
+    response.json({ tasks });
+  });
+
+  router.post("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const task = await createAiAssistantTask(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+      createTaskSchema.parse(request.body),
+    );
+    response.status(201).json({ task });
+  });
+
+  router.patch(
+    "/ai/assistants/:assistantId/tasks/:taskId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const task = await updateAiAssistantTask(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.taskId),
+        updateTaskSchema.parse(request.body),
+      );
+      response.json({ task });
+    },
+  );
+
+  router.delete(
+    "/ai/assistants/:assistantId/tasks/:taskId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      await deleteAiAssistantTask(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.taskId),
+      );
+      response.status(204).end();
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/tasks/:taskId/run",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const task = await requestAiAssistantTaskRun(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.taskId),
+      );
+      response.status(202).json({ task });
+    },
+  );
 
   return router;
 }

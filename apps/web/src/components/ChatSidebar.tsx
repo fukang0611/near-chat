@@ -111,6 +111,7 @@ interface ChatSidebarProps {
   onCreateGroup: () => void;
   onOpenMessageAssets: () => void;
   assistantAvailable?: boolean;
+  assistantUnreadCount?: number;
   onOpenAssistants?: () => void;
   aiAvailable?: boolean;
   onOpenKnowledge?: () => void;
@@ -158,6 +159,7 @@ export function ChatSidebar({
   onCreateGroup,
   onOpenMessageAssets,
   assistantAvailable = false,
+  assistantUnreadCount = 0,
   onOpenAssistants,
   aiAvailable = false,
   onOpenKnowledge,
@@ -345,10 +347,19 @@ export function ChatSidebar({
               className="icon-button assistant-trigger"
               type="button"
               onClick={onOpenAssistants}
-              aria-label="打开智能助理"
+              aria-label={
+                assistantUnreadCount > 0
+                  ? `打开智能助理，${assistantUnreadCount} 条任务提醒`
+                  : "打开智能助理"
+              }
               title="智能助理"
             >
               <Bot size={18} />
+              {assistantUnreadCount > 0 && (
+                <b className="assistant-trigger-badge">
+                  {assistantUnreadCount > 9 ? "9+" : assistantUnreadCount}
+                </b>
+              )}
             </button>
           )}
           {aiAvailable && onOpenKnowledge && (
