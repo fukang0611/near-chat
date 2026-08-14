@@ -65,6 +65,12 @@ try {
     },
   });
   assistantId = created.assistant.id;
+  const threadDirectory = await request(
+    `/api/ai/assistants/${assistantId}/threads?includeArchived=true`,
+    { token },
+  );
+  const threadId = threadDirectory.threads.find((thread) => thread.isDefault)?.id;
+  assert.ok(threadId, "新建助理应自动创建默认对话");
 
   const uploadForm = new FormData();
   uploadForm.append(
@@ -96,6 +102,7 @@ try {
     token,
     method: "POST",
     body: {
+      threadId,
       title: `读取健康页-${suffix}`,
       prompt: "读取授权文件和页面，先输出文件中的验收标记，再用一句话说明页面是否健康。",
       scheduleType: "ONCE",
@@ -107,6 +114,7 @@ try {
     },
   });
   assert.deepEqual(taskResult.task.fileIds, [added.file.id]);
+  assert.equal(taskResult.task.threadId, threadId);
   assert.equal(taskResult.task.browserAction, "SCREENSHOT");
 
   await request(`/api/ai/assistants/${assistantId}/tasks/${taskResult.task.id}/run`, {
@@ -120,7 +128,9 @@ try {
   assert.ok(run.browserRunId, "任务执行应关联受控浏览器记录");
   assert.ok(run.toolSummary.browser.artifactFileId, "页面截图应进入助理文件工作区");
 
-  const messages = await request(`/api/ai/assistants/${assistantId}/messages`, { token });
+  const messages = await request(`/api/ai/assistants/${assistantId}/threads/${threadId}/messages`, {
+    token,
+  });
   const resultMessage = messages.messages.find((message) => message.id === run.resultMessageId);
   assert.ok(resultMessage, "任务结果消息应写回助理对话");
   assert.match(resultMessage.content, new RegExp(fileMarker));

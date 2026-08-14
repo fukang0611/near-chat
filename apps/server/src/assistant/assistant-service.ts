@@ -14,6 +14,11 @@ import {
   loadAssistantMessageFileBundles,
 } from "./assistant-file-service.js";
 import { closeAiAssistantBrowserSessions } from "./assistant-browser-service.js";
+import {
+  createDefaultAiAssistantThread,
+  requireActiveAiAssistantThread,
+  selectAiAssistantThread,
+} from "./assistant-thread-service.js";
 
 export const ASSISTANT_HISTORY_LIMIT = 20;
 const ASSISTANT_LIST_LIMIT = 20;
@@ -55,6 +60,7 @@ interface AssistantRow {
 interface AssistantMessageRow {
   id: string;
   assistant_id: string;
+  thread_id: string;
   role: "USER" | "ASSISTANT";
   content: string;
   model_id: string | null;
@@ -108,6 +114,7 @@ function publicMessage(
   return {
     id: row.id,
     assistantId: row.assistant_id,
+    threadId: row.thread_id,
     role: row.role,
     content: row.content,
     model:
@@ -300,6 +307,7 @@ export async function createAiAssistant(userId: string, input: SaveAiAssistantIn
         input.modelId,
       ],
     );
+    await createDefaultAiAssistantThread(client, userId, assistantId);
     await replaceKnowledgeBindings(client, assistantId, input.knowledgeBaseIds);
     return publicAssistant(await selectAssistant(userId, assistantId, client));
   });
@@ -363,24 +371,31 @@ export async function deleteAiAssistant(userId: string, assistantId: string): Pr
   await closeAiAssistantBrowserSessions(userId, assistantId);
 }
 
-export async function listAiAssistantMessages(userId: string, assistantId: string) {
+export async function listAiAssistantMessages(
+  userId: string,
+  assistantId: string,
+  threadId: string,
+) {
   await selectAssistant(userId, assistantId);
+  await selectAiAssistantThread(userId, assistantId, threadId);
   const result = await query<AssistantMessageRow>(
-    `SELECT timeline.id, timeline.assistant_id, timeline.role, timeline.content,
+    `SELECT timeline.id, timeline.assistant_id, timeline.thread_id,
+            timeline.role, timeline.content,
             timeline.model_id, timeline.model_name, timeline.provider_model,
             timeline.sources, timeline.created_at
        FROM (
-         SELECT message.id, message.assistant_id, message.role, message.content,
+         SELECT message.id, message.assistant_id, message.thread_id,
+                message.role, message.content,
                 message.model_id, model.name AS model_name, model.provider_model,
                 message.sources, message.created_at
            FROM ai_assistant_messages message
            LEFT JOIN ai_model_configs model ON model.id = message.model_id
-          WHERE message.assistant_id = $1
+          WHERE message.assistant_id = $1 AND message.thread_id = $2
           ORDER BY message.created_at DESC, message.id DESC
-          LIMIT $2
+          LIMIT $3
        ) timeline
       ORDER BY timeline.created_at, timeline.id`,
-    [assistantId, ASSISTANT_MESSAGE_LIMIT],
+    [assistantId, threadId, ASSISTANT_MESSAGE_LIMIT],
   );
   const bundles = await loadAssistantMessageFileBundles(
     assistantId,
@@ -389,10 +404,21 @@ export async function listAiAssistantMessages(userId: string, assistantId: strin
   return result.rows.map((row) => publicMessage(row, bundles.get(row.id)));
 }
 
-export async function clearAiAssistantMessages(userId: string, assistantId: string): Promise<void> {
+export async function clearAiAssistantMessages(
+  userId: string,
+  assistantId: string,
+  threadId: string,
+): Promise<void> {
   await transaction(async (client) => {
     await selectAssistant(userId, assistantId, client, true);
-    await client.query(`DELETE FROM ai_assistant_messages WHERE assistant_id = $1`, [assistantId]);
+    await requireActiveAiAssistantThread(userId, assistantId, threadId, client, true);
+    await client.query(
+      `DELETE FROM ai_assistant_messages WHERE assistant_id = $1 AND thread_id = $2`,
+      [assistantId, threadId],
+    );
+    await client.query(`UPDATE ai_assistant_threads SET updated_at = NOW() WHERE id = $1`, [
+      threadId,
+    ]);
     await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
   });
 }
@@ -427,11 +453,13 @@ async function assistantSources(
 async function generateAndSaveAssistantReply(
   userId: string,
   assistantId: string,
+  threadId: string,
   content: string,
   includeHistory: boolean,
   fileIds: string[] = [],
 ) {
   const assistant = await selectAssistant(userId, assistantId);
+  await requireActiveAiAssistantThread(userId, assistantId, threadId);
   const modelId = await resolveUserAiModelId(userId, assistant.model_id ?? undefined);
   if (!modelId) throw new ApiError(503, "当前没有可用的对话模型");
 
@@ -440,10 +468,10 @@ async function generateAndSaveAssistantReply(
         await query<Pick<AssistantMessageRow, "role" | "content">>(
           `SELECT role, content
              FROM ai_assistant_messages
-            WHERE assistant_id = $1
+            WHERE assistant_id = $1 AND thread_id = $2
             ORDER BY created_at DESC, id DESC
-            LIMIT $2`,
-          [assistantId, ASSISTANT_HISTORY_LIMIT],
+            LIMIT $3`,
+          [assistantId, threadId, ASSISTANT_HISTORY_LIMIT],
         )
       ).rows.reverse()
     : [];
@@ -462,18 +490,20 @@ async function generateAndSaveAssistantReply(
   const messages = await transaction(async (client) => {
     // 生成期间用户可能删除助理；写入前重新校验，避免留下孤立消息。
     await selectAssistant(userId, assistantId, client, true);
+    await requireActiveAiAssistantThread(userId, assistantId, threadId, client, true);
     const userMessageId = randomUUID();
     const assistantMessageId = randomUUID();
     const userCreatedAt = new Date();
     const assistantCreatedAt = new Date(userCreatedAt.getTime() + 1);
     await client.query(
       `INSERT INTO ai_assistant_messages
-         (id, assistant_id, role, content, model_id, sources, created_at)
-       VALUES ($1, $2, 'USER', $3, NULL, '[]'::jsonb, $4),
-              ($5, $2, 'ASSISTANT', $6, $7, $8::jsonb, $9)`,
+         (id, assistant_id, thread_id, role, content, model_id, sources, created_at)
+       VALUES ($1, $2, $3, 'USER', $4, NULL, '[]'::jsonb, $5),
+              ($6, $2, $3, 'ASSISTANT', $7, $8, $9::jsonb, $10)`,
       [
         userMessageId,
         assistantId,
+        threadId,
         content,
         userCreatedAt,
         assistantMessageId,
@@ -484,9 +514,13 @@ async function generateAndSaveAssistantReply(
       ],
     );
     await linkAssistantFilesToMessage(client, assistantId, userMessageId, fileIds);
+    await client.query(`UPDATE ai_assistant_threads SET updated_at = NOW() WHERE id = $1`, [
+      threadId,
+    ]);
     await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
     const messages = await client.query<AssistantMessageRow>(
-      `SELECT message.id, message.assistant_id, message.role, message.content,
+      `SELECT message.id, message.assistant_id, message.thread_id,
+              message.role, message.content,
               message.model_id, model.name AS model_name, model.provider_model,
               message.sources, message.created_at
          FROM ai_assistant_messages message
@@ -508,11 +542,13 @@ async function generateAndSaveAssistantReply(
 export async function sendAiAssistantMessage(
   userId: string,
   assistantId: string,
+  threadId: string,
   content: string,
   fileIds: string[] = [],
 ) {
-  return (await generateAndSaveAssistantReply(userId, assistantId, content, true, fileIds))
-    .messages;
+  return (
+    await generateAndSaveAssistantReply(userId, assistantId, threadId, content, true, fileIds)
+  ).messages;
 }
 
 /**
@@ -522,6 +558,7 @@ export async function sendAiAssistantMessage(
 export async function executeAiAssistantTask(
   userId: string,
   assistantId: string,
+  threadId: string,
   taskTitle: string,
   prompt: string,
   fileIds: string[] = [],
@@ -530,5 +567,5 @@ export async function executeAiAssistantTask(
   const content = [`[定时任务：${taskTitle}]`, prompt.trim(), toolContext.trim()]
     .filter(Boolean)
     .join("\n\n");
-  return generateAndSaveAssistantReply(userId, assistantId, content, false, fileIds);
+  return generateAndSaveAssistantReply(userId, assistantId, threadId, content, false, fileIds);
 }

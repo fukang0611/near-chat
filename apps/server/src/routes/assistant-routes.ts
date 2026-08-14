@@ -28,6 +28,13 @@ import {
   updateAiAssistant,
 } from "../assistant/assistant-service.js";
 import {
+  createAiAssistantThread,
+  defaultAiAssistantThreadId,
+  findAiAssistantMessageThread,
+  listAiAssistantThreads,
+  updateAiAssistantThread,
+} from "../assistant/assistant-thread-service.js";
+import {
   createAiAssistantTask,
   deleteAiAssistantTask,
   listAiAssistantTasks,
@@ -79,6 +86,15 @@ const sendMessageSchema = z.object({
     .refine((ids) => new Set(ids).size === ids.length, "引用文件不能重复")
     .default([]),
 });
+const createThreadSchema = z.object({
+  title: z.string().trim().min(1, "请输入对话名称").max(80, "对话名称不能超过 80 个字"),
+});
+const updateThreadSchema = z
+  .object({
+    title: createThreadSchema.shape.title.optional(),
+    archived: z.boolean().optional(),
+  })
+  .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 const addAssistantFileSchema = z.object({
   attachmentId: idSchema,
   origin: z.enum(["CHAT", "UPLOAD"]),
@@ -117,6 +133,7 @@ const scheduledForSchema = z
   .datetime({ offset: true, message: "执行时间格式不正确" })
   .transform((value) => new Date(value));
 const taskFields = {
+  threadId: idSchema.optional(),
   title: z.string().trim().min(1, "请输入任务名称").max(80, "任务名称不能超过 80 个字"),
   prompt: z.string().trim().min(1, "请输入任务内容").max(6000, "任务内容不能超过 6000 个字"),
   scheduleType: z.enum(["ONCE", "DAILY", "WEEKLY"]),
@@ -184,20 +201,125 @@ export function createAssistantRouter() {
     response.status(204).end();
   });
 
-  router.get("/ai/assistants/:assistantId/messages", authenticate, async (request, response) => {
+  router.get("/ai/assistants/:assistantId/threads", authenticate, async (request, response) => {
     requirePersonalAssistants();
-    const messages = await listAiAssistantMessages(
+    const includeArchived = z
+      .enum(["true", "false"])
+      .optional()
+      .transform((value) => value === "true")
+      .parse(request.query.includeArchived);
+    const threads = await listAiAssistantThreads(
       currentUser(request).id,
       idSchema.parse(request.params.assistantId),
+      includeArchived,
+    );
+    response.json({ threads });
+  });
+
+  router.post("/ai/assistants/:assistantId/threads", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const input = createThreadSchema.parse(request.body);
+    const thread = await createAiAssistantThread(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+      input.title,
+    );
+    response.status(201).json({ thread });
+  });
+
+  router.patch(
+    "/ai/assistants/:assistantId/threads/:threadId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const thread = await updateAiAssistantThread(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.threadId),
+        updateThreadSchema.parse(request.body),
+      );
+      response.json({ thread });
+    },
+  );
+
+  router.get(
+    "/ai/assistants/:assistantId/threads/:threadId/messages",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const messages = await listAiAssistantMessages(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.threadId),
+      );
+      response.json({ messages });
+    },
+  );
+
+  router.delete(
+    "/ai/assistants/:assistantId/threads/:threadId/messages",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      await clearAiAssistantMessages(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.threadId),
+      );
+      response.status(204).end();
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/threads/:threadId/messages",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const input = sendMessageSchema.parse(request.body);
+      const messages = await sendAiAssistantMessage(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.threadId),
+        input.content,
+        input.fileIds,
+      );
+      response.status(201).json({ messages });
+    },
+  );
+
+  router.get(
+    "/ai/assistants/:assistantId/messages/:messageId/location",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const threadId = await findAiAssistantMessageThread(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.messageId),
+      );
+      response.json({ threadId });
+    },
+  );
+
+  /** 旧客户端未传 threadId 时继续使用当前默认线程。 */
+  router.get("/ai/assistants/:assistantId/messages", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const assistantId = idSchema.parse(request.params.assistantId);
+    const messages = await listAiAssistantMessages(
+      currentUser(request).id,
+      assistantId,
+      await defaultAiAssistantThreadId(currentUser(request).id, assistantId),
     );
     response.json({ messages });
   });
 
   router.delete("/ai/assistants/:assistantId/messages", authenticate, async (request, response) => {
     requirePersonalAssistants();
+    const assistantId = idSchema.parse(request.params.assistantId);
     await clearAiAssistantMessages(
       currentUser(request).id,
-      idSchema.parse(request.params.assistantId),
+      assistantId,
+      await defaultAiAssistantThreadId(currentUser(request).id, assistantId),
     );
     response.status(204).end();
   });
@@ -205,9 +327,11 @@ export function createAssistantRouter() {
   router.post("/ai/assistants/:assistantId/messages", authenticate, async (request, response) => {
     requirePersonalAssistants();
     const input = sendMessageSchema.parse(request.body);
+    const assistantId = idSchema.parse(request.params.assistantId);
     const messages = await sendAiAssistantMessage(
       currentUser(request).id,
-      idSchema.parse(request.params.assistantId),
+      assistantId,
+      await defaultAiAssistantThreadId(currentUser(request).id, assistantId),
       input.content,
       input.fileIds,
     );
@@ -386,20 +510,24 @@ export function createAssistantRouter() {
 
   router.get("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
     requirePersonalAssistants();
+    const threadId = idSchema.optional().parse(request.query.threadId);
     const tasks = await listAiAssistantTasks(
       currentUser(request).id,
       idSchema.parse(request.params.assistantId),
+      threadId ?? null,
     );
     response.json({ tasks });
   });
 
   router.post("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
     requirePersonalAssistants();
-    const task = await createAiAssistantTask(
-      currentUser(request).id,
-      idSchema.parse(request.params.assistantId),
-      createTaskSchema.parse(request.body),
-    );
+    const userId = currentUser(request).id;
+    const assistantId = idSchema.parse(request.params.assistantId);
+    const input = createTaskSchema.parse(request.body);
+    const task = await createAiAssistantTask(userId, assistantId, {
+      ...input,
+      threadId: input.threadId ?? (await defaultAiAssistantThreadId(userId, assistantId)),
+    });
     response.status(201).json({ task });
   });
 

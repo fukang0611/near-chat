@@ -197,6 +197,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [assistantUnreadCount, setAssistantUnreadCount] = useState(0);
   const [assistantTarget, setAssistantTarget] = useState<{
     assistantId: string;
+    threadId: string | null;
     messageId: string | null;
   } | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -358,7 +359,18 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           const [, assistantId, messageId] = conversationId.split(":");
           if (assistantId) {
             setSelectedAssistantId(assistantId);
-            setAssistantTarget({ assistantId, messageId: messageId || null });
+            setAssistantTarget({ assistantId, threadId: null, messageId: messageId || null });
+            setAssistantUnreadCount(0);
+            setAssistantDetailOpen(true);
+            setSidebarMode("assistants");
+          }
+          return;
+        }
+        if (conversationId.startsWith("assistant-thread:")) {
+          const [, assistantId, threadId] = conversationId.split(":");
+          if (assistantId && threadId) {
+            setSelectedAssistantId(assistantId);
+            setAssistantTarget({ assistantId, threadId, messageId: null });
             setAssistantUnreadCount(0);
             setAssistantDetailOpen(true);
             setSidebarMode("assistants");
@@ -655,7 +667,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       const body = succeeded
         ? `${event.taskTitle}：${event.preview || "结果已写入助理对话"}`
         : `${event.taskTitle}：${event.preview || "请打开助理中心查看"}`;
-      const target = `assistant:${event.assistantId}:${event.messageId ?? ""}`;
+      const target = event.messageId
+        ? `assistant:${event.assistantId}:${event.messageId}`
+        : `assistant-thread:${event.assistantId}:${event.threadId}`;
       if (window.nearChatDesktop) {
         void window.nearChatDesktop
           .showNotification({ title, body, conversationId: target })
@@ -669,7 +683,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           notification.onclick = () => {
             window.focus();
             setSelectedAssistantId(event.assistantId);
-            setAssistantTarget({ assistantId: event.assistantId, messageId: event.messageId });
+            setAssistantTarget({
+              assistantId: event.assistantId,
+              threadId: event.threadId,
+              messageId: event.messageId,
+            });
             setAssistantUnreadCount(0);
             setAssistantDetailOpen(true);
             setSidebarMode("assistants");
@@ -1649,6 +1667,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           onMobileBack={() => setAssistantDetailOpen(false)}
           initialMessageId={
             assistantTarget?.assistantId === selectedAssistantId ? assistantTarget.messageId : null
+          }
+          initialThreadId={
+            assistantTarget?.assistantId === selectedAssistantId ? assistantTarget.threadId : null
           }
           refreshVersion={assistantRefreshVersion}
           createRequestVersion={assistantCreateRequestVersion}

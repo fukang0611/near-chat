@@ -92,6 +92,7 @@ describe("parseRealtimeEvent", () => {
     const task = {
       taskId: "task-one",
       assistantId: "assistant-one",
+      threadId: "thread-one",
       assistantName: "分析搭档",
       taskTitle: "每日摘要",
       status: "SUCCEEDED",

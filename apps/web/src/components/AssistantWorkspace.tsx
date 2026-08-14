@@ -1,4 +1,5 @@
 import {
+  ArchiveRestore,
   ArrowUp,
   BrainCircuit,
   CalendarClock,
@@ -30,6 +31,7 @@ import type {
   AiAssistantCategory,
   AiAssistantFile,
   AiAssistantMessage,
+  AiAssistantThread,
   AiCapabilities,
   KnowledgeBase,
   KnowledgeSource,
@@ -44,6 +46,7 @@ import {
   assistantCategoryIcon,
 } from "./AssistantIdentity";
 import { AssistantTasksPanel } from "./AssistantTasksPanel";
+import { AssistantThreadBar } from "./AssistantThreadBar";
 
 export interface AssistantDirectorySnapshot {
   assistants: AiAssistant[];
@@ -57,6 +60,7 @@ interface AssistantWorkspaceProps {
   onDirectoryChange: (snapshot: AssistantDirectorySnapshot) => void;
   onMobileBack: () => void;
   initialMessageId?: string | null;
+  initialThreadId?: string | null;
   refreshVersion?: number;
   createRequestVersion?: number;
 }
@@ -169,10 +173,16 @@ export function AssistantWorkspace({
   onDirectoryChange,
   onMobileBack,
   initialMessageId = null,
+  initialThreadId = null,
   refreshVersion = 0,
   createRequestVersion = 0,
 }: AssistantWorkspaceProps) {
   const [assistants, setAssistants] = useState<AiAssistant[]>([]);
+  const [threads, setThreads] = useState<AiAssistantThread[]>([]);
+  const [selectedThreadIds, setSelectedThreadIds] = useState<Record<string, string>>({});
+  const [loadingThreads, setLoadingThreads] = useState(false);
+  const [showArchivedThreads, setShowArchivedThreads] = useState(false);
+  const [threadBusyId, setThreadBusyId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiAssistantMessage[]>([]);
   const [models, setModels] = useState<UserAiModels>({
     models: [],
@@ -210,11 +220,21 @@ export function AssistantWorkspace({
   const messageEndRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const selectedIdRef = useRef(selectedId);
+  const selectedThreadIdRef = useRef<string | null>(null);
   const handledCreateRequestRef = useRef(createRequestVersion);
 
   const selectedAssistant = useMemo(
     () => assistants.find((assistant) => assistant.id === selectedId) ?? null,
     [assistants, selectedId],
+  );
+  const selectedThreadId = selectedId ? (selectedThreadIds[selectedId] ?? null) : null;
+  const selectedThread = useMemo(
+    () => threads.find((thread) => thread.id === selectedThreadId) ?? null,
+    [selectedThreadId, threads],
+  );
+  const visibleThreads = useMemo(
+    () => (showArchivedThreads ? threads : threads.filter((thread) => !thread.archived)),
+    [showArchivedThreads, threads],
   );
   const processableAssistantFiles = useMemo(
     () => assistantFiles.filter((file) => file.processable),
@@ -225,18 +245,18 @@ export function AssistantWorkspace({
     [assistantFiles, selectedFileIds],
   );
   const defaultModel = models.models.find((model) => model.id === models.selectedModelId) ?? null;
-  const draft = selectedId ? (drafts[selectedId] ?? "") : "";
+  const draft = selectedThreadId ? (drafts[selectedThreadId] ?? "") : "";
   const updateDraft = useCallback(
     (value: string) => {
-      if (!selectedId) return;
+      if (!selectedThreadId) return;
       setDrafts((current) => {
         const next = { ...current };
-        if (value) next[selectedId] = value;
-        else delete next[selectedId];
+        if (value) next[selectedThreadId] = value;
+        else delete next[selectedThreadId];
         return next;
       });
     },
-    [selectedId],
+    [selectedThreadId],
   );
   const showNotice = useCallback((tone: "error" | "success", text: string) => {
     setNotice({ tone, text });
@@ -252,6 +272,10 @@ export function AssistantWorkspace({
   useEffect(() => {
     selectedIdRef.current = selectedId;
   }, [selectedId]);
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
 
   useEffect(() => {
     let active = true;
@@ -293,21 +317,85 @@ export function AssistantWorkspace({
   }, [refreshVersion]);
 
   useEffect(() => {
-    if (!initialMessageId || !selectedId) return;
+    setShowArchivedThreads(false);
+  }, [selectedId]);
+
+  // 对话目录始终包含归档项，是否展示仅由界面控制，避免归档/恢复后重复请求和状态跳变。
+  useEffect(() => {
+    let active = true;
+    setThreads([]);
+    setMessages([]);
+    setConfirmClear(false);
+    setLoadingThreads(Boolean(selectedId));
+    if (!selectedId) return () => undefined;
+    void api
+      .aiAssistantThreads(selectedId, true)
+      .then((result) => {
+        if (!active) return;
+        setThreads(result.threads);
+        setSelectedThreadIds((current) => {
+          const remembered = current[selectedId];
+          const preferred = result.threads.some((thread) => thread.id === remembered)
+            ? remembered
+            : null;
+          const nextId =
+            preferred ??
+            result.threads.find((thread) => !thread.archived)?.id ??
+            result.threads[0]?.id;
+          if (!nextId || current[selectedId] === nextId) return current;
+          return { ...current, [selectedId]: nextId };
+        });
+      })
+      .catch((error) => {
+        if (active) setNotice({ tone: "error", text: errorMessage(error, "对话目录加载失败") });
+      })
+      .finally(() => {
+        if (active) setLoadingThreads(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshVersion, selectedId]);
+
+  // 通知可直接携带 threadId；旧通知只有 messageId 时再通过服务端定位所属对话。
+  useEffect(() => {
+    if ((!initialMessageId && !initialThreadId) || !selectedId) return () => undefined;
+    let active = true;
     setWorkspaceMode("chat");
-    setTargetMessageId(initialMessageId);
-    setMessageLoadVersion((current) => current + 1);
-  }, [initialMessageId, selectedId]);
+    const location = initialThreadId
+      ? Promise.resolve({ threadId: initialThreadId })
+      : api.aiAssistantMessageLocation(selectedId, initialMessageId!);
+    void location
+      .then(({ threadId }) => {
+        if (!active) return;
+        setSelectedThreadIds((current) => ({ ...current, [selectedId]: threadId }));
+        setTargetMessageId(initialMessageId ?? null);
+        setMessageLoadVersion((current) => current + 1);
+      })
+      .catch((error) => {
+        if (active) setNotice({ tone: "error", text: errorMessage(error, "原消息定位失败") });
+      });
+    return () => {
+      active = false;
+    };
+  }, [initialMessageId, initialThreadId, selectedId]);
+
+  useEffect(() => {
+    if (selectedThread?.archived) setShowArchivedThreads(true);
+  }, [selectedThread]);
 
   useEffect(() => {
     let active = true;
     setMessages([]);
     setConfirmClear(false);
     setConfirmDelete(false);
-    if (!selectedId) return () => undefined;
+    if (!selectedId || !selectedThreadId) {
+      setLoadingMessages(false);
+      return () => undefined;
+    }
     setLoadingMessages(true);
     void api
-      .aiAssistantMessages(selectedId)
+      .aiAssistantMessages(selectedId, selectedThreadId)
       .then((result) => {
         if (active) setMessages(result.messages);
       })
@@ -320,7 +408,7 @@ export function AssistantWorkspace({
     return () => {
       active = false;
     };
-  }, [messageLoadVersion, refreshVersion, selectedId]);
+  }, [messageLoadVersion, refreshVersion, selectedId, selectedThreadId]);
 
   useEffect(() => {
     let active = true;
@@ -348,7 +436,7 @@ export function AssistantWorkspace({
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end" });
-  }, [messages, sendingText, selectedId]);
+  }, [messages, sendingText, selectedId, selectedThreadId]);
 
   useEffect(() => {
     if (!targetMessageId || loadingMessages || workspaceMode !== "chat") return;
@@ -369,6 +457,93 @@ export function AssistantWorkspace({
     setTargetMessageId(messageId);
     setMessageLoadVersion((current) => current + 1);
   }, []);
+
+  const selectThread = useCallback(
+    (threadId: string) => {
+      if (!selectedId || threadId === selectedThreadId) return;
+      if (sendingText) {
+        showNotice("error", "请等待当前回复完成后再切换对话");
+        return;
+      }
+      setSelectedThreadIds((current) => ({ ...current, [selectedId]: threadId }));
+      setTargetMessageId(null);
+      setConfirmClear(false);
+      setFilePickerOpen(false);
+      setSelectedFileIds([]);
+    },
+    [selectedId, selectedThreadId, sendingText, showNotice],
+  );
+
+  const createThread = useCallback(
+    async (title: string) => {
+      if (!selectedId || threadBusyId || sendingText) return false;
+      setThreadBusyId("create");
+      try {
+        const result = await api.createAiAssistantThread(selectedId, title);
+        setThreads((current) => [result.thread, ...current]);
+        setSelectedThreadIds((current) => ({ ...current, [selectedId]: result.thread.id }));
+        setShowArchivedThreads(false);
+        showNotice("success", `已创建“${result.thread.title}”`);
+        return true;
+      } catch (error) {
+        showNotice("error", errorMessage(error, "新建对话失败"));
+        return false;
+      } finally {
+        setThreadBusyId(null);
+      }
+    },
+    [selectedId, sendingText, showNotice, threadBusyId],
+  );
+
+  const renameThread = useCallback(
+    async (threadId: string, title: string) => {
+      if (!selectedId || threadBusyId) return false;
+      setThreadBusyId(threadId);
+      try {
+        const result = await api.updateAiAssistantThread(selectedId, threadId, { title });
+        setThreads((current) =>
+          current.map((thread) => (thread.id === result.thread.id ? result.thread : thread)),
+        );
+        showNotice("success", "对话名称已更新");
+        return true;
+      } catch (error) {
+        showNotice("error", errorMessage(error, "重命名失败"));
+        return false;
+      } finally {
+        setThreadBusyId(null);
+      }
+    },
+    [selectedId, showNotice, threadBusyId],
+  );
+
+  const toggleThreadArchived = useCallback(
+    async (thread: AiAssistantThread) => {
+      if (!selectedId || threadBusyId || sendingText) return;
+      setThreadBusyId(thread.id);
+      try {
+        await api.updateAiAssistantThread(selectedId, thread.id, {
+          archived: !thread.archived,
+        });
+        const result = await api.aiAssistantThreads(selectedId, true);
+        setThreads(result.threads);
+        if (!thread.archived && selectedThreadId === thread.id) {
+          const nextThread = result.threads.find((item) => !item.archived);
+          if (nextThread) {
+            setSelectedThreadIds((current) => ({ ...current, [selectedId]: nextThread.id }));
+          }
+        }
+        showNotice(
+          "success",
+          thread.archived ? `已恢复“${thread.title}”` : `已归档“${thread.title}”`,
+        );
+      } catch (error) {
+        showNotice("error", errorMessage(error, thread.archived ? "恢复失败" : "归档失败"));
+      } finally {
+        setThreadBusyId(null);
+      }
+    },
+    [selectedId, selectedThreadId, sendingText, showNotice, threadBusyId],
+  );
 
   const openTaskBrowserRun = useCallback((runId: string) => {
     setBrowserFocusRunId(runId);
@@ -471,18 +646,33 @@ export function AssistantWorkspace({
   };
 
   const clearMessages = async () => {
-    if (!selectedAssistant) return;
+    if (!selectedAssistant || !selectedThread || selectedThread.archived) return;
     try {
-      await api.clearAiAssistantMessages(selectedAssistant.id);
+      await api.clearAiAssistantMessages(selectedAssistant.id, selectedThread.id);
       setMessages([]);
+      const otherLastMessageAt = threads
+        .filter((thread) => thread.id !== selectedThread.id && thread.lastMessageAt)
+        .map((thread) => thread.lastMessageAt as string)
+        .sort((left, right) => right.localeCompare(left))[0];
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.id === selectedThread.id
+            ? { ...thread, messageCount: 0, lastMessageAt: null }
+            : thread,
+        ),
+      );
       setAssistants((current) =>
         current.map((assistant) =>
           assistant.id === selectedAssistant.id
-            ? { ...assistant, messageCount: 0, lastMessageAt: null }
+            ? {
+                ...assistant,
+                messageCount: Math.max(0, assistant.messageCount - selectedThread.messageCount),
+                lastMessageAt: otherLastMessageAt ?? null,
+              }
             : assistant,
         ),
       );
-      setNotice({ tone: "success", text: "对话记录已清空" });
+      setNotice({ tone: "success", text: `“${selectedThread.title}”已清空` });
     } catch (error) {
       setNotice({ tone: "error", text: errorMessage(error, "清空失败") });
     } finally {
@@ -493,7 +683,17 @@ export function AssistantWorkspace({
   const sendMessage = async (event?: FormEvent) => {
     event?.preventDefault();
     const content = draft.trim();
-    if (!selectedAssistant || !content || sendingText) return;
+    if (
+      !selectedAssistant ||
+      !selectedThread ||
+      selectedThread.archived ||
+      !content ||
+      sendingText
+    ) {
+      return;
+    }
+    const assistantId = selectedAssistant.id;
+    const threadId = selectedThread.id;
     const fileIds = selectedFileIds;
     const referencedFiles = assistantFiles.filter((file) => fileIds.includes(file.id));
     updateDraft("");
@@ -503,12 +703,26 @@ export function AssistantWorkspace({
     setSendingFiles(referencedFiles);
     setNotice(null);
     try {
-      const result = await api.sendAiAssistantMessage(selectedAssistant.id, content, fileIds);
-      setMessages((current) => [...current, ...result.messages]);
+      const result = await api.sendAiAssistantMessage(assistantId, threadId, content, fileIds);
+      if (selectedIdRef.current === assistantId && selectedThreadIdRef.current === threadId) {
+        setMessages((current) => [...current, ...result.messages]);
+      }
       const lastMessageAt = result.messages.at(-1)?.createdAt ?? new Date().toISOString();
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.id === threadId
+            ? {
+                ...thread,
+                messageCount: thread.messageCount + result.messages.length,
+                lastMessageAt,
+                updatedAt: lastMessageAt,
+              }
+            : thread,
+        ),
+      );
       setAssistants((current) =>
         current.map((assistant) =>
-          assistant.id === selectedAssistant.id
+          assistant.id === assistantId
             ? {
                 ...assistant,
                 messageCount: assistant.messageCount + result.messages.length,
@@ -518,7 +732,7 @@ export function AssistantWorkspace({
         ),
       );
     } catch (error) {
-      updateDraft(content);
+      setDrafts((current) => ({ ...current, [threadId]: content }));
       setSelectedFileIds(
         fileIds.filter((fileId) => assistantFiles.some((file) => file.id === fileId)),
       );
@@ -750,16 +964,34 @@ export function AssistantWorkspace({
                       type="button"
                       onClick={() => setConfirmClear(true)}
                       aria-label="清空对话"
-                      disabled={messages.length === 0}
+                      disabled={messages.length === 0 || selectedThread?.archived}
                     >
                       <MoreHorizontal size={18} />
                     </button>
                   )}
                 </div>
               </header>
-              {workspaceMode === "tasks" ? (
+              <AssistantThreadBar
+                threads={visibleThreads}
+                selectedId={selectedThreadId}
+                loading={loadingThreads}
+                busyId={threadBusyId ?? (sendingText ? selectedThreadId : null)}
+                showArchived={showArchivedThreads}
+                onSelect={selectThread}
+                onCreate={createThread}
+                onRename={renameThread}
+                onToggleArchived={toggleThreadArchived}
+                onToggleShowArchived={() => setShowArchivedThreads((current) => !current)}
+              />
+              {loadingThreads || !selectedThread ? (
+                <div className="assistant-workspace-loading" role="status">
+                  <LoaderCircle className="spin" size={20} />
+                  正在准备对话
+                </div>
+              ) : workspaceMode === "tasks" ? (
                 <AssistantTasksPanel
                   assistant={selectedAssistant}
+                  threadId={selectedThread.id}
                   files={assistantFiles}
                   refreshVersion={refreshVersion}
                   onNotice={showNotice}
@@ -800,7 +1032,7 @@ export function AssistantWorkspace({
                 <>
                   {confirmClear && (
                     <div className="assistant-inline-confirm">
-                      <span>清空与 {selectedAssistant.name} 的全部对话？</span>
+                      <span>清空“{selectedThread.title}”中的全部消息？</span>
                       <button type="button" onClick={() => setConfirmClear(false)}>
                         取消
                       </button>
@@ -996,138 +1228,155 @@ export function AssistantWorkspace({
                     )}
                     <div ref={messageEndRef} />
                   </div>
-                  <form
-                    className="assistant-composer"
-                    onSubmit={(event) => void sendMessage(event)}
-                  >
-                    {filePickerOpen && (
-                      <div className="assistant-composer-file-picker">
-                        <header>
-                          <span>
-                            <Paperclip size={14} />
-                            选择本轮要读取的文件
-                          </span>
-                          <small>{selectedFileIds.length} / 5</small>
-                        </header>
-                        <div>
-                          {processableAssistantFiles.length === 0 ? (
+                  {selectedThread.archived ? (
+                    <div className="assistant-thread-archived-note">
+                      <span>
+                        <strong>这条对话已归档</strong>
+                        <small>历史消息仍然保留，恢复后可继续发送和执行自动任务。</small>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void toggleThreadArchived(selectedThread)}
+                        disabled={Boolean(threadBusyId)}
+                      >
+                        <ArchiveRestore size={14} />
+                        恢复对话
+                      </button>
+                    </div>
+                  ) : (
+                    <form
+                      className="assistant-composer"
+                      onSubmit={(event) => void sendMessage(event)}
+                    >
+                      {filePickerOpen && (
+                        <div className="assistant-composer-file-picker">
+                          <header>
+                            <span>
+                              <Paperclip size={14} />
+                              选择本轮要读取的文件
+                            </span>
+                            <small>{selectedFileIds.length} / 5</small>
+                          </header>
+                          <div>
+                            {processableAssistantFiles.length === 0 ? (
+                              <button
+                                type="button"
+                                className="assistant-composer-file-empty"
+                                onClick={() => {
+                                  setFilePickerOpen(false);
+                                  setWorkspaceMode("files");
+                                }}
+                              >
+                                <FolderOpen size={18} />
+                                <span>
+                                  <strong>还没有可读取的文档</strong>
+                                  <small>前往文件工作区添加 PDF、DOCX、Markdown 或文本</small>
+                                </span>
+                              </button>
+                            ) : (
+                              processableAssistantFiles.map((file) => {
+                                const selected = selectedFileIds.includes(file.id);
+                                return (
+                                  <label key={file.id}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selected}
+                                      disabled={!selected && selectedFileIds.length >= 5}
+                                      onChange={() =>
+                                        setSelectedFileIds((current) =>
+                                          selected
+                                            ? current.filter((id) => id !== file.id)
+                                            : [...current, file.id].slice(0, 5),
+                                        )
+                                      }
+                                    />
+                                    <FileText size={15} />
+                                    <span title={file.attachment.originalName}>
+                                      {file.attachment.originalName}
+                                    </span>
+                                    <i>{selected && <Check size={11} />}</i>
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
+                          <footer>
+                            <span>只有勾选的文件会在本轮发送提取后的文字</span>
                             <button
                               type="button"
-                              className="assistant-composer-file-empty"
                               onClick={() => {
                                 setFilePickerOpen(false);
                                 setWorkspaceMode("files");
                               }}
                             >
-                              <FolderOpen size={18} />
-                              <span>
-                                <strong>还没有可读取的文档</strong>
-                                <small>前往文件工作区添加 PDF、DOCX、Markdown 或文本</small>
-                              </span>
+                              管理文件
                             </button>
-                          ) : (
-                            processableAssistantFiles.map((file) => {
-                              const selected = selectedFileIds.includes(file.id);
-                              return (
-                                <label key={file.id}>
-                                  <input
-                                    type="checkbox"
-                                    checked={selected}
-                                    disabled={!selected && selectedFileIds.length >= 5}
-                                    onChange={() =>
-                                      setSelectedFileIds((current) =>
-                                        selected
-                                          ? current.filter((id) => id !== file.id)
-                                          : [...current, file.id].slice(0, 5),
-                                      )
-                                    }
-                                  />
-                                  <FileText size={15} />
-                                  <span title={file.attachment.originalName}>
-                                    {file.attachment.originalName}
-                                  </span>
-                                  <i>{selected && <Check size={11} />}</i>
-                                </label>
-                              );
-                            })
-                          )}
+                          </footer>
                         </div>
-                        <footer>
-                          <span>只有勾选的文件会在本轮发送提取后的文字</span>
+                      )}
+                      {selectedAssistantFiles.length > 0 && (
+                        <div className="assistant-composer-selected-files">
+                          {selectedAssistantFiles.map((file) => (
+                            <span key={file.id}>
+                              <FileText size={12} />
+                              <b>{file.attachment.originalName}</b>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedFileIds((current) =>
+                                    current.filter((id) => id !== file.id),
+                                  )
+                                }
+                                aria-label={`取消引用 ${file.attachment.originalName}`}
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      <textarea
+                        ref={composerRef}
+                        value={draft}
+                        onChange={(event) => updateDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void sendMessage();
+                          }
+                        }}
+                        placeholder={`给 ${selectedAssistant.name} 发消息`}
+                        rows={2}
+                        maxLength={4000}
+                        disabled={Boolean(sendingText)}
+                      />
+                      <footer>
+                        <div>
                           <button
+                            className={`assistant-composer-attach ${filePickerOpen ? "is-active" : ""}`}
                             type="button"
-                            onClick={() => {
-                              setFilePickerOpen(false);
-                              setWorkspaceMode("files");
-                            }}
+                            onClick={() => setFilePickerOpen((current) => !current)}
+                            aria-label="引用助理文件"
+                            aria-expanded={filePickerOpen}
                           >
-                            管理文件
+                            <Paperclip size={15} />
+                            {selectedFileIds.length > 0 && <b>{selectedFileIds.length}</b>}
                           </button>
-                        </footer>
-                      </div>
-                    )}
-                    {selectedAssistantFiles.length > 0 && (
-                      <div className="assistant-composer-selected-files">
-                        {selectedAssistantFiles.map((file) => (
-                          <span key={file.id}>
-                            <FileText size={12} />
-                            <b>{file.attachment.originalName}</b>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setSelectedFileIds((current) =>
-                                  current.filter((id) => id !== file.id),
-                                )
-                              }
-                              aria-label={`取消引用 ${file.attachment.originalName}`}
-                            >
-                              <X size={11} />
-                            </button>
+                          <span>
+                            <MessageSquareText size={13} />
+                            Enter 发送 · Shift + Enter 换行
                           </span>
-                        ))}
-                      </div>
-                    )}
-                    <textarea
-                      ref={composerRef}
-                      value={draft}
-                      onChange={(event) => updateDraft(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          void sendMessage();
-                        }
-                      }}
-                      placeholder={`给 ${selectedAssistant.name} 发消息`}
-                      rows={2}
-                      maxLength={4000}
-                      disabled={Boolean(sendingText)}
-                    />
-                    <footer>
-                      <div>
+                        </div>
                         <button
-                          className={`assistant-composer-attach ${filePickerOpen ? "is-active" : ""}`}
-                          type="button"
-                          onClick={() => setFilePickerOpen((current) => !current)}
-                          aria-label="引用助理文件"
-                          aria-expanded={filePickerOpen}
+                          type="submit"
+                          disabled={!draft.trim() || Boolean(sendingText)}
+                          aria-label="发送给智能助理"
                         >
-                          <Paperclip size={15} />
-                          {selectedFileIds.length > 0 && <b>{selectedFileIds.length}</b>}
+                          <Send size={17} />
                         </button>
-                        <span>
-                          <MessageSquareText size={13} />
-                          Enter 发送 · Shift + Enter 换行
-                        </span>
-                      </div>
-                      <button
-                        type="submit"
-                        disabled={!draft.trim() || Boolean(sendingText)}
-                        aria-label="发送给智能助理"
-                      >
-                        <Send size={17} />
-                      </button>
-                    </footer>
-                  </form>
+                      </footer>
+                    </form>
+                  )}
                 </>
               )}
             </>

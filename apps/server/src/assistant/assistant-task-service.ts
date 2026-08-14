@@ -10,6 +10,7 @@ import {
 import { ASSISTANT_MESSAGE_FILE_LIMIT } from "./assistant-file-service.js";
 import type { AiAssistantScheduleType } from "./assistant-task-schedule.js";
 import { nextAssistantTaskRun } from "./assistant-task-schedule.js";
+import { requireActiveAiAssistantThread } from "./assistant-thread-service.js";
 
 const ASSISTANT_TASK_LIMIT = 50;
 const ASSISTANT_TASK_RUN_LIMIT = 5;
@@ -21,6 +22,7 @@ export type AiAssistantTaskTrigger = "SCHEDULED" | "MANUAL";
 export type AiAssistantTaskBrowserAction = "NONE" | "READ" | "SCREENSHOT";
 
 export interface SaveAiAssistantTaskInput {
+  threadId: string;
   title: string;
   prompt: string;
   scheduleType: AiAssistantScheduleType;
@@ -45,6 +47,7 @@ export interface UpdateAiAssistantTaskInput {
 interface AssistantTaskRow {
   id: string;
   assistant_id: string;
+  thread_id: string;
   owner_id: string;
   title: string;
   prompt: string;
@@ -78,7 +81,7 @@ interface AssistantTaskRunRow {
 }
 
 const TASK_COLUMNS = `
-  task.id, task.assistant_id, task.owner_id, task.title, task.prompt,
+  task.id, task.assistant_id, task.thread_id, task.owner_id, task.title, task.prompt,
   task.browser_action, task.browser_url,
   ARRAY(
     SELECT task_file.assistant_file_id
@@ -110,6 +113,7 @@ function publicTask(row: AssistantTaskRow, runs: AssistantTaskRunRow[] = []) {
   return {
     id: row.id,
     assistantId: row.assistant_id,
+    threadId: row.thread_id,
     title: row.title,
     prompt: row.prompt,
     fileIds: row.file_ids,
@@ -245,16 +249,21 @@ async function taskWithRuns(
   return task;
 }
 
-export async function listAiAssistantTasks(userId: string, assistantId: string) {
+export async function listAiAssistantTasks(
+  userId: string,
+  assistantId: string,
+  threadId: string | null = null,
+) {
   const taskResult = await transaction(async (client) => {
     await assertAssistantOwner(client, userId, assistantId);
     return client.query<AssistantTaskRow>(
       `SELECT ${TASK_COLUMNS}
          FROM ai_assistant_tasks task
         WHERE task.assistant_id = $1 AND task.owner_id = $2
+          AND ($3::uuid IS NULL OR task.thread_id = $3)
         ORDER BY task.enabled DESC, task.next_run_at NULLS LAST,
                  task.updated_at DESC, task.created_at DESC`,
-      [assistantId, userId],
+      [assistantId, userId, threadId],
     );
   });
   if (taskResult.rows.length === 0) return [];
@@ -294,6 +303,7 @@ export async function createAiAssistantTask(
   const browserUrl = normalizeTaskBrowserTarget(input.browserAction, input.browserUrl);
   const taskId = await transaction(async (client) => {
     await assertAssistantOwner(client, userId, assistantId);
+    await requireActiveAiAssistantThread(userId, assistantId, input.threadId, client);
     const fileIds = await validateTaskFiles(client, userId, assistantId, input.fileIds);
     if (input.browserAction !== "NONE") {
       await assertAiAssistantBrowserTaskPermission(
@@ -314,12 +324,13 @@ export async function createAiAssistantTask(
     const id = randomUUID();
     await client.query(
       `INSERT INTO ai_assistant_tasks
-         (id, assistant_id, owner_id, title, prompt, browser_action, browser_url,
+         (id, assistant_id, thread_id, owner_id, title, prompt, browser_action, browser_url,
           schedule_type, enabled, next_run_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         id,
         assistantId,
+        input.threadId,
         userId,
         input.title,
         input.prompt,
@@ -345,6 +356,7 @@ export async function updateAiAssistantTask(
   if (input.scheduledFor) validateScheduledFor(input.scheduledFor);
   await transaction(async (client) => {
     const current = await selectTask(client, userId, assistantId, taskId, true);
+    await requireActiveAiAssistantThread(userId, assistantId, current.thread_id, client);
     const scheduleType = input.scheduleType ?? current.schedule_type;
     const browserAction = input.browserAction ?? current.browser_action;
     const browserUrl = normalizeTaskBrowserTarget(
@@ -365,6 +377,9 @@ export async function updateAiAssistantTask(
         (input.enabled === true && !current.enabled))
     ) {
       await assertAiAssistantBrowserTaskPermission(userId, assistantId, browserAction, client);
+    }
+    if (input.enabled === true && !current.enabled) {
+      await requireActiveAiAssistantThread(userId, assistantId, current.thread_id, client);
     }
 
     if (enabled && !nextRunAt) {
@@ -426,6 +441,7 @@ export async function requestAiAssistantTaskRun(
 ) {
   await transaction(async (client) => {
     const current = await selectTask(client, userId, assistantId, taskId, true);
+    await requireActiveAiAssistantThread(userId, assistantId, current.thread_id, client);
     const running = await client.query(
       `SELECT 1 FROM ai_assistant_task_runs
         WHERE task_id = $1 AND status = 'RUNNING' LIMIT 1`,

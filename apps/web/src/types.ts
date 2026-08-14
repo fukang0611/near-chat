@@ -355,6 +355,7 @@ export interface AiAssistant {
 export interface AiAssistantMessage {
   id: string;
   assistantId: string;
+  threadId: string;
   role: "USER" | "ASSISTANT";
   content: string;
   model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
@@ -364,6 +365,18 @@ export interface AiAssistantMessage {
   /** 用户把该条助理回复显式保存后生成的文件。 */
   generatedFiles?: AiAssistantFile[];
   createdAt: string;
+}
+
+export interface AiAssistantThread {
+  id: string;
+  assistantId: string;
+  title: string;
+  archived: boolean;
+  isDefault: boolean;
+  messageCount: number;
+  lastMessageAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AiAssistantFileOrigin = "CHAT" | "UPLOAD" | "GENERATED";
@@ -417,6 +430,7 @@ export interface AiAssistantTaskRun {
 export interface AiAssistantTask {
   id: string;
   assistantId: string;
+  threadId: string;
   title: string;
   prompt: string;
   scheduleType: AiAssistantTaskSchedule;
@@ -439,6 +453,7 @@ export interface AiAssistantTask {
 export interface AiAssistantTaskEvent {
   taskId: string;
   assistantId: string;
+  threadId: string;
   assistantName: string;
   taskTitle: string;
   status: "SUCCEEDED" | "FAILED";

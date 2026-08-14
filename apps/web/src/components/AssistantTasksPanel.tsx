@@ -33,6 +33,7 @@ import { formatBytes } from "../utils/format";
 
 interface AssistantTasksPanelProps {
   assistant: AiAssistant;
+  threadId: string;
   files: AiAssistantFile[];
   refreshVersion: number;
   onNotice: (tone: "error" | "success", text: string) => void;
@@ -127,6 +128,7 @@ function runStatus(task: AiAssistantTask) {
 /** 助理任务定义和最近执行历史均由此组件维护，主对话只接收定位动作。 */
 export function AssistantTasksPanel({
   assistant,
+  threadId,
   files,
   refreshVersion,
   onNotice,
@@ -152,7 +154,7 @@ export function AssistantTasksPanel({
     setLoading(true);
     try {
       const [taskResult, permissionResult] = await Promise.all([
-        api.aiAssistantTasks(assistant.id),
+        api.aiAssistantTasks(assistant.id, threadId),
         api.aiAssistantBrowserPermission(assistant.id),
       ]);
       if (sequence === loadSequenceRef.current) {
@@ -166,13 +168,14 @@ export function AssistantTasksPanel({
     } finally {
       if (sequence === loadSequenceRef.current) setLoading(false);
     }
-  }, [assistant.id, onNotice]);
+  }, [assistant.id, onNotice, threadId]);
 
   useEffect(() => {
-    if (loadedAssistantIdRef.current !== assistant.id) {
+    const workspaceKey = `${assistant.id}:${threadId}`;
+    if (loadedAssistantIdRef.current !== workspaceKey) {
       setEditingId(null);
       setConfirmDeleteId(null);
-      loadedAssistantIdRef.current = assistant.id;
+      loadedAssistantIdRef.current = workspaceKey;
     }
     void loadTasks();
   }, [assistant.id, loadTasks, refreshVersion]);
@@ -200,6 +203,7 @@ export function AssistantTasksPanel({
     }
     const input: SaveAiAssistantTaskInput = {
       title: form.title.trim(),
+      threadId,
       prompt: form.prompt.trim(),
       scheduleType: form.scheduleType,
       scheduledFor: scheduledFor.toISOString(),

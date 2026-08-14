@@ -23,7 +23,8 @@
     "smoke:phase3": "node scripts/phase-3-smoke-test.mjs",
     "smoke:knowledge-sharing": "node scripts/knowledge-sharing-smoke-test.mjs",
     "smoke:knowledge-extraction": "node scripts/knowledge-extraction-smoke-test.mjs",
-    "smoke:assistant-task-tools": "node scripts/assistant-task-tools-smoke-test.mjs"
+    "smoke:assistant-task-tools": "node scripts/assistant-task-tools-smoke-test.mjs",
+    "smoke:assistant-threads": "node scripts/assistant-threads-smoke-test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

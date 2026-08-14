@@ -19,6 +19,7 @@ interface ClaimedAssistantTask {
   runId: string;
   taskId: string;
   assistantId: string;
+  threadId: string;
   assistantName: string;
   ownerId: string;
   title: string;
@@ -31,6 +32,7 @@ interface ClaimedAssistantTask {
 interface DueTaskRow {
   id: string;
   assistant_id: string;
+  thread_id: string;
   assistant_name: string;
   owner_id: string;
   title: string;
@@ -66,7 +68,7 @@ async function recoverStaleRuns(): Promise<void> {
 async function claimAssistantTask(): Promise<ClaimedAssistantTask | null> {
   return transaction(async (client) => {
     const result = await client.query<DueTaskRow>(
-      `SELECT task.id, task.assistant_id, assistant.name AS assistant_name,
+      `SELECT task.id, task.assistant_id, task.thread_id, assistant.name AS assistant_name,
               task.owner_id, task.title, task.prompt, task.schedule_type,
               task.browser_action, task.browser_url,
               ARRAY(
@@ -78,10 +80,12 @@ async function claimAssistantTask(): Promise<ClaimedAssistantTask | null> {
               task.next_run_at, task.run_requested_at
          FROM ai_assistant_tasks task
          JOIN ai_assistants assistant ON assistant.id = task.assistant_id
+         JOIN ai_assistant_threads thread ON thread.id = task.thread_id
         WHERE (
                 task.run_requested_at IS NOT NULL
                 OR (task.enabled = TRUE AND task.next_run_at <= NOW())
               )
+          AND thread.archived = FALSE
           AND NOT EXISTS (
                 SELECT 1 FROM ai_assistant_task_runs run
                  WHERE run.task_id = task.id AND run.status = 'RUNNING'
@@ -142,6 +146,7 @@ async function claimAssistantTask(): Promise<ClaimedAssistantTask | null> {
       runId,
       taskId: task.id,
       assistantId: task.assistant_id,
+      threadId: task.thread_id,
       assistantName: task.assistant_name,
       ownerId: task.owner_id,
       title: task.title,
@@ -254,6 +259,7 @@ async function processAssistantTask(task: ClaimedAssistantTask, realtime: Realti
     const generated = await executeAiAssistantTask(
       task.ownerId,
       task.assistantId,
+      task.threadId,
       task.title,
       task.prompt,
       task.fileIds,
@@ -280,6 +286,7 @@ async function processAssistantTask(task: ClaimedAssistantTask, realtime: Realti
       payload: {
         taskId: task.taskId,
         assistantId: task.assistantId,
+        threadId: task.threadId,
         assistantName: generated.assistantName,
         taskTitle: task.title,
         status: "SUCCEEDED",
@@ -298,6 +305,7 @@ async function processAssistantTask(task: ClaimedAssistantTask, realtime: Realti
       payload: {
         taskId: task.taskId,
         assistantId: task.assistantId,
+        threadId: task.threadId,
         assistantName: task.assistantName,
         taskTitle: task.title,
         status: "FAILED",

@@ -144,6 +144,7 @@ function isAssistantTaskEvent(value: unknown): value is AiAssistantTaskEvent {
     isRecord(value) &&
     typeof value.taskId === "string" &&
     typeof value.assistantId === "string" &&
+    typeof value.threadId === "string" &&
     typeof value.assistantName === "string" &&
     typeof value.taskTitle === "string" &&
     (value.status === "SUCCEEDED" || value.status === "FAILED") &&

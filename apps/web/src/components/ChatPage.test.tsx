@@ -412,6 +412,21 @@ describe("ChatPage message scrolling", () => {
       defaultModelId: null,
     });
     vi.spyOn(api, "knowledgeBases").mockResolvedValue({ knowledgeBases: [] });
+    vi.spyOn(api, "aiAssistantThreads").mockResolvedValue({
+      threads: [
+        {
+          id: "abababab-abab-4bab-8bab-abababababab",
+          assistantId: smartAssistant.id,
+          title: "默认对话",
+          archived: false,
+          isDefault: true,
+          messageCount: 0,
+          lastMessageAt: null,
+          createdAt: "2026-08-14T08:00:00.000Z",
+          updatedAt: "2026-08-14T08:00:00.000Z",
+        },
+      ],
+    });
     vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
     vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
 

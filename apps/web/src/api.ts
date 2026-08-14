@@ -10,6 +10,7 @@ import type {
   AiAssistantMessage,
   AiAssistantTask,
   AiAssistantTaskSchedule,
+  AiAssistantThread,
   AiCapabilities,
   Attachment,
   AuditLog,
@@ -88,6 +89,7 @@ export interface SaveAiAssistantInput {
 }
 
 export interface SaveAiAssistantTaskInput {
+  threadId: string;
   title: string;
   prompt: string;
   scheduleType: AiAssistantTaskSchedule;
@@ -308,15 +310,49 @@ export const api = {
     }),
   deleteAiAssistant: (assistantId: string) =>
     request<void>(`/api/ai/assistants/${assistantId}`, { method: "DELETE" }),
-  aiAssistantMessages: (assistantId: string) =>
-    request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`),
-  clearAiAssistantMessages: (assistantId: string) =>
-    request<void>(`/api/ai/assistants/${assistantId}/messages`, { method: "DELETE" }),
-  sendAiAssistantMessage: (assistantId: string, content: string, fileIds: string[] = []) =>
-    request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`, {
+  aiAssistantThreads: (assistantId: string, includeArchived = false) =>
+    request<{ threads: AiAssistantThread[] }>(
+      `/api/ai/assistants/${assistantId}/threads?includeArchived=${includeArchived}`,
+    ),
+  createAiAssistantThread: (assistantId: string, title: string) =>
+    request<{ thread: AiAssistantThread }>(`/api/ai/assistants/${assistantId}/threads`, {
       method: "POST",
-      body: JSON.stringify({ content, fileIds }),
+      body: JSON.stringify({ title }),
     }),
+  updateAiAssistantThread: (
+    assistantId: string,
+    threadId: string,
+    input: { title?: string; archived?: boolean },
+  ) =>
+    request<{ thread: AiAssistantThread }>(
+      `/api/ai/assistants/${assistantId}/threads/${threadId}`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    ),
+  aiAssistantMessages: (assistantId: string, threadId: string) =>
+    request<{ messages: AiAssistantMessage[] }>(
+      `/api/ai/assistants/${assistantId}/threads/${threadId}/messages`,
+    ),
+  clearAiAssistantMessages: (assistantId: string, threadId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/threads/${threadId}/messages`, {
+      method: "DELETE",
+    }),
+  sendAiAssistantMessage: (
+    assistantId: string,
+    threadId: string,
+    content: string,
+    fileIds: string[] = [],
+  ) =>
+    request<{ messages: AiAssistantMessage[] }>(
+      `/api/ai/assistants/${assistantId}/threads/${threadId}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content, fileIds }),
+      },
+    ),
+  aiAssistantMessageLocation: (assistantId: string, messageId: string) =>
+    request<{ threadId: string }>(
+      `/api/ai/assistants/${assistantId}/messages/${messageId}/location`,
+    ),
   aiAssistantFiles: (assistantId: string) =>
     request<{ files: AiAssistantFile[] }>(`/api/ai/assistants/${assistantId}/files`),
   addAiAssistantFile: (assistantId: string, attachmentId: string, origin: "CHAT" | "UPLOAD") =>
@@ -335,8 +371,10 @@ export const api = {
       `/api/ai/assistants/${assistantId}/messages/${messageId}/file`,
       { method: "POST", body: JSON.stringify(input) },
     ),
-  aiAssistantTasks: (assistantId: string) =>
-    request<{ tasks: AiAssistantTask[] }>(`/api/ai/assistants/${assistantId}/tasks`),
+  aiAssistantTasks: (assistantId: string, threadId?: string) =>
+    request<{ tasks: AiAssistantTask[] }>(
+      `/api/ai/assistants/${assistantId}/tasks${threadId ? `?threadId=${encodeURIComponent(threadId)}` : ""}`,
+    ),
   createAiAssistantTask: (assistantId: string, input: SaveAiAssistantTaskInput) =>
     request<{ task: AiAssistantTask }>(`/api/ai/assistants/${assistantId}/tasks`, {
       method: "POST",

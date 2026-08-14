@@ -7580,6 +7580,221 @@ body,
   gap: 3px;
 }
 
+.assistant-thread-bar {
+  min-height: 44px;
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(252, 252, 253, 0.78);
+}
+
+.assistant-thread-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  scrollbar-width: none;
+}
+
+.assistant-thread-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.assistant-thread-loading {
+  padding-left: 4px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.assistant-thread-chip {
+  height: 30px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--muted);
+  background: transparent;
+  transition: 150ms ease;
+}
+
+.assistant-thread-chip:hover {
+  color: var(--ink-soft);
+  background: rgba(103, 87, 232, 0.055);
+}
+
+.assistant-thread-chip.is-active {
+  border-color: rgba(103, 87, 232, 0.14);
+  color: var(--accent-dark);
+  background: rgba(103, 87, 232, 0.09);
+}
+
+.assistant-thread-chip.is-archived {
+  color: var(--faint);
+  border-style: dashed;
+}
+
+.assistant-thread-chip > button:first-child {
+  min-width: 0;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 7px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.assistant-thread-chip > button:first-child span {
+  max-width: 132px;
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-thread-chip > button:first-child small {
+  min-width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  color: var(--faint);
+  background: rgba(127, 128, 139, 0.08);
+  font-size: 7px;
+}
+
+.assistant-thread-chip .is-action,
+.assistant-thread-controls > button,
+.assistant-thread-editor > button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  color: var(--faint);
+  background: transparent;
+  cursor: pointer;
+}
+
+.assistant-thread-chip .is-action:hover:not(:disabled),
+.assistant-thread-controls > button:hover:not(:disabled),
+.assistant-thread-controls > button.is-active {
+  color: var(--accent);
+  background: rgba(103, 87, 232, 0.1);
+}
+
+.assistant-thread-chip .is-action:disabled,
+.assistant-thread-controls > button:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+.assistant-thread-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-left: 5px;
+  border-left: 1px solid var(--line);
+}
+
+.assistant-thread-editor {
+  width: min(290px, calc(100vw - 60px));
+  min-height: 40px;
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 6px);
+  left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 7px 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 14px 38px rgba(35, 36, 46, 0.14);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.assistant-thread-editor input {
+  min-width: 0;
+  height: 27px;
+  flex: 1;
+  outline: none;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  font-size: 10px;
+}
+
+.assistant-thread-editor > button[type="submit"] {
+  color: #fff;
+  background: var(--accent);
+}
+
+.assistant-thread-archived-note {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0 clamp(18px, 4vw, 54px) 18px;
+  padding: 9px 11px 9px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 15px;
+  color: var(--muted);
+  background: rgba(245, 245, 248, 0.78);
+}
+
+.assistant-thread-archived-note > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.assistant-thread-archived-note strong {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.assistant-thread-archived-note small {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-thread-archived-note button {
+  height: 30px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  font-size: 9px;
+  font-weight: 620;
+  cursor: pointer;
+}
+
 .assistant-model-badge {
   max-width: 180px;
   min-height: 29px;
@@ -10832,6 +11047,7 @@ body,
 }
 
 :root[data-theme="dark"] .assistant-chat-header,
+:root[data-theme="dark"] .assistant-thread-bar,
 :root[data-theme="dark"] .assistant-editor-panel > header {
   background: rgba(31, 32, 39, 0.8);
 }
@@ -10902,6 +11118,25 @@ body,
 :root[data-theme="dark"] .assistant-model-badge,
 :root[data-theme="dark"] .assistant-message.is-thinking > div > span {
   background: rgba(255, 255, 255, 0.045);
+}
+
+:root[data-theme="dark"] .assistant-thread-chip:hover,
+:root[data-theme="dark"] .assistant-thread-chip.is-active,
+:root[data-theme="dark"] .assistant-thread-controls > button:hover:not(:disabled),
+:root[data-theme="dark"] .assistant-thread-controls > button.is-active {
+  color: #b8afff;
+  background: rgba(125, 109, 245, 0.13);
+}
+
+:root[data-theme="dark"] .assistant-thread-editor {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(37, 38, 46, 0.98);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.32);
+}
+
+:root[data-theme="dark"] .assistant-thread-archived-note {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 :root[data-theme="dark"] .assistant-preset-grid button:hover {
@@ -11211,7 +11446,24 @@ body,
     display: none;
   }
 
+  .assistant-thread-bar {
+    min-height: 42px;
+    padding: 5px 9px;
+  }
+
+  .assistant-thread-chip > button:first-child span {
+    max-width: 105px;
+  }
+
+  .assistant-thread-editor {
+    left: 9px;
+  }
+
   .assistant-composer {
+    margin: 0 10px 10px;
+  }
+
+  .assistant-thread-archived-note {
     margin: 0 10px 10px;
   }
 

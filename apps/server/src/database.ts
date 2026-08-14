@@ -352,6 +352,38 @@ CREATE TABLE IF NOT EXISTS ai_assistants (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 同一助理的多个对话线程共享角色、模型、知识库和文件工作区；归档只隐藏线程，
+-- 不删除消息。is_default 标识从旧版单时间线迁移而来的初始对话。
+CREATE TABLE IF NOT EXISTS ai_assistant_threads (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title VARCHAR(80) NOT NULL,
+  archived BOOLEAN NOT NULL DEFAULT FALSE,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_assistant_threads_default
+  ON ai_assistant_threads(assistant_id) WHERE is_default = TRUE;
+
+-- 升级旧数据库时，为每个既有助理生成稳定的默认线程；重复启动不会产生新记录。
+INSERT INTO ai_assistant_threads (id, assistant_id, owner_id, title, is_default, created_at, updated_at)
+SELECT (
+         substr(md5(assistant.id::text || ':default-thread'), 1, 8) || '-' ||
+         substr(md5(assistant.id::text || ':default-thread'), 9, 4) || '-' ||
+         substr(md5(assistant.id::text || ':default-thread'), 13, 4) || '-' ||
+         substr(md5(assistant.id::text || ':default-thread'), 17, 4) || '-' ||
+         substr(md5(assistant.id::text || ':default-thread'), 21, 12)
+       )::uuid,
+       assistant.id, assistant.owner_id, '默认对话', TRUE,
+       assistant.created_at, assistant.updated_at
+  FROM ai_assistants assistant
+ WHERE NOT EXISTS (
+   SELECT 1 FROM ai_assistant_threads thread WHERE thread.assistant_id = assistant.id
+ );
+
 -- 一个助理可以组合用户自己的多个知识库；知识库删除后只解除绑定。
 CREATE TABLE IF NOT EXISTS ai_assistant_knowledge_bases (
   assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
@@ -359,17 +391,38 @@ CREATE TABLE IF NOT EXISTS ai_assistant_knowledge_bases (
   PRIMARY KEY (assistant_id, knowledge_base_id)
 );
 
--- 第一阶段每个助理维护一条独立持久时间线。后续若需要多线程会话，可在本表前
--- 增加 thread_id，而不改变助理配置与模型绑定。
+-- 每条消息必须归属一个线程，助理级配置和文件引用继续保持共享。
 CREATE TABLE IF NOT EXISTS ai_assistant_messages (
   id UUID PRIMARY KEY,
   assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  thread_id UUID NOT NULL REFERENCES ai_assistant_threads(id) ON DELETE CASCADE,
   role VARCHAR(12) NOT NULL CHECK (role IN ('USER', 'ASSISTANT')),
   content TEXT NOT NULL,
   model_id UUID REFERENCES ai_model_configs(id) ON DELETE SET NULL,
   sources JSONB NOT NULL DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE ai_assistant_messages ADD COLUMN IF NOT EXISTS thread_id UUID;
+UPDATE ai_assistant_messages message
+   SET thread_id = thread.id
+  FROM ai_assistant_threads thread
+ WHERE message.thread_id IS NULL
+   AND thread.assistant_id = message.assistant_id
+   AND thread.is_default = TRUE;
+ALTER TABLE ai_assistant_messages ALTER COLUMN thread_id SET NOT NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'ai_assistant_messages_thread_id_fkey'
+       AND conrelid = 'ai_assistant_messages'::regclass
+  ) THEN
+    ALTER TABLE ai_assistant_messages
+      ADD CONSTRAINT ai_assistant_messages_thread_id_fkey
+      FOREIGN KEY (thread_id) REFERENCES ai_assistant_threads(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- 每个助理拥有独立文件工作区，但底层继续复用 attachments 与同一份 MinIO 对象。
 -- CHAT 表示来自会话文件库，UPLOAD 表示为助理单独上传，GENERATED 表示由助理回复显式保存。
@@ -396,6 +449,7 @@ CREATE TABLE IF NOT EXISTS ai_assistant_message_files (
 CREATE TABLE IF NOT EXISTS ai_assistant_tasks (
   id UUID PRIMARY KEY,
   assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  thread_id UUID NOT NULL REFERENCES ai_assistant_threads(id) ON DELETE CASCADE,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title VARCHAR(80) NOT NULL,
   prompt TEXT NOT NULL,
@@ -420,6 +474,14 @@ ALTER TABLE ai_assistant_tasks
   ADD COLUMN IF NOT EXISTS browser_action VARCHAR(16) NOT NULL DEFAULT 'NONE';
 ALTER TABLE ai_assistant_tasks
   ADD COLUMN IF NOT EXISTS browser_url TEXT;
+ALTER TABLE ai_assistant_tasks ADD COLUMN IF NOT EXISTS thread_id UUID;
+UPDATE ai_assistant_tasks task
+   SET thread_id = thread.id
+  FROM ai_assistant_threads thread
+ WHERE task.thread_id IS NULL
+   AND thread.assistant_id = task.assistant_id
+   AND thread.is_default = TRUE;
+ALTER TABLE ai_assistant_tasks ALTER COLUMN thread_id SET NOT NULL;
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -430,6 +492,18 @@ BEGIN
     ALTER TABLE ai_assistant_tasks
       ADD CONSTRAINT ai_assistant_tasks_browser_action_check
       CHECK (browser_action IN ('NONE', 'READ', 'SCREENSHOT'));
+  END IF;
+END $$;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'ai_assistant_tasks_thread_id_fkey'
+       AND conrelid = 'ai_assistant_tasks'::regclass
+  ) THEN
+    ALTER TABLE ai_assistant_tasks
+      ADD CONSTRAINT ai_assistant_tasks_thread_id_fkey
+      FOREIGN KEY (thread_id) REFERENCES ai_assistant_threads(id) ON DELETE CASCADE;
   END IF;
 END $$;
 
@@ -608,6 +682,10 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistants_owner_activity
   ON ai_assistants(owner_id, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_timeline
   ON ai_assistant_messages(assistant_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_threads_directory
+  ON ai_assistant_threads(assistant_id, archived, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_thread_timeline
+  ON ai_assistant_messages(thread_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_assistant_created
   ON ai_assistant_files(assistant_id, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_attachment

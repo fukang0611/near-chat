@@ -8,6 +8,7 @@ import type {
   AiAssistantFile,
   AiAssistantMessage,
   AiAssistantTask,
+  AiAssistantThread,
   AiCapabilities,
 } from "../types";
 import { AssistantWorkspace } from "./AssistantWorkspace";
@@ -75,6 +76,29 @@ const workspaceFile: AiAssistantFile = {
   createdAt: "2026-08-14T08:30:00.000Z",
 };
 
+function assistantThread(
+  assistantId = assistant.id,
+  overrides: Partial<AiAssistantThread> = {},
+): AiAssistantThread {
+  return {
+    id:
+      assistantId === assistant.id
+        ? "abababab-abab-4bab-8bab-abababababab"
+        : "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
+    assistantId,
+    title: "默认对话",
+    archived: false,
+    isDefault: true,
+    messageCount: 0,
+    lastMessageAt: null,
+    createdAt: "2026-08-14T08:00:00.000Z",
+    updatedAt: "2026-08-14T08:00:00.000Z",
+    ...overrides,
+  };
+}
+
+const defaultThread = assistantThread();
+
 function AssistantWorkspaceHarness() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   return (
@@ -117,6 +141,9 @@ describe("AssistantWorkspace", () => {
     vi.spyOn(api, "aiAssistants").mockResolvedValue({ assistants: [assistant] });
     vi.spyOn(api, "aiModels").mockResolvedValue(modelResult);
     vi.spyOn(api, "knowledgeBases").mockResolvedValue({ knowledgeBases: [] });
+    vi.spyOn(api, "aiAssistantThreads").mockImplementation(async (assistantId) => ({
+      threads: [assistantThread(assistantId)],
+    }));
     vi.spyOn(api, "aiAssistantMessages").mockResolvedValue({ messages: [] });
     vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
     vi.spyOn(api, "aiAssistantTasks").mockResolvedValue({ tasks: [] });
@@ -159,6 +186,7 @@ describe("AssistantWorkspace", () => {
       {
         id: "33333333-3333-4333-8333-333333333333",
         assistantId: assistant.id,
+        threadId: defaultThread.id,
         role: "USER",
         content: "帮我分析这件事",
         model: null,
@@ -168,6 +196,7 @@ describe("AssistantWorkspace", () => {
       {
         id: "44444444-4444-4444-8444-444444444444",
         assistantId: assistant.id,
+        threadId: defaultThread.id,
         role: "ASSISTANT",
         content: "可以，先从已知事实开始。",
         model: modelResult.models[0]!,
@@ -183,7 +212,12 @@ describe("AssistantWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "发送给智能助理" }));
 
     await waitFor(() =>
-      expect(api.sendAiAssistantMessage).toHaveBeenCalledWith(assistant.id, "帮我分析这件事", []),
+      expect(api.sendAiAssistantMessage).toHaveBeenCalledWith(
+        assistant.id,
+        defaultThread.id,
+        "帮我分析这件事",
+        [],
+      ),
     );
     expect(await screen.findByText("可以，先从已知事实开始。")).toBeTruthy();
   });
@@ -233,6 +267,61 @@ describe("AssistantWorkspace", () => {
     ).toBe("分析草稿");
   });
 
+  it("同一助理可创建、切换和归档彼此隔离的对话", async () => {
+    const user = userEvent.setup();
+    const projectThread = assistantThread(assistant.id, {
+      id: "dededede-dede-4ede-8ede-dededededede",
+      title: "项目讨论",
+      isDefault: false,
+      createdAt: "2026-08-14T10:00:00.000Z",
+      updatedAt: "2026-08-14T10:00:00.000Z",
+    });
+    let threadDirectory = [defaultThread];
+    vi.mocked(api.aiAssistantThreads).mockImplementation(async () => ({
+      threads: threadDirectory,
+    }));
+    vi.spyOn(api, "createAiAssistantThread").mockImplementation(async () => {
+      threadDirectory = [projectThread, ...threadDirectory];
+      return { thread: projectThread };
+    });
+    vi.spyOn(api, "updateAiAssistantThread").mockImplementation(
+      async (_assistantId, threadId, input) => {
+        threadDirectory = threadDirectory.map((thread) =>
+          thread.id === threadId ? { ...thread, ...input } : thread,
+        );
+        return { thread: threadDirectory.find((thread) => thread.id === threadId)! };
+      },
+    );
+
+    render(<AssistantWorkspaceHarness />);
+    const defaultComposer = await screen.findByPlaceholderText("给 分析搭档 发消息");
+    await user.type(defaultComposer, "默认对话草稿");
+
+    await user.click(screen.getByRole("button", { name: "新建助理对话" }));
+    await user.type(screen.getByRole("textbox", { name: "新对话名称" }), projectThread.title);
+    await user.click(screen.getByRole("button", { name: "保存对话名称" }));
+
+    const projectComposer = await screen.findByPlaceholderText("给 分析搭档 发消息");
+    expect((projectComposer as HTMLTextAreaElement).value).toBe("");
+    await user.type(projectComposer, "项目对话草稿");
+
+    await user.click(screen.getByRole("tab", { name: /默认对话/ }));
+    expect(
+      ((await screen.findByPlaceholderText("给 分析搭档 发消息")) as HTMLTextAreaElement).value,
+    ).toBe("默认对话草稿");
+
+    await user.click(screen.getByRole("tab", { name: /项目讨论/ }));
+    await user.click(screen.getByRole("button", { name: `归档 ${projectThread.title}` }));
+    await waitFor(() =>
+      expect(api.updateAiAssistantThread).toHaveBeenCalledWith(assistant.id, projectThread.id, {
+        archived: true,
+      }),
+    );
+    expect(screen.queryByRole("tab", { name: /项目讨论/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "显示已归档对话" }));
+    expect(await screen.findByRole("tab", { name: /项目讨论/ })).toBeTruthy();
+  });
+
   it("无助理时可从预设打开配置并创建", async () => {
     const user = userEvent.setup();
     vi.mocked(api.aiAssistants).mockResolvedValueOnce({ assistants: [] });
@@ -261,6 +350,7 @@ describe("AssistantWorkspace", () => {
       {
         id: "88888888-8888-4888-8888-888888888888",
         assistantId: assistant.id,
+        threadId: defaultThread.id,
         role: "USER",
         content: "提炼计划中的负责人",
         model: null,
@@ -272,6 +362,7 @@ describe("AssistantWorkspace", () => {
       {
         id: "99999999-9999-4999-8999-999999999999",
         assistantId: assistant.id,
+        threadId: defaultThread.id,
         role: "ASSISTANT",
         content: "负责人是林小满。",
         model: modelResult.models[0]!,
@@ -290,9 +381,12 @@ describe("AssistantWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "发送给智能助理" }));
 
     await waitFor(() =>
-      expect(api.sendAiAssistantMessage).toHaveBeenCalledWith(assistant.id, "提炼计划中的负责人", [
-        workspaceFile.id,
-      ]),
+      expect(api.sendAiAssistantMessage).toHaveBeenCalledWith(
+        assistant.id,
+        defaultThread.id,
+        "提炼计划中的负责人",
+        [workspaceFile.id],
+      ),
     );
     expect(await screen.findByText("负责人是林小满。")).toBeTruthy();
   });
@@ -302,6 +396,7 @@ describe("AssistantWorkspace", () => {
     const reply: AiAssistantMessage = {
       id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       assistantId: assistant.id,
+      threadId: defaultThread.id,
       role: "ASSISTANT",
       content: "这是整理后的项目摘要。",
       model: modelResult.models[0]!,
@@ -365,6 +460,7 @@ describe("AssistantWorkspace", () => {
     const task: AiAssistantTask = {
       id: "55555555-5555-4555-8555-555555555555",
       assistantId: assistant.id,
+      threadId: defaultThread.id,
       title: "整理项目摘要",
       prompt: "总结今天的重要进展和待办。",
       scheduleType: "ONCE",
@@ -400,6 +496,7 @@ describe("AssistantWorkspace", () => {
         assistant.id,
         expect.objectContaining({
           title: task.title,
+          threadId: defaultThread.id,
           prompt: task.prompt,
           scheduleType: "ONCE",
           enabled: true,
