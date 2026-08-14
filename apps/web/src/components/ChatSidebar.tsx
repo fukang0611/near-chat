@@ -424,7 +424,7 @@ export function ChatSidebar({
                   <HardDrive size={16} />
                   <span>
                     <strong>私有文件服务</strong>
-                    <small>单文件最大 50 MB</small>
+                    <small>单文件最大 500 MB</small>
                   </span>
                 </div>
                 {window.nearChatDesktop && (

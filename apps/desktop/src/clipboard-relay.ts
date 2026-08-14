@@ -2,7 +2,7 @@ import type { DesktopClipboardRelayPayload } from "./contracts";
 
 export const CLIPBOARD_RELAY_ACCELERATOR = "CommandOrControl+Shift+V";
 export const CLIPBOARD_RELAY_MAX_TEXT_LENGTH = 5_000;
-export const CLIPBOARD_RELAY_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+export const CLIPBOARD_RELAY_MAX_IMAGE_BYTES = 500 * 1024 * 1024;
 
 interface ClipboardRelaySnapshot {
   id: string;
@@ -25,7 +25,7 @@ export function buildClipboardRelayPayload(
     : null;
 
   let issue: string | null = null;
-  if (imageTooLarge) issue = "剪贴板图片超过 50 MB，无法发送";
+  if (imageTooLarge) issue = "剪贴板图片超过 500 MB，无法发送";
   else if (textTooLong) issue = "剪贴板文字超过 5000 个字符，请缩短后重试";
   else if (!text && !imageDataUrl) issue = "剪贴板中没有可发送的文字或图片";
 

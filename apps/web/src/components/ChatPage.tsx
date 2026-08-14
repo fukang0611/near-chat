@@ -98,7 +98,7 @@ interface UploadState {
   progress: number;
 }
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 500 * 1024 * 1024;
 const MAX_FORWARD_MESSAGES = 20;
 
 async function clipboardImageFile(payload: DesktopClipboardRelayPayload): Promise<File> {
@@ -951,7 +951,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      notify("单个文件不能超过 50 MB", "error");
+      notify("单个文件不能超过 500 MB", "error");
       return;
     }
 
@@ -1176,7 +1176,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       return false;
     }
     if (file && file.size > MAX_FILE_BYTES) {
-      notify("单个文件不能超过 50 MB", "error");
+      notify("单个文件不能超过 500 MB", "error");
       return false;
     }
     if (payload.kind === "text" && payload.text.length > 5_000) {
@@ -1280,7 +1280,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       return false;
     }
     if (file.size > MAX_FILE_BYTES) {
-      notify("标注图片不能超过 50 MB", "error");
+      notify("标注图片不能超过 500 MB", "error");
       return false;
     }
 

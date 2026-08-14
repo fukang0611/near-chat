@@ -40,7 +40,7 @@ interface KnowledgeBaseDialogProps {
 
 type QueryMode = "SEARCH" | "ASK";
 
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 500 * 1024 * 1024;
 const ACCEPTED_DOCUMENTS = ".pdf,.docx,.md,.mdx,.txt,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml";
 
 const documentStatus = {
@@ -261,7 +261,7 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
   const addDocument = async (file?: File) => {
     if (!file || !selectedBase || uploading) return;
     if (file.size > MAX_FILE_BYTES) {
-      setNotice({ tone: "error", text: "知识文档不能超过 50 MB" });
+      setNotice({ tone: "error", text: "知识文档不能超过 500 MB" });
       return;
     }
     setUploading({ name: file.name, progress: 0 });
@@ -566,7 +566,7 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                 <div className="knowledge-upload-row">
                   <div>
                     <strong>知识文档</strong>
-                    <small>PDF、DOCX、Markdown、JSON 与文本 · 最大 50 MB</small>
+                    <small>PDF、DOCX、Markdown、JSON 与文本 · 最大 500 MB</small>
                   </div>
                   <input
                     ref={fileInputRef}

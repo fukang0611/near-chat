@@ -351,7 +351,7 @@ export function MessageComposer({
                   </>
                 )}
               </div>
-              <span>支持粘贴或拖入文件 · 最大 50 MB</span>
+              <span>支持粘贴或拖入文件 · 最大 500 MB</span>
             </div>
             <div className="send-group">
               {text.length > MAX_MESSAGE_TEXT_LENGTH - 500 && (

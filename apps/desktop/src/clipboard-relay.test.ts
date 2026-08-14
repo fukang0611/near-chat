@@ -40,6 +40,6 @@ describe("buildClipboardRelayPayload", () => {
         text: "",
         imagePng: { byteLength: CLIPBOARD_RELAY_MAX_IMAGE_BYTES + 1 } as Uint8Array,
       }).issue,
-    ).toContain("50 MB");
+    ).toContain("500 MB");
   });
 });

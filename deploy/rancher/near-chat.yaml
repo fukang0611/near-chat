@@ -15,7 +15,7 @@ data:
   MINIO_PORT: "9000"
   MINIO_USE_SSL: "false"
   MINIO_BUCKET: "near-chat-files"
-  FILE_MAX_BYTES: "52428800"
+  FILE_MAX_BYTES: "524288000"
   AVATAR_MAX_BYTES: "8388608"
   FILE_USER_QUOTA_BYTES: "1073741824"
   FILE_ORPHAN_TTL_HOURS: "24"
@@ -144,8 +144,8 @@ metadata:
   name: near-chat
   namespace: near-chat
   annotations:
-    # 预留 multipart 边界开销，应用内部仍严格限制单文件 50 MiB。
-    nginx.ingress.kubernetes.io/proxy-body-size: "55m"
+    # 预留 multipart 边界开销，应用内部仍严格限制单文件 500 MiB。
+    nginx.ingress.kubernetes.io/proxy-body-size: "510m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
 spec:

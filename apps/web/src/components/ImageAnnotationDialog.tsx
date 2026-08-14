@@ -38,7 +38,7 @@ interface ImageAnnotationDialogProps {
 }
 
 const ANNOTATION_COLORS = ["#ff4f63", "#ffb32c", "#35c894", "#765ff2"];
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_FILE_BYTES = 500 * 1024 * 1024;
 
 function pointFromPointer(
   event: ReactPointerEvent<HTMLCanvasElement>,
@@ -243,7 +243,7 @@ export function ImageAnnotationDialog({
       repaint(false);
       const blob = await canvasBlob(canvas);
       if (blob.size > MAX_FILE_BYTES) {
-        setSendError("标注图片超过 50 MB，请使用较小的原图");
+        setSendError("标注图片超过 500 MB，请使用较小的原图");
         return;
       }
       const baseName = attachment.originalName.replace(/\.[^.]+$/, "") || "图片";
