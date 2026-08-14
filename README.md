@@ -34,7 +34,7 @@
 | 群聊管理   | 常驻群聊、限时闪聊房间、群资料、成员管理、群主转让、退出与解散                                         |
 | 使用体验   | 明亮/黑暗主题、响应式布局、今日团队雷达、头像投递、通知授权引导、桌面通知与提示音                      |
 | 桌面客户端 | Electron 系统托盘、原生通知、剪贴板接力、置顶会话浮岛与会话定位                                        |
-| AI 知识库  | 个人与团队知识空间、成员权限、MinIO 文档、异步索引、Mastra RAG、pgvector 检索及带引用问答              |
+| AI 知识库  | 团队知识空间、成员权限、PDF/Office/表格/OCR 解析、Mastra RAG、pgvector 检索及带引用问答                |
 | 消息 AI    | 会话内总结、待办提取、润色、翻译与分析，支持文档附件、模型切换、结果复制和草稿回填                     |
 | 个人助理   | 多助理、独立历史、模型与知识库绑定、文件工作区、自动任务、受控浏览器与完整执行记录                     |
 | 部署方式   | Docker Compose、本地 Docker 镜像、Rancher/Kubernetes 单文件清单                                        |
@@ -83,7 +83,7 @@ flowchart LR
 
 管理员可在“管理中心 → AI 设置”中即时启用或关闭 AI，无需修改配置文件或重启服务。管理员可以维护多个 OpenAI 兼容对话模型、指定唯一默认项，并单独配置全局 Embedding 服务；普通用户可选择自己的偏好模型，也可以为不同个人助理单独绑定更合适的模型。绑定模型被停用或删除后会自动回退到用户偏好或全局默认模型。
 
-知识库沿用现有账号与文件权限：原文件仍保存在 MinIO，PostgreSQL 保存知识库、共享成员、来源片段、加密模型设置与持久索引任务，Mastra 负责文档切分、Embedding、pgvector 检索和带来源回答。拥有者管理知识库资料和共享范围；编辑者可以维护文档；查看者只能检索、问答和打开来源文件。撤销共享后，对方个人助理中的对应知识库绑定会自动解除。
+知识库沿用现有账号与文件权限：原文件仍保存在 MinIO，PostgreSQL 保存知识库、共享成员、来源片段、解析元数据、加密模型设置与持久索引任务，Mastra 负责文档切分、Embedding、pgvector 检索和带来源回答。拥有者管理知识库资料和共享范围；编辑者可以维护文档；查看者只能检索、问答和打开来源文件。撤销共享后，对方个人助理中的对应知识库绑定会自动解除。服务镜像内置中英文 OCR，图片和扫描 PDF 均在本机解析，不会把原始文件上传到模型服务。
 
 侧栏“智能助理”入口提供独立的私人工作台。每个用户最多创建 20 个助理，可从通用、写作、分析和规划预设开始，自定义角色说明与头像颜色，并组合最多 10 个自己的知识库。每个助理拥有最多 30 个文件的独立工作区，可复用聊天文件或单独上传；用户在某轮提问中明确勾选后，服务端才提取受支持文档的文字交给模型，未选择的文件不会被隐式读取。助理回复可由用户显式保存为 Markdown 或 TXT，并继续通过原有 MinIO 权限和配额体系下载、引用与回收。
 
@@ -91,9 +91,9 @@ flowchart LR
 
 受控浏览器按助理默认关闭。用户需分别授权页面读取、截图和表单交互，创建执行时不会立即访问网络，每个打开、读取、截图、点击或填写步骤都要再次确认。服务端只接受页面快照生成的元素编号，不开放任意 CSS、脚本、密码框、文件上传或下载；会话使用独立无痕上下文，完成、取消或空闲超时后立即销毁。目标、脱敏后的页面快照、步骤状态与截图文件均保留在本人助理工作区，便于追踪和复核。
 
-会话消息悬浮操作栏提供“AI 快捷处理”。用户可以对消息正文和 PDF、DOCX、Markdown、HTML、JSON、CSV、纯文本附件进行总结、待办提取、润色、翻译或分析，按次选择模型，并在预览后复制结果或追加到当前输入框。该操作不会修改原消息，也不会自动发送；原文件保留在 MinIO，只有提取后的受限长度文字会发送给模型服务，图片、音频和其他二进制文件不会上传给模型。
+会话消息悬浮操作栏提供“AI 快捷处理”。用户可以对消息正文和 PDF、DOCX、XLSX、CSV、Markdown、网页、JSON、纯文本以及含文字图片进行总结、待办提取、润色、翻译或分析，按次选择模型，并在预览后复制结果或追加到当前输入框。该操作不会修改原消息，也不会自动发送；原文件保留在 MinIO，只有本地解析后的受限长度文字会发送给模型服务。
 
-- 支持 PDF、DOCX、Markdown、HTML、JSON、CSV 与纯文本。
+- 支持 PDF、DOCX、XLSX、CSV、TSV、Markdown、HTML、JSON、纯文本、PNG 与 JPEG；扫描件自动使用中英文 OCR。
 - 文档异步索引，服务重启后会继续执行，失败可在界面重试。
 - 搜索融合语义向量与本地关键词；模型服务瞬时故障时自动回退关键词结果。
 - 对话模型可配置多项且必须有一个默认项；用户偏好失效时自动回退默认模型。
@@ -106,7 +106,7 @@ flowchart LR
 - 助理回复只有在用户点击“保存为文件”后才写入 MinIO，支持 Markdown 与 TXT，并沿用个人配额和引用感知回收。
 - 消息 AI 处理前再次校验会话成员权限，撤回消息不可处理；结果仅临时预览，由用户确认后写入草稿。
 - 未配置 Embedding 时，已配置对话模型的个人助理仍可工作；知识库增强会单独降级。
-- 知识库支持精确到成员的拥有者、编辑者和查看者权限；OCR 与表格结构化解析留待后续版本。
+- 知识库支持精确到成员的拥有者、编辑者和查看者权限；表格保留工作表、表头与行号，OCR 结果保留页数和平均置信度。
 - 当前自动任务只生成文本和引用来源；不会自行启动浏览器或操作页面。
 - 受控浏览器默认全局最多 4 个、单用户最多 2 个并发会话，避免 Chromium 抢占局域网服务器资源。
 
@@ -214,35 +214,42 @@ npm run smoke          # 第一阶段核心链路冒烟测试
 npm run smoke:phase2   # 文件治理、群管理与账号管理
 npm run smoke:phase3   # 回执、搜索、撤回与实时事件
 npm run smoke:knowledge-sharing # 团队知识库共享、权限与撤销清理
+npm run smoke:knowledge-extraction # XLSX 结构化解析、本地 OCR 与检索
 ```
 
 ## 关键配置
 
 完整配置示例见 [.env.example](.env.example)。
 
-| 变量                               | 默认值          | 用途                                       |
-| ---------------------------------- | --------------- | ------------------------------------------ |
-| `DATABASE_URL`                     | 本地 PostgreSQL | 业务数据库连接地址                         |
-| `JWT_SECRET`                       | 仅供本地开发    | 登录令牌签名密钥                           |
-| `MINIO_*`                          | 本地 MinIO      | 对象存储连接与 Bucket                      |
-| `FILE_MAX_BYTES`                   | `524288000`     | 单文件最大 500 MiB                         |
-| `AVATAR_MAX_BYTES`                 | `8388608`       | 用户头像最大 8 MiB                         |
-| `FILE_USER_QUOTA_BYTES`            | `1073741824`    | 单用户文件配额 1 GiB                       |
-| `FILE_ORPHAN_TTL_HOURS`            | `24`            | 未发送附件保留时间                         |
-| `MESSAGE_RECALL_WINDOW_SECONDS`    | `120`           | 消息可撤回时限                             |
-| `SEED_DEMO_USERS`                  | `true`          | 是否初始化演示用户                         |
-| `AI_SETTINGS_ENCRYPTION_KEY`       | 回退到 JWT 密钥 | 模型密钥的持久加密密钥，部署后不可随意更换 |
-| `AI_ENABLED`                       | `false`         | 首次建库时的 AI 开关引导值                 |
-| `AI_BASE_URL` / `AI_API_KEY`       | 空              | 首次建库时的 OpenAI 兼容服务引导值         |
-| `AI_CHAT_MODEL`                    | 空              | 首次创建的默认对话模型                     |
-| `AI_EMBEDDING_MODEL`               | 空              | 首次创建的全局向量模型                     |
-| `AI_EMBEDDING_DIMENSIONS`          | `1536`          | 首次创建的向量输出维度                     |
-| `AI_ASSISTANT_TASK_POLL_MS`        | `1000`          | 个人助理任务调度轮询间隔（毫秒）           |
-| `AI_BROWSER_EXECUTABLE_PATH`       | 镜像内置路径    | Chromium 可执行文件路径                    |
-| `AI_BROWSER_*_TIMEOUT_MS`          | `20000/10000`   | 页面导航与单步操作超时（毫秒）             |
-| `AI_BROWSER_MAX_SESSIONS`          | `4`             | 全局同时运行的浏览器会话上限               |
-| `AI_BROWSER_MAX_SESSIONS_PER_USER` | `2`             | 单用户同时运行的浏览器会话上限             |
-| `AI_BROWSER_SESSION_TTL_MINUTES`   | `15`            | 浏览器会话空闲回收时间                     |
+| 变量                                 | 默认值          | 用途                                       |
+| ------------------------------------ | --------------- | ------------------------------------------ |
+| `DATABASE_URL`                       | 本地 PostgreSQL | 业务数据库连接地址                         |
+| `JWT_SECRET`                         | 仅供本地开发    | 登录令牌签名密钥                           |
+| `MINIO_*`                            | 本地 MinIO      | 对象存储连接与 Bucket                      |
+| `FILE_MAX_BYTES`                     | `524288000`     | 单文件最大 500 MiB                         |
+| `AVATAR_MAX_BYTES`                   | `8388608`       | 用户头像最大 8 MiB                         |
+| `FILE_USER_QUOTA_BYTES`              | `1073741824`    | 单用户文件配额 1 GiB                       |
+| `FILE_ORPHAN_TTL_HOURS`              | `24`            | 未发送附件保留时间                         |
+| `MESSAGE_RECALL_WINDOW_SECONDS`      | `120`           | 消息可撤回时限                             |
+| `SEED_DEMO_USERS`                    | `true`          | 是否初始化演示用户                         |
+| `AI_SETTINGS_ENCRYPTION_KEY`         | 回退到 JWT 密钥 | 模型密钥的持久加密密钥，部署后不可随意更换 |
+| `AI_ENABLED`                         | `false`         | 首次建库时的 AI 开关引导值                 |
+| `AI_BASE_URL` / `AI_API_KEY`         | 空              | 首次建库时的 OpenAI 兼容服务引导值         |
+| `AI_CHAT_MODEL`                      | 空              | 首次创建的默认对话模型                     |
+| `AI_EMBEDDING_MODEL`                 | 空              | 首次创建的全局向量模型                     |
+| `AI_EMBEDDING_DIMENSIONS`            | `1536`          | 首次创建的向量输出维度                     |
+| `AI_KNOWLEDGE_SPREADSHEET_MAX_CELLS` | `200000`        | 单个表格允许解析的有效单元格上限           |
+| `AI_KNOWLEDGE_OCR_ENABLED`           | `true`          | 是否为图片和扫描 PDF 启用本地 OCR          |
+| `AI_KNOWLEDGE_OCR_LANGUAGES`         | `chi_sim+eng`   | Tesseract 识别语言                         |
+| `AI_KNOWLEDGE_OCR_TIMEOUT_MS`        | `60000`         | 单次 OCR 或 PDF 渲染超时（毫秒）           |
+| `AI_KNOWLEDGE_OCR_MAX_PAGES`         | `20`            | 单个扫描 PDF 最多识别页数                  |
+| `AI_KNOWLEDGE_OCR_MAX_IMAGE_BYTES`   | `20971520`      | 单张 OCR 图片上限（20 MiB）                |
+| `AI_ASSISTANT_TASK_POLL_MS`          | `1000`          | 个人助理任务调度轮询间隔（毫秒）           |
+| `AI_BROWSER_EXECUTABLE_PATH`         | 镜像内置路径    | Chromium 可执行文件路径                    |
+| `AI_BROWSER_*_TIMEOUT_MS`            | `20000/10000`   | 页面导航与单步操作超时（毫秒）             |
+| `AI_BROWSER_MAX_SESSIONS`            | `4`             | 全局同时运行的浏览器会话上限               |
+| `AI_BROWSER_MAX_SESSIONS_PER_USER`   | `2`             | 单用户同时运行的浏览器会话上限             |
+| `AI_BROWSER_SESSION_TTL_MINUTES`     | `15`            | 浏览器会话空闲回收时间                     |
 
 ## 目录结构
 

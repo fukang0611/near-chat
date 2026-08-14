@@ -12628,6 +12628,7 @@ body,
 
 .knowledge-file-copy strong,
 .knowledge-file-copy small,
+.knowledge-file-copy .knowledge-extraction,
 .knowledge-file-copy em {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -12641,6 +12642,17 @@ body,
 .knowledge-file-copy small {
   color: var(--muted);
   font-size: 9px;
+}
+
+.knowledge-file-copy .knowledge-extraction {
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 5px;
+  color: #5f54bf;
+  background: rgba(103, 87, 232, 0.09);
+  font-size: 8px;
+  font-weight: 620;
 }
 
 .knowledge-file-copy em {
@@ -13283,6 +13295,11 @@ body,
 :root[data-theme="dark"] .knowledge-base-item > span:first-child {
   color: #9e91ff;
   background: rgba(120, 105, 238, 0.16);
+}
+
+:root[data-theme="dark"] .knowledge-file-copy .knowledge-extraction {
+  color: #b0a6ff;
+  background: rgba(120, 105, 238, 0.14);
 }
 
 :root[data-theme="dark"] .knowledge-query-hint {

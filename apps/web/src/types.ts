@@ -292,8 +292,23 @@ export interface KnowledgeDocument {
   status: "QUEUED" | "INDEXING" | "READY" | "FAILED";
   chunkCount: number;
   errorMessage: string | null;
+  extraction: KnowledgeExtractionDetails | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type KnowledgeExtractionMethod =
+  "TEXT" | "MARKDOWN" | "HTML" | "JSON" | "PDF_TEXT" | "DOCX" | "SPREADSHEET" | "OCR";
+
+export interface KnowledgeExtractionDetails {
+  method: KnowledgeExtractionMethod;
+  pageCount?: number;
+  processedPages?: number;
+  averageConfidence?: number | null;
+  truncated?: boolean;
+  worksheetCount?: number;
+  rowCount?: number;
+  cellCount?: number;
 }
 
 export interface KnowledgeSource {

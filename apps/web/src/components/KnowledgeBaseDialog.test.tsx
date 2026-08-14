@@ -60,6 +60,7 @@ const document: KnowledgeDocument = {
   status: "READY",
   chunkCount: 12,
   errorMessage: null,
+  extraction: { method: "PDF_TEXT", pageCount: 4 },
   createdAt: base.createdAt,
   updatedAt: base.updatedAt,
 };
@@ -95,6 +96,7 @@ describe("KnowledgeBaseDialog", () => {
 
     expect(await screen.findByText("NearChat 使用手册.pdf")).toBeTruthy();
     expect(screen.getByText("可检索")).toBeTruthy();
+    expect(screen.getByText("PDF 文本 · 4 页")).toBeTruthy();
     await user.type(screen.getByPlaceholderText("查找文档中的内容…"), "文件保存在哪里");
     await user.click(screen.getByRole("button", { name: "开始检索" }));
 

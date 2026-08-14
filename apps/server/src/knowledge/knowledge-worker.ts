@@ -147,9 +147,11 @@ async function indexDocument(job: IndexJobRow): Promise<void> {
     }
     await client.query(
       `UPDATE knowledge_documents
-          SET status = 'READY', chunk_count = $2, error_message = NULL, updated_at = NOW()
+          SET status = 'READY', chunk_count = $2, error_message = NULL,
+              extraction_method = $3, extraction_details = $4::jsonb,
+              updated_at = NOW()
         WHERE id = $1`,
-      [document.id, chunks.length],
+      [document.id, chunks.length, extracted.details.method, JSON.stringify(extracted.details)],
     );
     await client.query(
       `UPDATE knowledge_bases
@@ -175,9 +177,10 @@ async function failJob(job: IndexJobRow, error: unknown): Promise<void> {
   await transaction(async (client) => {
     await client.query(
       `UPDATE knowledge_index_jobs
-          SET status = $2,
+          SET status = $2::varchar,
               next_attempt_at = CASE
-                WHEN $2 = 'QUEUED' THEN NOW() + ($3::double precision * INTERVAL '1 second')
+                WHEN $2::varchar = 'QUEUED'::varchar
+                  THEN NOW() + ($3::double precision * INTERVAL '1 second')
                 ELSE next_attempt_at
               END,
               error_message = $4,

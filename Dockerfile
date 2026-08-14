@@ -20,8 +20,16 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # 个人助理的受控浏览器工具只使用系统 Chromium，不下载 Playwright 自带浏览器。
-# Noto CJK 让局域网页面的中文截图在无桌面环境中仍能正确显示。
-RUN apk add --no-cache chromium nss font-noto-cjk
+# Noto CJK 让局域网页面的中文截图和 OCR 在无桌面环境中仍能正确显示；
+# Tesseract 与 Poppler 只在图片或扫描 PDF 入库时使用，不参与核心服务健康检查。
+RUN apk add --no-cache \
+  chromium \
+  nss \
+  font-noto-cjk \
+  tesseract-ocr \
+  tesseract-ocr-data-chi_sim \
+  tesseract-ocr-data-eng \
+  poppler-utils
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules

@@ -10,7 +10,12 @@ import { publicAvatarUrl } from "../avatar-service.js";
 import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError } from "../http.js";
-import { supportsKnowledgeDocument } from "./document-extractor.js";
+import {
+  isOcrImageDocument,
+  supportsKnowledgeDocument,
+  type KnowledgeExtractionDetails,
+  type KnowledgeExtractionMethod,
+} from "./document-extractor.js";
 
 export type KnowledgeBaseAccessRole = "OWNER" | "EDITOR" | "VIEWER";
 export type KnowledgeBaseMemberRole = Exclude<KnowledgeBaseAccessRole, "OWNER">;
@@ -69,6 +74,8 @@ interface KnowledgeDocumentRow {
   status: "QUEUED" | "INDEXING" | "READY" | "FAILED";
   chunk_count: number;
   error_message: string | null;
+  extraction_method: KnowledgeExtractionMethod | null;
+  extraction_details: Omit<KnowledgeExtractionDetails, "method">;
   created_at: Date;
   updated_at: Date;
 }
@@ -243,6 +250,9 @@ function publicKnowledgeDocument(row: KnowledgeDocumentRow) {
     status: row.status,
     chunkCount: row.chunk_count,
     errorMessage: row.error_message,
+    extraction: row.extraction_method
+      ? { ...row.extraction_details, method: row.extraction_method }
+      : null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -470,6 +480,7 @@ export async function listKnowledgeDocuments(userId: string, knowledgeBaseId: st
     `SELECT document.id, document.knowledge_base_id, document.attachment_id,
             document.name, document.content_type, document.size_bytes::text,
             document.status, document.chunk_count, document.error_message,
+            document.extraction_method, document.extraction_details,
             document.created_at, document.updated_at
        FROM knowledge_documents document
       WHERE document.knowledge_base_id = $1
@@ -502,7 +513,16 @@ export async function addKnowledgeDocument(
     const file = attachment.rows[0];
     if (!file || file.state !== "READY") throw new ApiError(404, "文件不存在或尚未就绪");
     if (!supportsKnowledgeDocument(file.original_name, file.content_type)) {
-      throw new ApiError(400, "暂不支持此格式，请上传 PDF、DOCX、Markdown 或文本文件");
+      throw new ApiError(400, "暂不支持此格式，请上传 PDF、DOCX、XLSX、图片或文本文件");
+    }
+    if (
+      isOcrImageDocument(file.original_name, file.content_type) &&
+      Number(file.size_bytes) > config.ai.knowledge.ocr.maxImageBytes
+    ) {
+      throw new ApiError(
+        400,
+        `OCR 图片不能超过 ${Math.floor(config.ai.knowledge.ocr.maxImageBytes / 1024 / 1024)} MB`,
+      );
     }
 
     const id = randomUUID();
@@ -513,7 +533,8 @@ export async function addKnowledgeDocument(
            (id, knowledge_base_id, attachment_id, added_by, name, content_type, size_bytes)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, knowledge_base_id, attachment_id, name, content_type,
-                   size_bytes::text, status, chunk_count, error_message, created_at, updated_at`,
+                   size_bytes::text, status, chunk_count, error_message,
+                   extraction_method, extraction_details, created_at, updated_at`,
         [
           id,
           knowledgeBaseId,
@@ -558,7 +579,9 @@ export async function reindexKnowledgeDocument(
     if (current.status !== "INDEXING") {
       await client.query(
         `UPDATE knowledge_documents
-            SET status = 'QUEUED', error_message = NULL, updated_at = NOW()
+            SET status = 'QUEUED', error_message = NULL,
+                extraction_method = NULL, extraction_details = '{}'::jsonb,
+                updated_at = NOW()
           WHERE id = $1`,
         [documentId],
       );

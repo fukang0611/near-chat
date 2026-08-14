@@ -11,10 +11,12 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  ScanText,
   Search,
   Share2,
   Sparkles,
   Trash2,
+  Table2,
   Upload,
   UserPlus,
   UsersRound,
@@ -48,7 +50,8 @@ interface KnowledgeBaseDialogProps {
 type QueryMode = "SEARCH" | "ASK";
 
 const MAX_FILE_BYTES = 500 * 1024 * 1024;
-const ACCEPTED_DOCUMENTS = ".pdf,.docx,.md,.mdx,.txt,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml";
+const ACCEPTED_DOCUMENTS =
+  ".pdf,.docx,.xlsx,.png,.jpg,.jpeg,.md,.mdx,.txt,.csv,.tsv,.json,.html,.htm,.xml,.yaml,.yml";
 
 const documentStatus = {
   QUEUED: { label: "等待索引", tone: "pending" },
@@ -62,6 +65,45 @@ const accessLabel = {
   EDITOR: "共享 · 可编辑",
   VIEWER: "共享 · 只读",
 } as const;
+
+function extractionSummary(document: KnowledgeDocument): string | null {
+  const extraction = document.extraction;
+  if (!extraction) return null;
+  if (extraction.method === "OCR") {
+    const confidence =
+      extraction.averageConfidence === null || extraction.averageConfidence === undefined
+        ? null
+        : `${extraction.averageConfidence}%`;
+    const pages = extraction.pageCount
+      ? `${extraction.processedPages ?? extraction.pageCount}/${extraction.pageCount} 页`
+      : null;
+    return ["OCR", confidence, pages, extraction.truncated ? "部分页" : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (extraction.method === "SPREADSHEET") {
+    return [
+      "结构化表格",
+      extraction.worksheetCount ? `${extraction.worksheetCount} 个工作表` : null,
+      extraction.rowCount ? `${extraction.rowCount} 行` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (extraction.method === "PDF_TEXT") {
+    return ["PDF 文本", extraction.pageCount ? `${extraction.pageCount} 页` : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const labels = {
+    DOCX: "Word 文本",
+    MARKDOWN: "Markdown",
+    HTML: "网页文本",
+    JSON: "JSON",
+    TEXT: "纯文本",
+  } as const;
+  return labels[extraction.method];
+}
 
 function KnowledgeSourceCard({ source, onOpen }: { source: KnowledgeSource; onOpen: () => void }) {
   return (
@@ -817,7 +859,7 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                     <strong>知识文档</strong>
                     <small>
                       {canEditDocuments
-                        ? "PDF、DOCX、Markdown、JSON 与文本 · 最大 500 MB"
+                        ? "PDF、DOCX、XLSX、图片 OCR 与文本 · 图片 20 MB / 其他 500 MB"
                         : "你拥有查看权限，可以检索、问答和打开来源文件"}
                     </small>
                   </div>
@@ -872,10 +914,17 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                     documents.map((document) => {
                       const status = documentStatus[document.status];
                       const busy = busyDocumentId === document.id;
+                      const extraction = extractionSummary(document);
                       return (
                         <article className="knowledge-document-item" key={document.id}>
                           <span className="knowledge-file-icon">
-                            <FileText size={18} />
+                            {document.extraction?.method === "OCR" ? (
+                              <ScanText size={18} />
+                            ) : document.extraction?.method === "SPREADSHEET" ? (
+                              <Table2 size={18} />
+                            ) : (
+                              <FileText size={18} />
+                            )}
                           </span>
                           <span className="knowledge-file-copy">
                             <strong title={document.attachment.originalName}>
@@ -885,6 +934,9 @@ export function KnowledgeBaseDialog({ capabilities, onClose }: KnowledgeBaseDial
                               {formatBytes(document.attachment.sizeBytes)}
                               {document.chunkCount > 0 ? ` · ${document.chunkCount} 个片段` : ""}
                             </small>
+                            {extraction && (
+                              <span className="knowledge-extraction">{extraction}</span>
+                            )}
                             {document.errorMessage && (
                               <em title={document.errorMessage}>{document.errorMessage}</em>
                             )}

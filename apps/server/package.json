@@ -19,6 +19,7 @@
     "ai": "^7.0.65",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.12.1",

@@ -83,6 +83,17 @@ export const config = {
       maxChunks: positiveInteger("AI_KNOWLEDGE_MAX_CHUNKS", 1000),
       pollMs: positiveInteger("AI_KNOWLEDGE_POLL_MS", 3000),
       defaultTopK: positiveInteger("AI_KNOWLEDGE_TOP_K", 8),
+      spreadsheetMaxCells: positiveInteger("AI_KNOWLEDGE_SPREADSHEET_MAX_CELLS", 200_000),
+      ocr: {
+        enabled: bool("AI_KNOWLEDGE_OCR_ENABLED", true),
+        tesseractPath: process.env.AI_KNOWLEDGE_TESSERACT_PATH?.trim() || "tesseract",
+        pdftoppmPath: process.env.AI_KNOWLEDGE_PDFTOPPM_PATH?.trim() || "pdftoppm",
+        languages: process.env.AI_KNOWLEDGE_OCR_LANGUAGES?.trim() || "chi_sim+eng",
+        timeoutMs: positiveInteger("AI_KNOWLEDGE_OCR_TIMEOUT_MS", 60_000),
+        maxPages: positiveInteger("AI_KNOWLEDGE_OCR_MAX_PAGES", 20),
+        maxImageBytes: positiveInteger("AI_KNOWLEDGE_OCR_MAX_IMAGE_BYTES", 20 * 1024 * 1024),
+        pdfFallbackTextChars: positiveInteger("AI_KNOWLEDGE_OCR_PDF_FALLBACK_CHARS", 40),
+      },
     },
     assistantTasks: {
       // 局域网单体部署以秒级轮询换取简单、可恢复的 PostgreSQL 持久调度。

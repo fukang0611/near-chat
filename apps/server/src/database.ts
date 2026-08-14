@@ -241,10 +241,31 @@ CREATE TABLE IF NOT EXISTS knowledge_documents (
     CHECK (status IN ('QUEUED', 'INDEXING', 'READY', 'FAILED')),
   chunk_count INTEGER NOT NULL DEFAULT 0,
   error_message TEXT,
+  extraction_method VARCHAR(24),
+  extraction_details JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (knowledge_base_id, attachment_id)
 );
+
+ALTER TABLE knowledge_documents
+  ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(24);
+ALTER TABLE knowledge_documents
+  ADD COLUMN IF NOT EXISTS extraction_details JSONB NOT NULL DEFAULT '{}'::jsonb;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'knowledge_documents_extraction_method_check'
+       AND conrelid = 'knowledge_documents'::regclass
+  ) THEN
+    ALTER TABLE knowledge_documents
+      ADD CONSTRAINT knowledge_documents_extraction_method_check
+      CHECK (extraction_method IS NULL OR extraction_method IN (
+        'TEXT', 'MARKDOWN', 'HTML', 'JSON', 'PDF_TEXT', 'DOCX', 'SPREADSHEET', 'OCR'
+      ));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS knowledge_chunks (
   id UUID PRIMARY KEY,
