@@ -495,7 +495,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   }, [displayMessages, loadingMessages, selectedId]);
 
   useEffect(() => {
-    if (!highlightedMessageId) return;
+    // around 消息会先写入状态，标记已读完成前时间线仍显示加载占位。
+    // 等真实消息 DOM 挂载后再定位，避免一次性 RAF 提前执行后永远停在列表顶部。
+    if (!highlightedMessageId || loadingMessages) return;
     const frame = window.requestAnimationFrame(() => {
       document
         .getElementById(`message-${highlightedMessageId}`)
@@ -506,7 +508,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       window.cancelAnimationFrame(frame);
       window.clearTimeout(timer);
     };
-  }, [highlightedMessageId]);
+  }, [highlightedMessageId, loadingMessages]);
 
   const loadOlderMessages = useCallback(async () => {
     const conversationId = selectedId;

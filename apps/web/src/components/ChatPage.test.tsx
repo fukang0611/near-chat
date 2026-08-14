@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
-import type { Conversation, Message, User } from "../types";
+import type { Conversation, Message, MessageFavorite, User } from "../types";
 import { ChatPage } from "./ChatPage";
 
 vi.mock("../hooks/useRealtimeConnection", () => ({
@@ -38,6 +38,10 @@ const peerUser: User = {
   role: "USER",
 };
 const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "scrollIntoView",
+);
 
 function conversation(id: string, title: string): Conversation {
   return {
@@ -160,6 +164,12 @@ describe("ChatPage message scrolling", () => {
     } else {
       delete (HTMLElement.prototype as { scrollHeight?: number }).scrollHeight;
     }
+    if (originalScrollIntoView) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", originalScrollIntoView);
+    } else {
+      delete (HTMLElement.prototype as { scrollIntoView?: Element["scrollIntoView"] })
+        .scrollIntoView;
+    }
   });
 
   it("切换到消息条数相同的会话时仍定位到最新消息", async () => {
@@ -183,6 +193,88 @@ describe("ChatPage message scrolling", () => {
     await screen.findByText("conversation-two 的最新消息");
 
     await waitFor(() => expect(messageScroll?.scrollTop).toBe(1_200));
+  });
+
+  it("从收藏跳转后等待目标消息渲染完成再滚动定位", async () => {
+    const user = userEvent.setup();
+    const targetMessage = message("conversation-two", "收藏定位目标");
+    let resolveTargetRead: ((value: { unreadCount: number }) => void) | null = null;
+    const favorite: MessageFavorite = {
+      id: "favorite-two",
+      sourceMessageId: targetMessage.id,
+      sourceConversationId: "conversation-two",
+      sourceConversationTitle: "第二会话",
+      sourceSenderId: currentUser.id,
+      sourceSenderName: currentUser.displayName,
+      sourceSenderAvatarColor: currentUser.avatarColor,
+      sourceSenderAvatarUrl: null,
+      type: "TEXT",
+      textContent: targetMessage.textContent,
+      messageCreatedAt: targetMessage.createdAt,
+      createdAt: targetMessage.createdAt,
+      attachments: [],
+      sourceAvailable: true,
+    };
+    vi.spyOn(api, "messageFavorites").mockResolvedValue({ favorites: [favorite] });
+    vi.spyOn(api, "chatFiles").mockResolvedValue({
+      files: [],
+      total: 0,
+      totalBytes: 0,
+      offset: 0,
+      hasMore: false,
+    });
+    vi.mocked(api.messages).mockImplementation(async (conversationId, options) => ({
+      messages:
+        options?.around === targetMessage.id
+          ? [targetMessage]
+          : [message(conversationId, `${conversationId} 的最新消息`)],
+      nextCursor: null,
+      hasMore: false,
+    }));
+    vi.mocked(api.markRead).mockImplementation((conversationId) => {
+      if (conversationId !== "conversation-two") return Promise.resolve({ unreadCount: 0 });
+      return new Promise((resolve) => {
+        resolveTargetRead = resolve;
+      });
+    });
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+
+    await screen.findByText("conversation-one 的最新消息");
+    await user.click(screen.getByRole("button", { name: "打开消息资产" }));
+    await user.click(screen.getByRole("tab", { name: "我的收藏" }));
+    await user.click(await screen.findByRole("button", { name: "原消息" }));
+
+    await waitFor(() =>
+      expect(api.messages).toHaveBeenCalledWith("conversation-two", {
+        around: targetMessage.id,
+        limit: 50,
+      }),
+    );
+    // 已读请求未完成时页面仍显示加载占位，确保旧的一次性 RAF 已经执行并错过目标。
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 30)));
+    expect(screen.queryByText("收藏定位目标")).toBeNull();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => resolveTargetRead?.({ unreadCount: 0 }));
+    expect(await screen.findByText("收藏定位目标")).toBeTruthy();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    expect(scrollIntoView.mock.instances[0]).toBe(
+      document.getElementById(`message-${targetMessage.id}`),
+    );
   });
 
   it("将联系人上的拖拽文本通过标准单聊消息链路直接发送", async () => {
