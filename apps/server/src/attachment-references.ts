@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 
 /**
- * 只有完全脱离原消息、转发消息、收藏和知识库的附件才能进入对象回收队列。
+ * 只有完全脱离原消息、转发消息、收藏、知识库和助理工作区的附件才能进入对象回收队列。
  * 后续新增附件引用类型时，只需在本模块补充检查，避免各删除入口语义漂移。
  */
 export async function stageDetachedAttachmentsForCleanup(
@@ -29,6 +29,11 @@ export async function stageDetachedAttachmentsForCleanup(
           SELECT 1
             FROM knowledge_documents knowledge_document
            WHERE knowledge_document.attachment_id = attachment.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM ai_assistant_files assistant_file
+           WHERE assistant_file.attachment_id = attachment.id
         )`,
     [attachmentIds],
   );
@@ -61,6 +66,10 @@ export async function detachMessageAttachments(
                 SELECT 1
                   FROM knowledge_documents knowledge_document
                  WHERE knowledge_document.attachment_id = attachment.id
+              ) OR EXISTS (
+                SELECT 1
+                  FROM ai_assistant_files assistant_file
+                 WHERE assistant_file.attachment_id = attachment.id
               ) THEN 'READY'
               ELSE 'CLEANUP_FAILED'
             END,
@@ -103,6 +112,10 @@ export async function detachConversationAttachments(
                 SELECT 1
                   FROM knowledge_documents knowledge_document
                  WHERE knowledge_document.attachment_id = attachment.id
+              ) OR EXISTS (
+                SELECT 1
+                  FROM ai_assistant_files assistant_file
+                 WHERE assistant_file.attachment_id = attachment.id
               ) THEN 'READY'
               ELSE 'CLEANUP_FAILED'
             END,

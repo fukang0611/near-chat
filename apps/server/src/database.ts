@@ -338,6 +338,26 @@ CREATE TABLE IF NOT EXISTS ai_assistant_messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- 每个助理拥有独立文件工作区，但底层继续复用 attachments 与同一份 MinIO 对象。
+-- CHAT 表示来自会话文件库，UPLOAD 表示为助理单独上传，GENERATED 表示由助理回复显式保存。
+CREATE TABLE IF NOT EXISTS ai_assistant_files (
+  id UUID PRIMARY KEY,
+  assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attachment_id UUID NOT NULL REFERENCES attachments(id) ON DELETE CASCADE,
+  origin VARCHAR(12) NOT NULL CHECK (origin IN ('CHAT', 'UPLOAD', 'GENERATED')),
+  source_message_id UUID REFERENCES ai_assistant_messages(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (assistant_id, attachment_id)
+);
+
+-- 只记录用户在某一轮对话中明确选择的文件；未选择的工作区文件不会进入模型上下文。
+CREATE TABLE IF NOT EXISTS ai_assistant_message_files (
+  message_id UUID NOT NULL REFERENCES ai_assistant_messages(id) ON DELETE CASCADE,
+  assistant_file_id UUID NOT NULL REFERENCES ai_assistant_files(id) ON DELETE CASCADE,
+  PRIMARY KEY (message_id, assistant_file_id)
+);
+
 -- 助理任务以 next_run_at 表示下一次计划执行，以 run_requested_at 表示不改变
 -- 原计划的“立即执行”请求。调度状态与任务定义同表，便于列表页一次读取。
 CREATE TABLE IF NOT EXISTS ai_assistant_tasks (
@@ -450,6 +470,14 @@ CREATE INDEX IF NOT EXISTS idx_ai_assistants_owner_activity
   ON ai_assistants(owner_id, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_messages_timeline
   ON ai_assistant_messages(assistant_id, created_at, id);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_assistant_created
+  ON ai_assistant_files(assistant_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_attachment
+  ON ai_assistant_files(attachment_id);
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_files_source_message
+  ON ai_assistant_files(source_message_id) WHERE source_message_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ai_assistant_message_files_file
+  ON ai_assistant_message_files(assistant_file_id);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_tasks_assistant_updated
   ON ai_assistant_tasks(assistant_id, updated_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_assistant_tasks_due

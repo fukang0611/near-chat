@@ -321,6 +321,23 @@ export interface AiAssistantMessage {
   content: string;
   model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
   sources: KnowledgeSource[];
+  /** 用户在这一轮明确交给助理读取的工作区文件。 */
+  referencedFiles?: AiAssistantFile[];
+  /** 用户把该条助理回复显式保存后生成的文件。 */
+  generatedFiles?: AiAssistantFile[];
+  createdAt: string;
+}
+
+export type AiAssistantFileOrigin = "CHAT" | "UPLOAD" | "GENERATED";
+
+export interface AiAssistantFile {
+  id: string;
+  assistantId: string;
+  origin: AiAssistantFileOrigin;
+  sourceMessageId: string | null;
+  attachment: Attachment;
+  /** 当前版本仅向模型发送可在服务端提取文字的文档。 */
+  processable: boolean;
   createdAt: string;
 }
 

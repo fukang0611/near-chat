@@ -5,14 +5,18 @@ import {
   CalendarClock,
   Check,
   ChevronRight,
+  Download,
+  FolderOpen,
   FileText,
   LibraryBig,
   LoaderCircle,
   MessageSquareText,
   MoreHorizontal,
+  Paperclip,
   PencilLine,
   Plus,
   Route,
+  Save,
   Send,
   Settings2,
   Sparkles,
@@ -26,6 +30,7 @@ import { api, type SaveAiAssistantInput } from "../api";
 import type {
   AiAssistant,
   AiAssistantCategory,
+  AiAssistantFile,
   AiAssistantMessage,
   AiCapabilities,
   KnowledgeBase,
@@ -33,6 +38,7 @@ import type {
   UserAiModels,
 } from "../types";
 import { errorMessage } from "../utils/errors";
+import { AssistantFilesPanel } from "./AssistantFilesPanel";
 import { AssistantTasksPanel } from "./AssistantTasksPanel";
 
 interface AssistantCenterDialogProps {
@@ -145,6 +151,27 @@ function SourceChip({ source, onOpen }: { source: KnowledgeSource; onOpen: () =>
   );
 }
 
+function AssistantMessageFileChip({
+  file,
+  onDownload,
+}: {
+  file: AiAssistantFile;
+  onDownload: () => void;
+}) {
+  return (
+    <button
+      className="assistant-message-file-chip"
+      type="button"
+      onClick={onDownload}
+      title={`下载 ${file.attachment.originalName}`}
+    >
+      <FileText size={14} />
+      <span>{file.attachment.originalName}</span>
+      <Download size={12} />
+    </button>
+  );
+}
+
 function emptyForm(preset = ASSISTANT_PRESETS[0]!): SaveAiAssistantInput {
   return {
     name: preset.name,
@@ -181,7 +208,18 @@ export function AssistantCenterDialog({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingText, setSendingText] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks">("chat");
+  const [workspaceMode, setWorkspaceMode] = useState<"chat" | "tasks" | "files">("chat");
+  const [assistantFiles, setAssistantFiles] = useState<AiAssistantFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [sendingFiles, setSendingFiles] = useState<AiAssistantFile[]>([]);
+  const [saveFileDraft, setSaveFileDraft] = useState<{
+    messageId: string;
+    name: string;
+    format: "MARKDOWN" | "TEXT";
+  } | null>(null);
+  const [savingMessageFile, setSavingMessageFile] = useState(false);
   const [messageLoadVersion, setMessageLoadVersion] = useState(0);
   const [targetMessageId, setTargetMessageId] = useState<string | null>(initialMessageId);
   const [editorMode, setEditorMode] = useState<"create" | "edit" | null>(null);
@@ -196,6 +234,14 @@ export function AssistantCenterDialog({
   const selectedAssistant = useMemo(
     () => assistants.find((assistant) => assistant.id === selectedId) ?? null,
     [assistants, selectedId],
+  );
+  const processableAssistantFiles = useMemo(
+    () => assistantFiles.filter((file) => file.processable),
+    [assistantFiles],
+  );
+  const selectedAssistantFiles = useMemo(
+    () => assistantFiles.filter((file) => selectedFileIds.includes(file.id)),
+    [assistantFiles, selectedFileIds],
   );
   const defaultModel = models.models.find((model) => model.id === models.selectedModelId) ?? null;
   const showNotice = useCallback((tone: "error" | "success", text: string) => {
@@ -270,6 +316,30 @@ export function AssistantCenterDialog({
   }, [messageLoadVersion, refreshVersion, selectedId]);
 
   useEffect(() => {
+    let active = true;
+    setAssistantFiles([]);
+    setSelectedFileIds([]);
+    setFilePickerOpen(false);
+    setSaveFileDraft(null);
+    if (!selectedId) return () => undefined;
+    setLoadingFiles(true);
+    void api
+      .aiAssistantFiles(selectedId)
+      .then((result) => {
+        if (active) setAssistantFiles(result.files);
+      })
+      .catch((error) => {
+        if (active) setNotice({ tone: "error", text: errorMessage(error, "助理文件加载失败") });
+      })
+      .finally(() => {
+        if (active) setLoadingFiles(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshVersion, selectedId]);
+
+  useEffect(() => {
     messageEndRef.current?.scrollIntoView({ block: "end" });
   }, [messages, sendingText, selectedId]);
 
@@ -296,12 +366,14 @@ export function AssistantCenterDialog({
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (editorMode) setEditorMode(null);
+      if (saveFileDraft) setSaveFileDraft(null);
+      else if (filePickerOpen) setFilePickerOpen(false);
+      else if (editorMode) setEditorMode(null);
       else onClose();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [editorMode, onClose]);
+  }, [editorMode, filePickerOpen, onClose, saveFileDraft]);
 
   const openCreate = (preset = ASSISTANT_PRESETS[0]!) => {
     setForm(emptyForm(preset));
@@ -403,11 +475,16 @@ export function AssistantCenterDialog({
     event?.preventDefault();
     const content = draft.trim();
     if (!selectedAssistant || !content || sendingText) return;
+    const fileIds = selectedFileIds;
+    const referencedFiles = assistantFiles.filter((file) => fileIds.includes(file.id));
     setDraft("");
+    setSelectedFileIds([]);
+    setFilePickerOpen(false);
     setSendingText(content);
+    setSendingFiles(referencedFiles);
     setNotice(null);
     try {
-      const result = await api.sendAiAssistantMessage(selectedAssistant.id, content);
+      const result = await api.sendAiAssistantMessage(selectedAssistant.id, content, fileIds);
       setMessages((current) => [...current, ...result.messages]);
       const lastMessageAt = result.messages.at(-1)?.createdAt ?? new Date().toISOString();
       setAssistants((current) =>
@@ -423,9 +500,13 @@ export function AssistantCenterDialog({
       );
     } catch (error) {
       setDraft(content);
+      setSelectedFileIds(
+        fileIds.filter((fileId) => assistantFiles.some((file) => file.id === fileId)),
+      );
       setNotice({ tone: "error", text: errorMessage(error, "助理暂时没有回复") });
     } finally {
       setSendingText(null);
+      setSendingFiles([]);
       window.setTimeout(() => composerRef.current?.focus(), 0);
     }
   };
@@ -438,6 +519,80 @@ export function AssistantCenterDialog({
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
       setNotice({ tone: "error", text: errorMessage(error, "原文件打开失败") });
+    }
+  };
+
+  const downloadAssistantFile = async (file: AiAssistantFile) => {
+    try {
+      const blob = await api.fileBlob(file.attachment.id, true);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.attachment.originalName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "文件下载失败") });
+    }
+  };
+
+  const addAssistantFileToState = useCallback((file: AiAssistantFile) => {
+    setAssistantFiles((current) => [file, ...current.filter((item) => item.id !== file.id)]);
+  }, []);
+
+  const removeAssistantFileFromState = useCallback((fileId: string) => {
+    setAssistantFiles((current) => current.filter((file) => file.id !== fileId));
+    setSelectedFileIds((current) => current.filter((id) => id !== fileId));
+    setMessages((current) =>
+      current.map((message) => ({
+        ...message,
+        referencedFiles: message.referencedFiles?.filter((file) => file.id !== fileId),
+        generatedFiles: message.generatedFiles?.filter((file) => file.id !== fileId),
+      })),
+    );
+  }, []);
+
+  const openSaveFile = (message: AiAssistantMessage) => {
+    if (!selectedAssistant) return;
+    setSaveFileDraft({
+      messageId: message.id,
+      name: `${selectedAssistant.name}回复`,
+      format: "MARKDOWN",
+    });
+  };
+
+  const saveMessageAsFile = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedAssistant || !saveFileDraft || savingMessageFile) return;
+    setSavingMessageFile(true);
+    try {
+      const result = await api.saveAiAssistantMessageFile(
+        selectedAssistant.id,
+        saveFileDraft.messageId,
+        { format: saveFileDraft.format, name: saveFileDraft.name.trim() || undefined },
+      );
+      addAssistantFileToState(result.file);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === saveFileDraft.messageId
+            ? {
+                ...message,
+                generatedFiles: [
+                  ...(message.generatedFiles ?? []).filter((file) => file.id !== result.file.id),
+                  result.file,
+                ],
+              }
+            : message,
+        ),
+      );
+      setSaveFileDraft(null);
+      setNotice({ tone: "success", text: `已保存为“${result.file.attachment.originalName}”` });
+    } catch (error) {
+      setNotice({ tone: "error", text: errorMessage(error, "助理回复保存失败") });
+    } finally {
+      setSavingMessageFile(false);
     }
   };
 
@@ -600,6 +755,16 @@ export function AssistantCenterDialog({
                         <CalendarClock size={13} />
                         任务
                       </button>
+                      <button
+                        type="button"
+                        className={workspaceMode === "files" ? "is-active" : ""}
+                        role="tab"
+                        aria-selected={workspaceMode === "files"}
+                        onClick={() => setWorkspaceMode("files")}
+                      >
+                        <FolderOpen size={13} />
+                        文件
+                      </button>
                     </div>
                     <span className="assistant-model-badge">
                       <BrainCircuit size={13} />
@@ -626,6 +791,15 @@ export function AssistantCenterDialog({
                     refreshVersion={refreshVersion}
                     onNotice={showNotice}
                     onOpenMessage={openTaskMessage}
+                  />
+                ) : workspaceMode === "files" ? (
+                  <AssistantFilesPanel
+                    assistant={selectedAssistant}
+                    files={assistantFiles}
+                    loading={loadingFiles}
+                    onFileAdded={addAssistantFileToState}
+                    onFileRemoved={removeAssistantFileFromState}
+                    onNotice={showNotice}
                   />
                 ) : (
                   <>
@@ -673,8 +847,10 @@ export function AssistantCenterDialog({
                               )}
                               <div>
                                 <p>{message.content}</p>
-                                {message.sources.length > 0 && (
-                                  <footer>
+                                {(message.sources.length > 0 ||
+                                  (message.referencedFiles?.length ?? 0) > 0 ||
+                                  (message.generatedFiles?.length ?? 0) > 0) && (
+                                  <footer className="assistant-message-resources">
                                     {message.sources.map((source) => (
                                       <SourceChip
                                         key={source.chunkId}
@@ -682,17 +858,113 @@ export function AssistantCenterDialog({
                                         onOpen={() => void openSource(source)}
                                       />
                                     ))}
+                                    {(message.referencedFiles ?? []).map((file) => (
+                                      <AssistantMessageFileChip
+                                        key={`reference-${file.id}`}
+                                        file={file}
+                                        onDownload={() => void downloadAssistantFile(file)}
+                                      />
+                                    ))}
+                                    {(message.generatedFiles ?? []).map((file) => (
+                                      <AssistantMessageFileChip
+                                        key={`generated-${file.id}`}
+                                        file={file}
+                                        onDownload={() => void downloadAssistantFile(file)}
+                                      />
+                                    ))}
                                   </footer>
                                 )}
-                                <small>
-                                  {new Intl.DateTimeFormat("zh-CN", {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  }).format(new Date(message.createdAt))}
-                                  {message.role === "ASSISTANT" && message.model
-                                    ? ` · ${message.model.name}`
-                                    : ""}
-                                </small>
+                                <div className="assistant-message-meta">
+                                  <small>
+                                    {new Intl.DateTimeFormat("zh-CN", {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    }).format(new Date(message.createdAt))}
+                                    {message.role === "ASSISTANT" && message.model
+                                      ? ` · ${message.model.name}`
+                                      : ""}
+                                  </small>
+                                  {message.role === "ASSISTANT" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openSaveFile(message)}
+                                      aria-label="将这条回复保存为文件"
+                                      title="保存为文件"
+                                    >
+                                      <Save size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                                {saveFileDraft?.messageId === message.id && (
+                                  <form
+                                    className="assistant-save-file-popover"
+                                    onSubmit={(event) => void saveMessageAsFile(event)}
+                                  >
+                                    <header>
+                                      <span>
+                                        <Save size={14} /> 保存回复
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSaveFileDraft(null)}
+                                        aria-label="关闭保存文件"
+                                      >
+                                        <X size={13} />
+                                      </button>
+                                    </header>
+                                    <label>
+                                      <span>文件名</span>
+                                      <input
+                                        value={saveFileDraft.name}
+                                        onChange={(event) =>
+                                          setSaveFileDraft((current) =>
+                                            current
+                                              ? { ...current, name: event.target.value }
+                                              : null,
+                                          )
+                                        }
+                                        maxLength={180}
+                                        autoFocus
+                                      />
+                                    </label>
+                                    <div>
+                                      <button
+                                        type="button"
+                                        className={
+                                          saveFileDraft.format === "MARKDOWN" ? "is-active" : ""
+                                        }
+                                        onClick={() =>
+                                          setSaveFileDraft((current) =>
+                                            current ? { ...current, format: "MARKDOWN" } : null,
+                                          )
+                                        }
+                                      >
+                                        Markdown
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={
+                                          saveFileDraft.format === "TEXT" ? "is-active" : ""
+                                        }
+                                        onClick={() =>
+                                          setSaveFileDraft((current) =>
+                                            current ? { ...current, format: "TEXT" } : null,
+                                          )
+                                        }
+                                      >
+                                        TXT
+                                      </button>
+                                      <button type="submit" disabled={savingMessageFile}>
+                                        {savingMessageFile ? (
+                                          <LoaderCircle className="spin" size={13} />
+                                        ) : (
+                                          <Save size={13} />
+                                        )}
+                                        保存
+                                      </button>
+                                    </div>
+                                  </form>
+                                )}
                               </div>
                             </article>
                           ))}
@@ -701,6 +973,19 @@ export function AssistantCenterDialog({
                               <article className="assistant-message is-user is-pending">
                                 <div>
                                   <p>{sendingText}</p>
+                                  {sendingFiles.length > 0 && (
+                                    <footer className="assistant-message-resources">
+                                      {sendingFiles.map((file) => (
+                                        <span
+                                          className="assistant-message-file-chip is-static"
+                                          key={file.id}
+                                        >
+                                          <FileText size={14} />
+                                          <span>{file.attachment.originalName}</span>
+                                        </span>
+                                      ))}
+                                    </footer>
+                                  )}
                                 </div>
                               </article>
                               <article className="assistant-message is-assistant is-thinking">
@@ -724,6 +1009,93 @@ export function AssistantCenterDialog({
                       className="assistant-composer"
                       onSubmit={(event) => void sendMessage(event)}
                     >
+                      {filePickerOpen && (
+                        <div className="assistant-composer-file-picker">
+                          <header>
+                            <span>
+                              <Paperclip size={14} />
+                              选择本轮要读取的文件
+                            </span>
+                            <small>{selectedFileIds.length} / 5</small>
+                          </header>
+                          <div>
+                            {processableAssistantFiles.length === 0 ? (
+                              <button
+                                type="button"
+                                className="assistant-composer-file-empty"
+                                onClick={() => {
+                                  setFilePickerOpen(false);
+                                  setWorkspaceMode("files");
+                                }}
+                              >
+                                <FolderOpen size={18} />
+                                <span>
+                                  <strong>还没有可读取的文档</strong>
+                                  <small>前往文件工作区添加 PDF、DOCX、Markdown 或文本</small>
+                                </span>
+                              </button>
+                            ) : (
+                              processableAssistantFiles.map((file) => {
+                                const selected = selectedFileIds.includes(file.id);
+                                return (
+                                  <label key={file.id}>
+                                    <input
+                                      type="checkbox"
+                                      checked={selected}
+                                      disabled={!selected && selectedFileIds.length >= 5}
+                                      onChange={() =>
+                                        setSelectedFileIds((current) =>
+                                          selected
+                                            ? current.filter((id) => id !== file.id)
+                                            : [...current, file.id].slice(0, 5),
+                                        )
+                                      }
+                                    />
+                                    <FileText size={15} />
+                                    <span title={file.attachment.originalName}>
+                                      {file.attachment.originalName}
+                                    </span>
+                                    <i>{selected && <Check size={11} />}</i>
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
+                          <footer>
+                            <span>只有勾选的文件会在本轮发送提取后的文字</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFilePickerOpen(false);
+                                setWorkspaceMode("files");
+                              }}
+                            >
+                              管理文件
+                            </button>
+                          </footer>
+                        </div>
+                      )}
+                      {selectedAssistantFiles.length > 0 && (
+                        <div className="assistant-composer-selected-files">
+                          {selectedAssistantFiles.map((file) => (
+                            <span key={file.id}>
+                              <FileText size={12} />
+                              <b>{file.attachment.originalName}</b>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedFileIds((current) =>
+                                    current.filter((id) => id !== file.id),
+                                  )
+                                }
+                                aria-label={`取消引用 ${file.attachment.originalName}`}
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       <textarea
                         ref={composerRef}
                         value={draft}
@@ -740,10 +1112,22 @@ export function AssistantCenterDialog({
                         disabled={Boolean(sendingText)}
                       />
                       <footer>
-                        <span>
-                          <MessageSquareText size={13} />
-                          Enter 发送 · Shift + Enter 换行
-                        </span>
+                        <div>
+                          <button
+                            className={`assistant-composer-attach ${filePickerOpen ? "is-active" : ""}`}
+                            type="button"
+                            onClick={() => setFilePickerOpen((current) => !current)}
+                            aria-label="引用助理文件"
+                            aria-expanded={filePickerOpen}
+                          >
+                            <Paperclip size={15} />
+                            {selectedFileIds.length > 0 && <b>{selectedFileIds.length}</b>}
+                          </button>
+                          <span>
+                            <MessageSquareText size={13} />
+                            Enter 发送 · Shift + Enter 换行
+                          </span>
+                        </div>
                         <button
                           type="submit"
                           disabled={!draft.trim() || Boolean(sendingText)}

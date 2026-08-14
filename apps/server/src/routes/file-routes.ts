@@ -204,6 +204,12 @@ export function createFileRouter() {
                   ON knowledge_base.id = knowledge_document.knowledge_base_id
                WHERE knowledge_document.attachment_id = $4
                  AND knowledge_base.owner_id = $2
+            )
+            OR EXISTS (
+              SELECT 1
+                FROM ai_assistant_files assistant_file
+               WHERE assistant_file.attachment_id = $4
+                 AND assistant_file.owner_id = $2
             )`,
       [file.message_id, user.id, file.uploader_id, file.id],
     );
@@ -249,10 +255,14 @@ export function createFileRouter() {
          SELECT 1 FROM message_attachment_links WHERE attachment_id = $1
          UNION ALL
          SELECT 1 FROM knowledge_documents WHERE attachment_id = $1
+         UNION ALL
+         SELECT 1 FROM ai_assistant_files WHERE attachment_id = $1
           LIMIT 1`,
         [fileId],
       );
-      if (referenced.rowCount) throw new ApiError(409, "已被消息、收藏或知识库引用的附件不能移除");
+      if (referenced.rowCount) {
+        throw new ApiError(409, "已被消息、收藏、知识库或助理引用的附件不能移除");
+      }
       await client.query(
         `UPDATE attachments
             SET state = 'CLEANING', state_updated_at = NOW()

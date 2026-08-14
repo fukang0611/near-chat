@@ -2,6 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { getAiCapabilities } from "../ai/ai-runtime.js";
 import {
+  ASSISTANT_MESSAGE_FILE_LIMIT,
+  addAiAssistantFile,
+  listAiAssistantFiles,
+  removeAiAssistantFile,
+  saveAssistantMessageAsFile,
+} from "../assistant/assistant-file-service.js";
+import {
   clearAiAssistantMessages,
   createAiAssistant,
   deleteAiAssistant,
@@ -56,6 +63,19 @@ const updateAssistantSchema = z
   .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1, "请输入消息").max(4000, "消息不能超过 4000 个字"),
+  fileIds: z
+    .array(idSchema)
+    .max(ASSISTANT_MESSAGE_FILE_LIMIT, `每次最多引用 ${ASSISTANT_MESSAGE_FILE_LIMIT} 个文件`)
+    .refine((ids) => new Set(ids).size === ids.length, "引用文件不能重复")
+    .default([]),
+});
+const addAssistantFileSchema = z.object({
+  attachmentId: idSchema,
+  origin: z.enum(["CHAT", "UPLOAD"]),
+});
+const saveAssistantMessageFileSchema = z.object({
+  format: z.enum(["MARKDOWN", "TEXT"]),
+  name: z.string().trim().max(180, "文件名不能超过 180 个字").optional(),
 });
 const scheduledForSchema = z
   .string()
@@ -144,9 +164,62 @@ export function createAssistantRouter() {
       currentUser(request).id,
       idSchema.parse(request.params.assistantId),
       input.content,
+      input.fileIds,
     );
     response.status(201).json({ messages });
   });
+
+  router.get("/ai/assistants/:assistantId/files", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const files = await listAiAssistantFiles(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+    );
+    response.json({ files });
+  });
+
+  router.post("/ai/assistants/:assistantId/files", authenticate, async (request, response) => {
+    requirePersonalAssistants();
+    const input = addAssistantFileSchema.parse(request.body);
+    const file = await addAiAssistantFile(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+      input.attachmentId,
+      input.origin,
+    );
+    response.status(201).json({ file });
+  });
+
+  router.delete(
+    "/ai/assistants/:assistantId/files/:fileId",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      await removeAiAssistantFile(
+        currentUser(request).id,
+        idSchema.parse(request.params.assistantId),
+        idSchema.parse(request.params.fileId),
+      );
+      response.status(204).end();
+    },
+  );
+
+  router.post(
+    "/ai/assistants/:assistantId/messages/:messageId/file",
+    authenticate,
+    async (request, response) => {
+      requirePersonalAssistants();
+      const input = saveAssistantMessageFileSchema.parse(request.body);
+      const file = await saveAssistantMessageAsFile({
+        userId: currentUser(request).id,
+        assistantId: idSchema.parse(request.params.assistantId),
+        messageId: idSchema.parse(request.params.messageId),
+        format: input.format,
+        name: input.name,
+      });
+      response.status(201).json({ file });
+    },
+  );
 
   router.get("/ai/assistants/:assistantId/tasks", authenticate, async (request, response) => {
     requirePersonalAssistants();

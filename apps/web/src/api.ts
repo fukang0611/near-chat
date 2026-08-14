@@ -3,6 +3,7 @@ import type {
   AdminAiSettings,
   AiAssistant,
   AiAssistantCategory,
+  AiAssistantFile,
   AiAssistantMessage,
   AiAssistantTask,
   AiAssistantTaskSchedule,
@@ -301,11 +302,29 @@ export const api = {
     request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`),
   clearAiAssistantMessages: (assistantId: string) =>
     request<void>(`/api/ai/assistants/${assistantId}/messages`, { method: "DELETE" }),
-  sendAiAssistantMessage: (assistantId: string, content: string) =>
+  sendAiAssistantMessage: (assistantId: string, content: string, fileIds: string[] = []) =>
     request<{ messages: AiAssistantMessage[] }>(`/api/ai/assistants/${assistantId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, fileIds }),
     }),
+  aiAssistantFiles: (assistantId: string) =>
+    request<{ files: AiAssistantFile[] }>(`/api/ai/assistants/${assistantId}/files`),
+  addAiAssistantFile: (assistantId: string, attachmentId: string, origin: "CHAT" | "UPLOAD") =>
+    request<{ file: AiAssistantFile }>(`/api/ai/assistants/${assistantId}/files`, {
+      method: "POST",
+      body: JSON.stringify({ attachmentId, origin }),
+    }),
+  deleteAiAssistantFile: (assistantId: string, fileId: string) =>
+    request<void>(`/api/ai/assistants/${assistantId}/files/${fileId}`, { method: "DELETE" }),
+  saveAiAssistantMessageFile: (
+    assistantId: string,
+    messageId: string,
+    input: { format: "MARKDOWN" | "TEXT"; name?: string },
+  ) =>
+    request<{ file: AiAssistantFile }>(
+      `/api/ai/assistants/${assistantId}/messages/${messageId}/file`,
+      { method: "POST", body: JSON.stringify(input) },
+    ),
   aiAssistantTasks: (assistantId: string) =>
     request<{ tasks: AiAssistantTask[] }>(`/api/ai/assistants/${assistantId}/tasks`),
   createAiAssistantTask: (assistantId: string, input: SaveAiAssistantTaskInput) =>
