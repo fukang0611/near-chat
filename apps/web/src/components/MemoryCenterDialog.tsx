@@ -30,6 +30,8 @@ interface MemoryCenterDialogProps {
   onClose: () => void;
   onNotify?: (message: string, tone: "success" | "error" | "info") => void;
   onOpenMessage?: (conversationId: string, messageId: string) => void;
+  /** 从助理来源进入时优先选中目标；若不在长期记忆中会自动尝试 7 天短期。 */
+  initialMemoryId?: string | null;
 }
 
 interface MemoryDraft {
@@ -93,7 +95,12 @@ function expiryLabel(expiresAt: string | null): string | null {
  * 私人记忆中心只调用 NearChat 原生接口。手动维护与明确意图识别不依赖 LLM；
  * 智能整理必须由用户主动开启，Embedding 不可用时搜索自动保留关键词结果。
  */
-export function MemoryCenterDialog({ onClose, onNotify, onOpenMessage }: MemoryCenterDialogProps) {
+export function MemoryCenterDialog({
+  onClose,
+  onNotify,
+  onOpenMessage,
+  initialMemoryId = null,
+}: MemoryCenterDialogProps) {
   const [view, setView] = useState<MemoryView>("LONG_TERM");
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
@@ -116,6 +123,9 @@ export function MemoryCenterDialog({ onClose, onNotify, onOpenMessage }: MemoryC
   const [settings, setSettings] = useState<MemorySettings | null>(null);
   const [settingsBusy, setSettingsBusy] = useState<"EXPLICIT" | "SEMANTIC" | null>(null);
   const requestIdRef = useRef(0);
+  const targetResolutionRef = useRef<"LONG_TERM" | "SHORT_TERM" | "DONE">(
+    initialMemoryId ? "LONG_TERM" : "DONE",
+  );
   const searchRef = useRef<HTMLInputElement>(null);
 
   const activeTier: MemoryTier = view === "SHORT_TERM" ? "SHORT_TERM" : "LONG_TERM";
@@ -150,6 +160,21 @@ export function MemoryCenterDialog({ onClose, onNotify, onOpenMessage }: MemoryC
       setMemories(page.memories);
       setTotal(page.total);
       setSearchMode(page.searchMode);
+      if (initialMemoryId && targetResolutionRef.current !== "DONE") {
+        if (page.memories.some((memory) => memory.id === initialMemoryId)) {
+          targetResolutionRef.current = "DONE";
+          setSelectedId(initialMemoryId);
+          return;
+        }
+        if (activeTier === "LONG_TERM" && targetResolutionRef.current === "LONG_TERM") {
+          targetResolutionRef.current = "SHORT_TERM";
+          setView("SHORT_TERM");
+          setMemories([]);
+          setSelectedId(null);
+          return;
+        }
+        targetResolutionRef.current = "DONE";
+      }
       setSelectedId((current) =>
         current && page.memories.some((memory) => memory.id === current)
           ? current
@@ -161,7 +186,7 @@ export function MemoryCenterDialog({ onClose, onNotify, onOpenMessage }: MemoryC
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [activeTier, debouncedKeyword, kindFilter]);
+  }, [activeTier, debouncedKeyword, initialMemoryId, kindFilter]);
 
   const loadCandidates = useCallback(async () => {
     setCandidatesLoading(true);

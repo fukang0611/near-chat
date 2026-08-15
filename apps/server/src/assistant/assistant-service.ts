@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import type {
+  AgentToolContext,
+  AssistantContextSource,
+  AssistantRetrievalGrants,
+} from "@near-chat/contracts";
 import type { PoolClient } from "pg";
 import { generatePersonalAssistantReply, type PersonalAssistantMessage } from "../ai/ai-runtime.js";
 import { resolveUserAiModelId } from "../ai/ai-settings-service.js";
@@ -35,6 +40,7 @@ export interface SaveAiAssistantInput {
   avatarColor: string;
   modelId: string | null;
   knowledgeBaseIds: string[];
+  toolGrants: AssistantRetrievalGrants;
 }
 
 export type UpdateAiAssistantInput = Partial<SaveAiAssistantInput>;
@@ -51,6 +57,8 @@ interface AssistantRow {
   model_name: string | null;
   provider_model: string | null;
   knowledge_base_ids: string[];
+  cross_conversation_search: boolean;
+  private_memory_read: boolean;
   message_count: string;
   last_message_at: Date | null;
   created_at: Date;
@@ -70,6 +78,18 @@ interface AssistantMessageRow {
   created_at: Date;
 }
 
+interface AssistantContextSourceRow {
+  message_id: string;
+  source_type: AssistantContextSource["type"];
+  source_id: string;
+  conversation_id: string | null;
+  target_message_id: string | null;
+  citation: string;
+  label: string;
+  excerpt: string;
+  source_created_at: Date;
+}
+
 const ASSISTANT_COLUMNS = `
   assistant.id, assistant.owner_id, assistant.name, assistant.description,
   assistant.category, assistant.instructions, assistant.avatar_color, assistant.model_id,
@@ -80,6 +100,18 @@ const ASSISTANT_COLUMNS = `
       WHERE binding.assistant_id = assistant.id),
     ARRAY[]::uuid[]
   ) AS knowledge_base_ids,
+  COALESCE(
+    (SELECT grant_row.cross_conversation_search
+       FROM assistant_tool_grants grant_row
+      WHERE grant_row.assistant_id = assistant.id),
+    FALSE
+  ) AS cross_conversation_search,
+  COALESCE(
+    (SELECT grant_row.private_memory_read
+       FROM assistant_tool_grants grant_row
+      WHERE grant_row.assistant_id = assistant.id),
+    FALSE
+  ) AS private_memory_read,
   (SELECT COUNT(*)::text FROM ai_assistant_messages message
     WHERE message.assistant_id = assistant.id) AS message_count,
   (SELECT MAX(message.created_at) FROM ai_assistant_messages message
@@ -100,6 +132,10 @@ function publicAssistant(row: AssistantRow) {
         ? { id: row.model_id, name: row.model_name, providerModel: row.provider_model }
         : null,
     knowledgeBaseIds: row.knowledge_base_ids,
+    toolGrants: {
+      crossConversationSearch: row.cross_conversation_search,
+      privateMemoryRead: row.private_memory_read,
+    },
     messageCount: Number(row.message_count),
     lastMessageAt: row.last_message_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -110,6 +146,7 @@ function publicAssistant(row: AssistantRow) {
 function publicMessage(
   row: AssistantMessageRow,
   files: AssistantMessageFileBundle = { referencedFiles: [], generatedFiles: [] },
+  contextSources: AssistantContextSource[] = [],
 ) {
   return {
     id: row.id,
@@ -122,10 +159,42 @@ function publicMessage(
         ? { id: row.model_id, name: row.model_name, providerModel: row.provider_model }
         : null,
     sources: Array.isArray(row.sources) ? row.sources : [],
+    contextSources,
     referencedFiles: files.referencedFiles,
     generatedFiles: files.generatedFiles,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+async function loadAssistantContextSources(
+  messageIds: string[],
+  client?: PoolClient,
+): Promise<Map<string, AssistantContextSource[]>> {
+  const grouped = new Map<string, AssistantContextSource[]>();
+  if (messageIds.length === 0) return grouped;
+  const statement = `SELECT message_id, source_type, source_id, conversation_id,
+                            target_message_id, citation, label, excerpt, source_created_at
+                       FROM ai_assistant_message_context_sources
+                      WHERE message_id = ANY($1::uuid[])
+                      ORDER BY created_at, source_type, source_id`;
+  const result = client
+    ? await client.query<AssistantContextSourceRow>(statement, [messageIds])
+    : await query<AssistantContextSourceRow>(statement, [messageIds]);
+  for (const row of result.rows) {
+    const sources = grouped.get(row.message_id) ?? [];
+    sources.push({
+      citation: row.citation,
+      type: row.source_type,
+      id: row.source_id,
+      conversationId: row.conversation_id,
+      messageId: row.target_message_id,
+      label: row.label,
+      excerpt: row.excerpt,
+      createdAt: row.source_created_at.toISOString(),
+    });
+    grouped.set(row.message_id, sources);
+  }
+  return grouped;
 }
 
 async function selectAssistant(
@@ -192,6 +261,25 @@ async function replaceKnowledgeBindings(
     `INSERT INTO ai_assistant_knowledge_bases (assistant_id, knowledge_base_id)
      SELECT $1, knowledge_base_id FROM unnest($2::uuid[]) AS knowledge_base_id`,
     [assistantId, knowledgeBaseIds],
+  );
+}
+
+async function upsertToolGrants(
+  client: PoolClient,
+  userId: string,
+  assistantId: string,
+  grants: AssistantRetrievalGrants,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO assistant_tool_grants
+       (assistant_id, owner_id, cross_conversation_search, private_memory_read)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (assistant_id) DO UPDATE
+       SET cross_conversation_search = EXCLUDED.cross_conversation_search,
+           private_memory_read = EXCLUDED.private_memory_read,
+           updated_at = NOW()
+     WHERE assistant_tool_grants.owner_id = EXCLUDED.owner_id`,
+    [assistantId, userId, grants.crossConversationSearch, grants.privateMemoryRead],
   );
 }
 
@@ -309,6 +397,7 @@ export async function createAiAssistant(userId: string, input: SaveAiAssistantIn
     );
     await createDefaultAiAssistantThread(client, userId, assistantId);
     await replaceKnowledgeBindings(client, assistantId, input.knowledgeBaseIds);
+    await upsertToolGrants(client, userId, assistantId, input.toolGrants);
     return publicAssistant(await selectAssistant(userId, assistantId, client));
   });
 }
@@ -343,6 +432,9 @@ export async function updateAiAssistant(
     );
     if (input.knowledgeBaseIds !== undefined) {
       await replaceKnowledgeBindings(client, assistantId, knowledgeBaseIds);
+    }
+    if (input.toolGrants !== undefined) {
+      await upsertToolGrants(client, userId, assistantId, input.toolGrants);
     }
     return publicAssistant(await selectAssistant(userId, assistantId, client));
   });
@@ -397,11 +489,14 @@ export async function listAiAssistantMessages(
       ORDER BY timeline.created_at, timeline.id`,
     [assistantId, threadId, ASSISTANT_MESSAGE_LIMIT],
   );
-  const bundles = await loadAssistantMessageFileBundles(
-    assistantId,
-    result.rows.map((row) => row.id),
+  const messageIds = result.rows.map((row) => row.id);
+  const [bundles, contextSources] = await Promise.all([
+    loadAssistantMessageFileBundles(assistantId, messageIds),
+    loadAssistantContextSources(messageIds),
+  ]);
+  return result.rows.map((row) =>
+    publicMessage(row, bundles.get(row.id), contextSources.get(row.id)),
   );
-  return result.rows.map((row) => publicMessage(row, bundles.get(row.id)));
 }
 
 export async function clearAiAssistantMessages(
@@ -450,6 +545,63 @@ async function assistantSources(
     .slice(0, ASSISTANT_SOURCE_LIMIT);
 }
 
+async function buildPrivateAssistantToolContext(
+  userId: string,
+  assistant: AssistantRow,
+): Promise<AgentToolContext> {
+  const allowedConversationIds = assistant.cross_conversation_search
+    ? (
+        await query<{ conversation_id: string }>(
+          `SELECT conversation_id
+             FROM conversation_members
+            WHERE user_id = $1
+            ORDER BY joined_at, conversation_id`,
+          [userId],
+        )
+      ).rows.map((row) => row.conversation_id)
+    : [];
+  return {
+    requesterUserId: userId,
+    assistantId: assistant.id,
+    invocationId: randomUUID(),
+    visibility: "PRIVATE_PREVIEW",
+    allowedConversationIds,
+    allowPrivateMemory: assistant.private_memory_read,
+  };
+}
+
+async function saveAssistantContextSources(
+  client: PoolClient,
+  messageId: string,
+  sources: AssistantContextSource[],
+): Promise<void> {
+  for (const source of sources) {
+    await client.query(
+      `INSERT INTO ai_assistant_message_context_sources
+         (message_id, source_type, source_id, conversation_id, target_message_id,
+          citation, label, excerpt, source_created_at)
+       VALUES (
+         $1, $2, $3,
+         (SELECT id FROM conversations WHERE id = $4),
+         (SELECT id FROM messages WHERE id = $5),
+         $6, $7, $8, $9
+       )
+       ON CONFLICT (message_id, source_type, source_id) DO NOTHING`,
+      [
+        messageId,
+        source.type,
+        source.id,
+        source.conversationId,
+        source.messageId,
+        source.citation,
+        source.label,
+        source.excerpt,
+        source.createdAt,
+      ],
+    );
+  }
+}
+
 async function generateAndSaveAssistantReply(
   userId: string,
   assistantId: string,
@@ -475,9 +627,10 @@ async function generateAndSaveAssistantReply(
         )
       ).rows.reverse()
     : [];
-  const [sources, fileContexts] = await Promise.all([
+  const [sources, fileContexts, toolContext] = await Promise.all([
     assistantSources(userId, assistant.knowledge_base_ids, content),
     loadAssistantFileContexts(userId, assistantId, fileIds),
+    buildPrivateAssistantToolContext(userId, assistant),
   ]);
   const reply = await generatePersonalAssistantReply({
     assistantId,
@@ -485,6 +638,7 @@ async function generateAndSaveAssistantReply(
     instructions: buildAssistantInstructions(assistant.category, assistant.instructions),
     modelId,
     messages: buildAssistantConversation(history, content, sources, fileContexts),
+    toolContext,
   });
 
   const messages = await transaction(async (client) => {
@@ -507,13 +661,14 @@ async function generateAndSaveAssistantReply(
         content,
         userCreatedAt,
         assistantMessageId,
-        reply,
+        reply.text,
         modelId,
         JSON.stringify(sources),
         assistantCreatedAt,
       ],
     );
     await linkAssistantFilesToMessage(client, assistantId, userMessageId, fileIds);
+    await saveAssistantContextSources(client, assistantMessageId, reply.contextSources);
     await client.query(`UPDATE ai_assistant_threads SET updated_at = NOW() WHERE id = $1`, [
       threadId,
     ]);
@@ -529,12 +684,14 @@ async function generateAndSaveAssistantReply(
         ORDER BY message.created_at, message.id`,
       [[userMessageId, assistantMessageId]],
     );
-    const bundles = await loadAssistantMessageFileBundles(
-      assistantId,
-      messages.rows.map((message) => message.id),
-      client,
+    const messageIds = messages.rows.map((message) => message.id);
+    const [bundles, contextSources] = await Promise.all([
+      loadAssistantMessageFileBundles(assistantId, messageIds, client),
+      loadAssistantContextSources(messageIds, client),
+    ]);
+    return messages.rows.map((message) =>
+      publicMessage(message, bundles.get(message.id), contextSources.get(message.id)),
     );
-    return messages.rows.map((message) => publicMessage(message, bundles.get(message.id)));
   });
   return { assistantName: assistant.name, messages };
 }

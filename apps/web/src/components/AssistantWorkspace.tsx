@@ -25,6 +25,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type { AssistantContextSource } from "@near-chat/contracts";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SaveAiAssistantInput } from "../api";
 import type {
@@ -66,6 +67,7 @@ interface AssistantWorkspaceProps {
   initialWorkspaceMode?: "chat" | "schedule" | null;
   refreshVersion?: number;
   createRequestVersion?: number;
+  onOpenContextSource?: (source: AssistantContextSource) => void;
 }
 
 interface AssistantPreset extends SaveAiAssistantInput {
@@ -82,6 +84,7 @@ const ASSISTANT_PRESETS: AssistantPreset[] = [
     avatarColor: "#6757E8",
     modelId: null,
     knowledgeBaseIds: [],
+    toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   },
   {
     kicker: "内容表达",
@@ -92,6 +95,7 @@ const ASSISTANT_PRESETS: AssistantPreset[] = [
     avatarColor: "#D9657C",
     modelId: null,
     knowledgeBaseIds: [],
+    toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   },
   {
     kicker: "信息洞察",
@@ -102,6 +106,7 @@ const ASSISTANT_PRESETS: AssistantPreset[] = [
     avatarColor: "#2F9D83",
     modelId: null,
     knowledgeBaseIds: [],
+    toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   },
   {
     kicker: "行动规划",
@@ -112,6 +117,7 @@ const ASSISTANT_PRESETS: AssistantPreset[] = [
     avatarColor: "#D08742",
     modelId: null,
     knowledgeBaseIds: [],
+    toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   },
 ];
 
@@ -128,6 +134,29 @@ function SourceChip({ source, onOpen }: { source: KnowledgeSource; onOpen: () =>
       <span>{source.document.name}</span>
       <small>片段 {source.position + 1}</small>
       <ChevronRight size={12} />
+    </button>
+  );
+}
+
+function ContextSourceChip({
+  source,
+  onOpen,
+}: {
+  source: AssistantContextSource;
+  onOpen?: () => void;
+}) {
+  return (
+    <button
+      className={`assistant-context-source-chip is-${source.type.toLowerCase()}`}
+      type="button"
+      onClick={onOpen}
+      disabled={!onOpen}
+      title={source.excerpt}
+    >
+      {source.type === "MESSAGE" ? <MessageSquareText size={13} /> : <BrainCircuit size={13} />}
+      <span>{source.label}</span>
+      <small>[{source.citation}]</small>
+      {onOpen && <ChevronRight size={12} />}
     </button>
   );
 }
@@ -162,6 +191,7 @@ function emptyForm(preset = ASSISTANT_PRESETS[0]!): SaveAiAssistantInput {
     avatarColor: preset.avatarColor,
     modelId: null,
     knowledgeBaseIds: [],
+    toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   };
 }
 
@@ -180,6 +210,7 @@ export function AssistantWorkspace({
   initialWorkspaceMode = null,
   refreshVersion = 0,
   createRequestVersion = 0,
+  onOpenContextSource,
 }: AssistantWorkspaceProps) {
   const [assistants, setAssistants] = useState<AiAssistant[]>([]);
   const [threads, setThreads] = useState<AiAssistantThread[]>([]);
@@ -591,6 +622,7 @@ export function AssistantWorkspace({
         ? selectedAssistant.modelId
         : null,
       knowledgeBaseIds: selectedAssistant.knowledgeBaseIds,
+      toolGrants: selectedAssistant.toolGrants,
     });
     setEditorMode("edit");
     setConfirmDelete(false);
@@ -1089,6 +1121,12 @@ export function AssistantWorkspace({
                               ? `已连接 ${selectedAssistant.knowledgeBaseIds.length} 个知识库`
                               : "未连接知识库"}
                           </span>
+                          {selectedAssistant.toolGrants.crossConversationSearch && (
+                            <span>可检索团队会话</span>
+                          )}
+                          {selectedAssistant.toolGrants.privateMemoryRead && (
+                            <span>可读取私人记忆</span>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -1105,6 +1143,7 @@ export function AssistantWorkspace({
                             <div>
                               <p>{message.content}</p>
                               {(message.sources.length > 0 ||
+                                (message.contextSources?.length ?? 0) > 0 ||
                                 (message.referencedFiles?.length ?? 0) > 0 ||
                                 (message.generatedFiles?.length ?? 0) > 0) && (
                                 <footer className="assistant-message-resources">
@@ -1113,6 +1152,17 @@ export function AssistantWorkspace({
                                       key={source.chunkId}
                                       source={source}
                                       onOpen={() => void openSource(source)}
+                                    />
+                                  ))}
+                                  {(message.contextSources ?? []).map((source) => (
+                                    <ContextSourceChip
+                                      key={`${source.type}-${source.id}`}
+                                      source={source}
+                                      onOpen={
+                                        onOpenContextSource
+                                          ? () => onOpenContextSource(source)
+                                          : undefined
+                                      }
                                     />
                                   ))}
                                   {(message.referencedFiles ?? []).map((file) => (
@@ -1544,6 +1594,62 @@ export function AssistantWorkspace({
                     })}
                   </div>
                 )}
+              </fieldset>
+              <fieldset>
+                <legend>
+                  资料检索权限 <small>默认关闭</small>
+                </legend>
+                <div className="assistant-tool-grant-options">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.toolGrants.crossConversationSearch}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          toolGrants: {
+                            ...current.toolGrants,
+                            crossConversationSearch: event.target.checked,
+                          },
+                        }))
+                      }
+                    />
+                    <span>
+                      <MessageSquareText size={15} />
+                      <b>
+                        <strong>跨会话检索</strong>
+                        <small>按需查找你有权访问的历史消息和附件名</small>
+                      </b>
+                    </span>
+                    <i>{form.toolGrants.crossConversationSearch && <Check size={12} />}</i>
+                  </label>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.toolGrants.privateMemoryRead}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          toolGrants: {
+                            ...current.toolGrants,
+                            privateMemoryRead: event.target.checked,
+                          },
+                        }))
+                      }
+                    />
+                    <span>
+                      <BrainCircuit size={15} />
+                      <b>
+                        <strong>私人记忆</strong>
+                        <small>按需读取你的短期与长期记忆，不向团队公开</small>
+                      </b>
+                    </span>
+                    <i>{form.toolGrants.privateMemoryRead && <Check size={12} />}</i>
+                  </label>
+                </div>
+                <small className="assistant-tool-grant-note">
+                  仅用于私人助理回答；未来公开到群聊的回复会强制隔离这些资料。
+                </small>
               </fieldset>
               <fieldset>
                 <legend>头像颜色</legend>

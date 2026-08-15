@@ -9524,6 +9524,55 @@ button.memory-source-note {
   white-space: nowrap;
 }
 
+.assistant-context-source-chip {
+  max-width: 280px;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid rgba(47, 157, 131, 0.16);
+  border-radius: 9px;
+  color: #2f8a75;
+  background: rgba(232, 247, 242, 0.88);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.assistant-context-source-chip.is-memory {
+  border-color: rgba(103, 87, 232, 0.16);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-context-source-chip:hover:not(:disabled) {
+  border-color: currentColor;
+  transform: translateY(-1px);
+}
+
+.assistant-context-source-chip:disabled {
+  cursor: default;
+}
+
+.assistant-context-source-chip span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-context-source-chip small {
+  margin: 0;
+  color: currentColor;
+  font-size: 8px;
+  white-space: nowrap;
+}
+
 .assistant-message.is-thinking > div {
   display: flex;
   align-items: flex-start;
@@ -10774,6 +10823,97 @@ button.memory-source-note {
   border-radius: 10px;
   color: var(--muted);
   font-size: 8px;
+}
+
+.assistant-tool-grant-options {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.assistant-tool-grant-options > label {
+  min-height: 48px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 7px 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+.assistant-tool-grant-options > label:has(input:checked) {
+  border-color: rgba(103, 87, 232, 0.24);
+  background: rgba(103, 87, 232, 0.045);
+}
+
+.assistant-tool-grant-options input {
+  width: 1px;
+  height: 1px;
+  position: absolute;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.assistant-tool-grant-options label > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.assistant-tool-grant-options label > span > b {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: inherit;
+}
+
+.assistant-tool-grant-options strong {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.assistant-tool-grant-options small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assistant-tool-grant-options label > i {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: #fff;
+}
+
+.assistant-tool-grant-options input:checked ~ i {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.assistant-tool-grant-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.5;
 }
 
 .assistant-color-options {
@@ -13113,7 +13253,8 @@ button.memory-source-note {
 
 :root[data-theme="dark"] .assistant-conversation-empty > div span,
 :root[data-theme="dark"] .assistant-category-grid button,
-:root[data-theme="dark"] .assistant-knowledge-options > label {
+:root[data-theme="dark"] .assistant-knowledge-options > label,
+:root[data-theme="dark"] .assistant-tool-grant-options > label {
   background: rgba(255, 255, 255, 0.035);
 }
 
@@ -13255,6 +13396,7 @@ button.memory-source-note {
 
 :root[data-theme="dark"] .assistant-category-grid button.is-active,
 :root[data-theme="dark"] .assistant-source-chip,
+:root[data-theme="dark"] .assistant-context-source-chip,
 :root[data-theme="dark"] .assistant-message-file-chip,
 :root[data-theme="dark"] .assistant-composer-selected-files > span {
   background: rgba(103, 87, 232, 0.17);

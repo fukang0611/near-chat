@@ -1,4 +1,5 @@
 import type {
+  AssistantRetrievalGrants,
   CreateMemoryInput,
   MemoryCandidate,
   MemoryCandidatePage,
@@ -98,6 +99,7 @@ export interface SaveAiAssistantInput {
   avatarColor: string;
   modelId: string | null;
   knowledgeBaseIds: string[];
+  toolGrants: AssistantRetrievalGrants;
 }
 
 export interface SaveAiAssistantTaskInput {

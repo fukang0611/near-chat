@@ -188,6 +188,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showMessageAssets, setShowMessageAssets] = useState(false);
   const [showMemoryCenter, setShowMemoryCenter] = useState(false);
+  const [memoryTargetId, setMemoryTargetId] = useState<string | null>(null);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
   const [aiActionMessage, setAiActionMessage] = useState<Message | null>(null);
   const [assistantDirectory, setAssistantDirectory] = useState<AssistantDirectorySnapshot>({
@@ -1712,7 +1713,10 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenMessageAssets={() => setShowMessageAssets(true)}
-        onOpenMemories={() => setShowMemoryCenter(true)}
+        onOpenMemories={() => {
+          setMemoryTargetId(null);
+          setShowMemoryCenter(true);
+        }}
         assistantAvailable={Boolean(aiCapabilities?.features.personalAssistants)}
         assistantUnreadCount={assistantUnreadCount}
         assistants={assistantDirectory.assistants}
@@ -1775,6 +1779,21 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           }
           refreshVersion={assistantRefreshVersion}
           createRequestVersion={assistantCreateRequestVersion}
+          onOpenContextSource={(source) => {
+            if (source.conversationId && source.messageId) {
+              messageTargetRef.current = {
+                conversationId: source.conversationId,
+                messageId: source.messageId,
+              };
+              setHighlightedMessageId(null);
+              setSelectedId(source.conversationId);
+              setMessageLoadVersion((current) => current + 1);
+              setSidebarMode("recent");
+              return;
+            }
+            setMemoryTargetId(source.type === "MEMORY" ? source.id : null);
+            setShowMemoryCenter(true);
+          }}
         />
       )}
 
@@ -2050,7 +2069,11 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       )}
       {showMemoryCenter && (
         <MemoryCenterDialog
-          onClose={() => setShowMemoryCenter(false)}
+          initialMemoryId={memoryTargetId}
+          onClose={() => {
+            setShowMemoryCenter(false);
+            setMemoryTargetId(null);
+          }}
           onNotify={notify}
           onOpenMessage={(conversationId, messageId) => {
             messageTargetRef.current = { conversationId, messageId };
@@ -2059,6 +2082,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
             setMessageLoadVersion((current) => current + 1);
             setSidebarMode("recent");
             setShowMemoryCenter(false);
+            setMemoryTargetId(null);
           }}
         />
       )}

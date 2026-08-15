@@ -1,4 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import type { AgentToolContext, AssistantContextSource } from "@near-chat/contracts";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { PgVector, type VectorType } from "@mastra/pg";
@@ -6,6 +7,10 @@ import { embedMany, type EmbeddingModel } from "ai";
 import type { AiChatModelSettings, AiRuntimeSettings } from "./ai-settings-service.js";
 import { config } from "../config.js";
 import { query } from "../database.js";
+import {
+  AssistantContextCollector,
+  createAssistantContextTools,
+} from "../assistant/assistant-context-tools.js";
 
 const KNOWLEDGE_INDEX = "near_chat_knowledge_embeddings";
 const MEMORY_INDEX = "near_chat_memory_embeddings";
@@ -505,7 +510,8 @@ export function generatePersonalAssistantReply(input: {
   instructions: string;
   modelId: string;
   messages: PersonalAssistantMessage[];
-}): Promise<string> {
+  toolContext: AgentToolContext;
+}): Promise<{ text: string; contextSources: AssistantContextSource[] }> {
   return serialized(async () => {
     if (!getAiCapabilities().features.personalAssistants) {
       throw new AiFeatureUnavailableError("个人助理尚未就绪，请检查 AI 对话模型配置");
@@ -515,24 +521,36 @@ export function generatePersonalAssistantReply(input: {
     );
     if (!model) throw new AiFeatureUnavailableError("所选对话模型当前不可用");
 
+    const contextCollector = new AssistantContextCollector();
+    const contextTools = createAssistantContextTools(input.toolContext, contextCollector);
+    const retrievalEnabled = Object.keys(contextTools).length > 0;
+
     const agent = new Agent({
       id: `near-chat-assistant-${input.assistantId}`,
       name: input.assistantName,
       instructions: [
         "你是 NearChat 中由当前用户创建的私人智能助理。",
         "默认使用中文，表达清楚、自然，并严格遵循下方角色说明。",
-        "你目前没有执行外部操作、浏览网页、发送消息或修改文件的工具；不得声称已经完成这些动作。",
+        "你没有执行外部操作、浏览网页、发送消息或修改文件的工具；不得声称已经完成这些动作。",
         "不确定的信息应明确说明，不得捏造用户、团队或系统内部数据。",
+        ...(retrievalEnabled
+          ? [
+              "当问题涉及过去的聊天、决定、负责人、个人偏好或持续事项时，先使用可用的只读检索工具，不要凭空回忆。",
+              "只引用工具实际返回的资料，并在相关陈述后保留工具结果给出的 [聊天N] 或 [记忆N] 标记。",
+              "工具没有命中时直接说明没有找到，不得构造来源标记。",
+            ]
+          : []),
         "",
         "角色说明：",
         input.instructions,
       ].join("\n"),
       model: openAiProvider(model, `near-chat-assistant-${model.id}`).chat(model.providerModel),
+      tools: contextTools,
     });
-    const result = await agent.generate(input.messages);
+    const result = await agent.generate(input.messages, { maxSteps: retrievalEnabled ? 5 : 1 });
     const text = result.text.trim();
     if (!text) throw new Error("模型未返回有效文本");
-    return text;
+    return { text, contextSources: contextCollector.values() };
   });
 }
 

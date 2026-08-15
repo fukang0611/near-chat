@@ -193,6 +193,47 @@ export const databaseMigrations: DatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "add_assistant_retrieval_tools",
+    async up(client) {
+      await client.query(`
+        CREATE TABLE assistant_tool_grants (
+          assistant_id UUID PRIMARY KEY REFERENCES ai_assistants(id) ON DELETE CASCADE,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          cross_conversation_search BOOLEAN NOT NULL DEFAULT FALSE,
+          private_memory_read BOOLEAN NOT NULL DEFAULT FALSE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (assistant_id, owner_id)
+        );
+
+        INSERT INTO assistant_tool_grants (assistant_id, owner_id)
+        SELECT id, owner_id FROM ai_assistants
+        ON CONFLICT (assistant_id) DO NOTHING;
+
+        CREATE TABLE ai_assistant_message_context_sources (
+          message_id UUID NOT NULL REFERENCES ai_assistant_messages(id) ON DELETE CASCADE,
+          source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('MESSAGE', 'MEMORY')),
+          source_id UUID NOT NULL,
+          conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+          target_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+          citation VARCHAR(24) NOT NULL,
+          label VARCHAR(180) NOT NULL,
+          excerpt TEXT NOT NULL,
+          source_created_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (message_id, source_type, source_id)
+        );
+
+        CREATE INDEX idx_assistant_context_sources_target_message
+          ON ai_assistant_message_context_sources(target_message_id)
+          WHERE target_message_id IS NOT NULL;
+        CREATE INDEX idx_assistant_context_sources_source
+          ON ai_assistant_message_context_sources(source_type, source_id);
+      `);
+    },
+  },
 ];
 
 export function orderedPendingMigrations(

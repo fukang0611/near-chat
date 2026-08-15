@@ -1,3 +1,5 @@
+import type { AssistantContextSource, AssistantRetrievalGrants } from "@near-chat/contracts";
+
 export interface User {
   id: string;
   username: string;
@@ -346,6 +348,7 @@ export interface AiAssistant {
   modelId: string | null;
   model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
   knowledgeBaseIds: string[];
+  toolGrants: AssistantRetrievalGrants;
   messageCount: number;
   lastMessageAt: string | null;
   createdAt: string;
@@ -360,6 +363,8 @@ export interface AiAssistantMessage {
   content: string;
   model: Pick<AiModelChoice, "id" | "name" | "providerModel"> | null;
   sources: KnowledgeSource[];
+  /** Mastra 只读工具在生成本条回复时实际使用过的聊天或私人记忆来源。 */
+  contextSources?: AssistantContextSource[];
   /** 用户在这一轮明确交给助理读取的工作区文件。 */
   referencedFiles?: AiAssistantFile[];
   /** 用户把该条助理回复显式保存后生成的文件。 */

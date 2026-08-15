@@ -23,6 +23,7 @@ const assistant: AiAssistant = {
   modelId: null,
   model: null,
   knowledgeBaseIds: [],
+  toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   messageCount: 0,
   lastMessageAt: null,
   createdAt: "2026-08-14T08:00:00.000Z",
@@ -352,6 +353,72 @@ describe("AssistantWorkspace", () => {
         expect.objectContaining({ name: "项目分析师", category: "GENERAL", modelId: null }),
       ),
     );
+  });
+
+  it("用户可为单个助理明确开启跨会话和私人记忆检索", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, "updateAiAssistant").mockImplementation(async (_assistantId, input) => ({
+      assistant: { ...assistant, ...input },
+    }));
+
+    render(<AssistantWorkspaceHarness />);
+    await user.click(await screen.findByRole("button", { name: "编辑助理" }));
+    await user.click(screen.getByRole("checkbox", { name: /跨会话检索/ }));
+    await user.click(screen.getByRole("checkbox", { name: /私人记忆/ }));
+    await user.click(screen.getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() =>
+      expect(api.updateAiAssistant).toHaveBeenCalledWith(
+        assistant.id,
+        expect.objectContaining({
+          toolGrants: { crossConversationSearch: true, privateMemoryRead: true },
+        }),
+      ),
+    );
+  });
+
+  it("助理回复展示实际使用的聊天来源并可定位原消息", async () => {
+    const user = userEvent.setup();
+    const onOpenContextSource = vi.fn();
+    const contextSource = {
+      citation: "聊天1",
+      type: "MESSAGE" as const,
+      id: "34343434-3434-4434-8434-343434343434",
+      conversationId: "45454545-4545-4454-8454-454545454545",
+      messageId: "34343434-3434-4434-8434-343434343434",
+      label: "项目群 · 林小满",
+      excerpt: "团队决定周五下午发布。",
+      createdAt: "2026-08-14T09:00:00.000Z",
+    };
+    vi.mocked(api.aiAssistantMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: "56565656-5656-4565-8565-565656565656",
+          assistantId: assistant.id,
+          threadId: defaultThread.id,
+          role: "ASSISTANT",
+          content: "团队决定周五下午发布。[聊天1]",
+          model: modelResult.models[0]!,
+          sources: [],
+          contextSources: [contextSource],
+          createdAt: "2026-08-14T09:01:00.000Z",
+        },
+      ],
+    });
+
+    render(
+      <AssistantWorkspace
+        capabilities={capabilities}
+        selectedId={assistant.id}
+        onSelectedIdChange={() => undefined}
+        onDirectoryChange={() => undefined}
+        onMobileBack={() => undefined}
+        onOpenContextSource={onOpenContextSource}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /项目群 · 林小满/ }));
+    expect(onOpenContextSource).toHaveBeenCalledWith(contextSource);
   });
 
   it("只把用户在当前一轮勾选的工作区文件交给助理", async () => {

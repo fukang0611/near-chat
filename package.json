@@ -27,6 +27,7 @@
     "smoke:assistant-task-tools": "node scripts/assistant-task-tools-smoke-test.mjs",
     "smoke:assistant-threads": "node scripts/assistant-threads-smoke-test.mjs",
     "smoke:assistant-reminders": "node scripts/assistant-reminders-smoke-test.mjs",
+    "smoke:assistant-context": "node scripts/assistant-context-smoke-test.mjs",
     "smoke:memory-capture": "node scripts/memory-capture-smoke-test.mjs"
   },
   "devDependencies": {

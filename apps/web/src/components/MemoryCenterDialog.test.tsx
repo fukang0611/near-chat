@@ -159,6 +159,30 @@ describe("MemoryCenterDialog", () => {
     );
   });
 
+  it("从助理来源进入时可跨层级定位指定记忆", async () => {
+    const shortMemory: MemoryRecord = {
+      ...memory,
+      id: "b0c323f4-d1a4-4e9a-9d12-193c258fc922",
+      tier: "SHORT_TERM",
+      title: "本周验收重点",
+      expiresAt: "2026-08-22T08:00:00.000Z",
+    };
+    vi.spyOn(api, "memories").mockImplementation(async (options) => ({
+      memories: options?.tier === "SHORT_TERM" ? [shortMemory] : [memory],
+      total: 1,
+      offset: 0,
+      hasMore: false,
+      searchMode: "KEYWORD",
+    }));
+
+    render(<MemoryCenterDialog onClose={vi.fn()} initialMemoryId={shortMemory.id} />);
+
+    expect(await screen.findByDisplayValue(shortMemory.title)).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "7 天短期" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+  });
+
   it("消息候选可确认成短期记忆", async () => {
     vi.mocked(api.memoryCandidates).mockResolvedValue({ candidates: [candidate], total: 1 });
     vi.spyOn(api, "memories").mockResolvedValue({

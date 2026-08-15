@@ -57,6 +57,10 @@ const knowledgeBaseIdsSchema = z
   .array(z.string().uuid())
   .max(10, "一个助理最多绑定 10 个知识库")
   .refine((ids) => new Set(ids).size === ids.length, "知识库不能重复绑定");
+const retrievalGrantsSchema = z.object({
+  crossConversationSearch: z.boolean(),
+  privateMemoryRead: z.boolean(),
+});
 
 const assistantFields = {
   name: z.string().trim().min(1, "请输入助理名称").max(80, "助理名称不能超过 80 个字"),
@@ -70,6 +74,10 @@ const assistantFields = {
   avatarColor: avatarColorSchema,
   modelId: z.union([z.string().uuid(), z.null()]),
   knowledgeBaseIds: knowledgeBaseIdsSchema,
+  toolGrants: retrievalGrantsSchema.default({
+    crossConversationSearch: false,
+    privateMemoryRead: false,
+  }),
 };
 
 const createAssistantSchema = z.object(assistantFields);
@@ -82,6 +90,7 @@ const updateAssistantSchema = z
     avatarColor: assistantFields.avatarColor.optional(),
     modelId: assistantFields.modelId.optional(),
     knowledgeBaseIds: assistantFields.knowledgeBaseIds.optional(),
+    toolGrants: assistantFields.toolGrants.optional(),
   })
   .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
 const sendMessageSchema = z.object({

@@ -114,6 +114,29 @@ export interface AgentToolContext {
   allowPrivateMemory: boolean;
 }
 
+/**
+ * 每个私人助理独立保存的只读资料授权。默认全部关闭；用户明确开启后，
+ * 模型才会获得对应工具，模型本身不能通过参数扩大权限。
+ */
+export interface AssistantRetrievalGrants {
+  crossConversationSearch: boolean;
+  privateMemoryRead: boolean;
+}
+
+export type AssistantContextSourceType = "MESSAGE" | "MEMORY";
+
+/** 助理工具实际使用过的资料来源，用于回答旁的可追溯跳转。 */
+export interface AssistantContextSource {
+  citation: string;
+  type: AssistantContextSourceType;
+  id: string;
+  conversationId: string | null;
+  messageId: string | null;
+  label: string;
+  excerpt: string;
+  createdAt: string;
+}
+
 export interface AgentRuntimeRequest {
   modelId: string | null;
   instructions: string;

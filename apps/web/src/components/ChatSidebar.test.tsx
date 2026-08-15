@@ -49,6 +49,7 @@ const assistant: AiAssistant = {
   modelId: null,
   model: null,
   knowledgeBaseIds: [],
+  toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
   messageCount: 3,
   lastMessageAt: "2026-08-14T08:00:00.000Z",
   createdAt: "2026-08-14T08:00:00.000Z",
