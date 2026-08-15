@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import pg, { type PoolClient, type QueryResultRow } from "pg";
 import { config } from "./config.js";
+import { runDatabaseMigrations } from "./migrations.js";
 import { retryUntilReady } from "./retry.js";
 
 const { Pool } = pg;
@@ -767,6 +768,7 @@ export async function initializeDatabase(): Promise<void> {
   await retryUntilReady(() => pool.query("SELECT 1"));
 
   await pool.query(schema);
+  await runDatabaseMigrations(pool);
 
   // 浏览器会话只存在于当前进程；异常重启后不能假装仍可继续旧页面。
   // 尚未首次打开的待确认运行没有页面状态，可以安全保留给用户稍后确认。

@@ -3,17 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @near-chat/server && npm run build -w @near-chat/web",
+    "build": "npm run build -w @near-chat/contracts && npm run build -w @near-chat/server && npm run build -w @near-chat/web",
     "build:desktop": "npm run build -w @near-chat/desktop",
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w @near-chat/server\" \"npm run dev -w @near-chat/web\"",
     "desktop:start": "npm run start -w @near-chat/desktop",
     "desktop:package": "npm run package -w @near-chat/desktop",
     "desktop:make": "npm run make -w @near-chat/desktop",
     "desktop:make:win": "npm run make:win -w @near-chat/desktop",
-    "typecheck": "npm run typecheck -w @near-chat/server && npm run typecheck -w @near-chat/web && npm run typecheck -w @near-chat/desktop",
+    "typecheck": "npm run typecheck -w @near-chat/contracts && npm run typecheck -w @near-chat/server && npm run typecheck -w @near-chat/web && npm run typecheck -w @near-chat/desktop",
     "test": "npm run test -w @near-chat/server && npm run test -w @near-chat/web && npm run test -w @near-chat/desktop",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
