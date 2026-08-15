@@ -282,3 +282,6 @@ scripts/         分阶段端到端冒烟测试
 后续近场协作能力及逐项验收口径见 [近场协作能力路线图](docs/nearby-collaboration-roadmap.md)。
 
 AI 协作能力的后续阶段与验收口径见 [AI 协作演进路线图](docs/ai-collaboration-roadmap.md)。
+
+记忆中枢、Android 个人助理、设备同步及微信/钉钉连接器的详细设计见
+[下一阶段实施方案](docs/memory-mobile-connectors-plan.md)。
