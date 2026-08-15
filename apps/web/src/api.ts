@@ -1,4 +1,11 @@
 import type {
+  CreateMemoryInput,
+  MemoryKind,
+  MemoryPage,
+  MemoryRecord,
+  UpdateMemoryInput,
+} from "@near-chat/contracts";
+import type {
   AdminUser,
   AdminAiSettings,
   AiAssistant,
@@ -554,6 +561,29 @@ export const api = {
     ),
   deleteFavorite: (favoriteId: string) =>
     request<void>(`/api/message-assets/favorites/${favoriteId}`, { method: "DELETE" }),
+  memories: (
+    options: { keyword?: string; kind?: MemoryKind; limit?: number; offset?: number } = {},
+  ) => {
+    const query = new URLSearchParams({
+      limit: String(options.limit ?? 100),
+      offset: String(options.offset ?? 0),
+    });
+    if (options.keyword) query.set("q", options.keyword);
+    if (options.kind) query.set("kind", options.kind);
+    return request<MemoryPage>(`/api/memories?${query}`);
+  },
+  createMemory: (input: CreateMemoryInput) =>
+    request<{ memory: MemoryRecord }>("/api/memories", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateMemory: (memoryId: string, input: UpdateMemoryInput) =>
+    request<{ memory: MemoryRecord }>(`/api/memories/${memoryId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  forgetMemory: (memoryId: string) =>
+    request<void>(`/api/memories/${memoryId}`, { method: "DELETE" }),
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(`/api/files/${fileId}/content${download ? "?download=1" : ""}`, {

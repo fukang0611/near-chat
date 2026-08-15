@@ -14,7 +14,85 @@ export interface DatabaseMigration {
  * 现有内联 Schema 继续作为旧版本数据库的兼容基线；从本阶段开始，新增领域表和
  * 破坏性较低的增量修改统一进入有序迁移，避免启动 SQL 随功能增长继续失控。
  */
-export const databaseMigrations: DatabaseMigration[] = [];
+export const databaseMigrations: DatabaseMigration[] = [
+  {
+    version: 1,
+    name: "create_memory_domain",
+    async up(client) {
+      await client.query(`
+        CREATE TABLE memories (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          tier VARCHAR(20) NOT NULL DEFAULT 'LONG_TERM'
+            CHECK (tier IN ('SHORT_TERM', 'LONG_TERM')),
+          scope VARCHAR(20) NOT NULL DEFAULT 'PRIVATE'
+            CHECK (scope IN ('PRIVATE', 'CONVERSATION')),
+          conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+          kind VARCHAR(30) NOT NULL
+            CHECK (kind IN (
+              'PREFERENCE', 'PERSON', 'PROJECT', 'DECISION',
+              'PROCEDURE', 'GOAL', 'NOTE', 'TASK_CONTEXT'
+            )),
+          title VARCHAR(120) NOT NULL,
+          content TEXT NOT NULL,
+          importance SMALLINT NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
+          status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+            CHECK (status IN ('ACTIVE', 'ARCHIVED', 'DELETED')),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          expires_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_at TIMESTAMPTZ,
+          CHECK (
+            (scope = 'PRIVATE' AND conversation_id IS NULL)
+            OR (scope = 'CONVERSATION' AND conversation_id IS NOT NULL)
+          )
+        );
+
+        CREATE TABLE memory_revisions (
+          id UUID PRIMARY KEY,
+          memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          kind VARCHAR(30) NOT NULL,
+          title VARCHAR(120) NOT NULL,
+          content TEXT NOT NULL,
+          importance SMALLINT NOT NULL CHECK (importance BETWEEN 1 AND 5),
+          change_type VARCHAR(20) NOT NULL
+            CHECK (change_type IN ('CREATE', 'APPEND', 'CORRECT', 'MERGE', 'SUPERSEDE', 'FORGET')),
+          changed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (memory_id, revision)
+        );
+
+        CREATE TABLE memory_sources (
+          id UUID PRIMARY KEY,
+          memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+          source_type VARCHAR(30) NOT NULL
+            CHECK (source_type IN (
+              'MESSAGE', 'ASSISTANT_MESSAGE', 'FILE', 'TASK', 'REMINDER', 'MANUAL'
+            )),
+          source_id UUID,
+          conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+          label VARCHAR(160) NOT NULL,
+          excerpt TEXT,
+          source_created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX idx_memories_owner_active
+          ON memories(owner_id, updated_at DESC, id DESC)
+          WHERE status = 'ACTIVE';
+        CREATE INDEX idx_memories_owner_kind
+          ON memories(owner_id, kind, updated_at DESC)
+          WHERE status = 'ACTIVE';
+        CREATE INDEX idx_memory_revisions_history
+          ON memory_revisions(memory_id, revision DESC);
+        CREATE INDEX idx_memory_sources_memory
+          ON memory_sources(memory_id, source_created_at DESC, id DESC);
+      `);
+    },
+  },
+];
 
 export function orderedPendingMigrations(
   migrations: DatabaseMigration[],

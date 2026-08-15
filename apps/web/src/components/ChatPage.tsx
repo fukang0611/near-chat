@@ -68,6 +68,7 @@ import { KnowledgeBaseDialog } from "./KnowledgeBaseDialog";
 import { MessageSearchPanel } from "./MessageSearchPanel";
 import { MessageAssetsDialog } from "./MessageAssetsDialog";
 import { MessageAiActionDialog } from "./MessageAiActionDialog";
+import { MemoryCenterDialog } from "./MemoryCenterDialog";
 import { MessageTimeline } from "./MessageTimeline";
 import { MessageSelectionToolbar } from "./MessageSelectionToolbar";
 import { NotificationPermissionPrompt } from "./NotificationPermissionPrompt";
@@ -185,6 +186,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [showGroupManagement, setShowGroupManagement] = useState(false);
   const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showMessageAssets, setShowMessageAssets] = useState(false);
+  const [showMemoryCenter, setShowMemoryCenter] = useState(false);
   const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
   const [aiActionMessage, setAiActionMessage] = useState<Message | null>(null);
   const [assistantDirectory, setAssistantDirectory] = useState<AssistantDirectorySnapshot>({
@@ -1692,6 +1694,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         onDropToContact={(peerId, payload) => void deliverToContact(peerId, payload)}
         onCreateGroup={() => setShowCreateGroup(true)}
         onOpenMessageAssets={() => setShowMessageAssets(true)}
+        onOpenMemories={() => setShowMemoryCenter(true)}
         assistantAvailable={Boolean(aiCapabilities?.features.personalAssistants)}
         assistantUnreadCount={assistantUnreadCount}
         assistants={assistantDirectory.assistants}
@@ -2024,6 +2027,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
           }}
           onFavoriteRemoved={forgetFavorite}
         />
+      )}
+      {showMemoryCenter && (
+        <MemoryCenterDialog onClose={() => setShowMemoryCenter(false)} onNotify={notify} />
       )}
       {aiActionMessage && aiCapabilities?.features.messageActions && (
         <MessageAiActionDialog

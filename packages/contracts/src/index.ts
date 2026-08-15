@@ -46,6 +46,29 @@ export interface MemoryRecord {
   updatedAt: string;
 }
 
+export interface MemoryPage {
+  memories: MemoryRecord[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface CreateMemoryInput {
+  title: string;
+  content: string;
+  kind: MemoryKind;
+  importance: number;
+}
+
+export interface UpdateMemoryInput {
+  title?: string;
+  content?: string;
+  kind?: MemoryKind;
+  importance?: number;
+  /** 客户端最后读取的版本，用于阻止覆盖其他终端刚完成的修改。 */
+  baseRevision: number;
+}
+
 export interface AgentToolContext {
   requesterUserId: string;
   assistantId: string;

@@ -77,6 +77,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof ChatSidebar>> = 
       onDropToContact={vi.fn()}
       onCreateGroup={vi.fn()}
       onOpenMessageAssets={vi.fn()}
+      onOpenMemories={vi.fn()}
       onOpenTeamRadar={vi.fn()}
       onOpenProfile={vi.fn()}
       onOpenAdmin={vi.fn()}
@@ -141,6 +142,15 @@ describe("ChatSidebar", () => {
     expect(onOpenMessageAssets).toHaveBeenCalledOnce();
   });
 
+  it("记忆入口不依赖 AI 能力开关", async () => {
+    const onOpenMemories = vi.fn();
+    renderSidebar({ aiAvailable: false, assistantAvailable: false, onOpenMemories });
+
+    await userEvent.click(screen.getByRole("button", { name: "打开记忆中心" }));
+
+    expect(onOpenMemories).toHaveBeenCalledOnce();
+  });
+
   it("AI 知识库启用后才显示原生入口", async () => {
     const onOpenKnowledge = vi.fn();
     const { rerender } = render(
@@ -164,6 +174,7 @@ describe("ChatSidebar", () => {
         onDropToContact={vi.fn()}
         onCreateGroup={vi.fn()}
         onOpenMessageAssets={vi.fn()}
+        onOpenMemories={vi.fn()}
         onOpenTeamRadar={vi.fn()}
         onOpenProfile={vi.fn()}
         onOpenAdmin={vi.fn()}
@@ -193,6 +204,7 @@ describe("ChatSidebar", () => {
         onDropToContact={vi.fn()}
         onCreateGroup={vi.fn()}
         onOpenMessageAssets={vi.fn()}
+        onOpenMemories={vi.fn()}
         aiAvailable
         onOpenKnowledge={onOpenKnowledge}
         onOpenTeamRadar={vi.fn()}

@@ -1,6 +1,7 @@
 import {
   AppWindow,
   Bot,
+  BrainCircuit,
   ClipboardPaste,
   HardDrive,
   FolderHeart,
@@ -112,6 +113,7 @@ interface ChatSidebarProps {
   onDropToContact: (userId: string, payload: ContactDropPayload) => void;
   onCreateGroup: () => void;
   onOpenMessageAssets: () => void;
+  onOpenMemories: () => void;
   assistantAvailable?: boolean;
   assistantUnreadCount?: number;
   assistants?: AiAssistant[];
@@ -164,6 +166,7 @@ export function ChatSidebar({
   onDropToContact,
   onCreateGroup,
   onOpenMessageAssets,
+  onOpenMemories,
   assistantAvailable = false,
   assistantUnreadCount = 0,
   assistants = [],
@@ -366,6 +369,15 @@ export function ChatSidebar({
             title="聊天文件与收藏"
           >
             <FolderHeart size={18} />
+          </button>
+          <button
+            className="icon-button memory-center-trigger"
+            type="button"
+            onClick={onOpenMemories}
+            aria-label="打开记忆中心"
+            title="私人长期记忆"
+          >
+            <BrainCircuit size={18} />
           </button>
           {aiAvailable && onOpenKnowledge && (
             <button

@@ -5,13 +5,16 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY apps/desktop/package.json apps/desktop/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
 # 服务镜像只安装前后端工作区；跳过 Electron 二进制，避免桌面打包依赖进入镜像构建链路。
 RUN ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci \
+  --workspace @near-chat/contracts \
   --workspace @near-chat/server \
   --workspace @near-chat/web \
   --include-workspace-root
 
 COPY apps ./apps
+COPY packages ./packages
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -36,6 +39,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/package.json ./apps/server/package.json
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
+COPY --from=build /app/packages/contracts/package.json ./packages/contracts/package.json
+COPY --from=build /app/packages/contracts/dist ./packages/contracts/dist
 
 WORKDIR /app/apps/server
 EXPOSE 3000

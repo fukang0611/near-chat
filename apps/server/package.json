@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@near-chat/contracts": "0.1.0",
     "@ai-sdk/openai": "^4.0.41",
     "@mastra/core": "^1.59.0",
     "@mastra/pg": "^1.20.0",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DatabaseMigration } from "./migrations.js";
-import { orderedPendingMigrations } from "./migrations.js";
+import { databaseMigrations, orderedPendingMigrations } from "./migrations.js";
 
 function migration(version: number): DatabaseMigration {
   return { version, name: `migration-${version}`, up: async () => undefined };
@@ -23,5 +23,12 @@ test("数据库迁移拒绝无效或重复版本", () => {
   assert.throws(
     () => orderedPendingMigrations([migration(10), migration(10)], new Set()),
     /版本重复/,
+  );
+});
+
+test("记忆领域迁移保持稳定的首个版本", () => {
+  assert.deepEqual(
+    databaseMigrations.map(({ version, name }) => ({ version, name })),
+    [{ version: 1, name: "create_memory_domain" }],
   );
 });
