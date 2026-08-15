@@ -35,6 +35,7 @@ import {
   type DesktopIslandPreferences,
 } from "./island-state";
 import { canGrantDesktopPermission, type DesktopMediaType } from "./permission-policy";
+import { notificationFailureMessage } from "./notification-support";
 import { DEFAULT_SERVER_URL, normalizeServerUrl, serverHealthUrl } from "./server-url";
 
 const APP_NAME = "近聊";
@@ -765,7 +766,7 @@ function registerIpcHandlers(): void {
           finish({
             granted: false,
             status: "failed",
-            message: error || "系统未能显示通知，请检查系统通知设置",
+            message: notificationFailureMessage(error),
           }),
         );
         // 部分 Linux 通知服务不回传 show 事件；请求已交给系统时允许业务继续启用。

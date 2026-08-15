@@ -39,11 +39,17 @@ npm run desktop:start
 NEAR_CHAT_DESKTOP_SERVER_URL=http://127.0.0.1:3000 npm run desktop:start
 ```
 
+macOS 开发启动会自动为当前项目的 Electron 运行时添加 ad-hoc 签名，以满足
+Electron 42+ 使用 UNNotification API 后的签名要求；不需要本机安装开发者证书。
+
 当前平台目录包：
 
 ```bash
 npm run desktop:package
 ```
+
+macOS 本地目录包默认使用 ad-hoc 签名，可直接验证系统通知。正式对外分发时应设置
+`NEAR_CHAT_MAC_SIGN_IDENTITY="Developer ID Application: ..."` 后重新打包，并继续完成 Apple 公证。
 
 Windows x64 安装包必须在 Windows x64 构建环境运行：
 
@@ -54,7 +60,7 @@ npm run desktop:make:win
 
 安装包输出到 `apps/desktop/out/make/squirrel.windows/x64/`。第一阶段不配置代码签名，Windows 可能显示来源提醒；局域网内部可由管理员统一分发并放行。
 
-> macOS 的 Electron 原生通知基于系统 UNNotification API，应用必须完成代码签名才能正常显示。Windows Squirrel 安装包会自动配置通知所需的开始菜单快捷方式；系统全局关闭通知时，仍需由用户在操作系统设置中重新允许。
+> macOS 的 Electron 原生通知基于系统 UNNotification API，应用必须完成代码签名才能正常显示。开发版和本地目录包会自动进行 ad-hoc 签名；正式分发仍需 Developer ID 签名与公证。Windows Squirrel 安装包会自动配置通知所需的开始菜单快捷方式；系统全局关闭通知时，仍需由用户在操作系统设置中重新允许。
 
 ## 麦克风权限
 

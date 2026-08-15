@@ -10,7 +10,7 @@
     "build": "node scripts/clean.mjs && tsc -p tsconfig.json && node scripts/copy-static.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "start": "npm run build && electron-forge start",
+    "start": "npm run build && node dist/dev-notification-signing.js && electron-forge start",
     "package": "npm run build && electron-forge package",
     "make": "npm run build && electron-forge make",
     "make:win": "npm run build && electron-forge make --platform=win32 --arch=x64"
