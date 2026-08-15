@@ -20,6 +20,7 @@ import { closeAllAiAssistantBrowserSessions } from "../assistant/assistant-brows
 import { authenticate, requireAdmin } from "../auth.js";
 import { currentUser } from "../http.js";
 import { queueAllKnowledgeDocumentsForReindex } from "../knowledge/knowledge-service.js";
+import { queueAllMemoryVectorsForReindex } from "../memory-service.js";
 import type { RealtimeHub } from "../realtime.js";
 
 const idSchema = z.string().uuid();
@@ -68,6 +69,7 @@ async function applyAndBroadcast(
   let reindexQueued = 0;
   if (embeddingChanged || applied.indexRecreated) {
     reindexQueued = await queueAllKnowledgeDocumentsForReindex();
+    await queueAllMemoryVectorsForReindex();
   }
   if (applied.indexRecreated) {
     await markVectorEmbeddingRevision(runtime.embeddingRevision);

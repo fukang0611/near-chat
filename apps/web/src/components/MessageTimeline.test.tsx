@@ -59,6 +59,7 @@ function renderTimeline(messages: Message[]) {
     endRef: createRef<HTMLDivElement>(),
     favoriteMessageIds: new Set(),
     favoriteBusyMessageIds: new Set(),
+    memoryBusyMessageIds: new Set(),
     selectionMode: false,
     selectedMessageIds: new Set(),
     aiActionsAvailable: false,
@@ -67,6 +68,7 @@ function renderTimeline(messages: Message[]) {
     onAnnotateImage: vi.fn(),
     onCopy: vi.fn(),
     onToggleFavorite: vi.fn(),
+    onRemember: vi.fn(),
     onBeginSelection: vi.fn(),
     onToggleSelection: vi.fn(),
     onReact: vi.fn().mockResolvedValue(true),
@@ -145,6 +147,16 @@ describe("MessageTimeline", () => {
     await rendered.user.click(button);
 
     expect(props.onToggleFavorite).toHaveBeenCalledWith(favorite);
+  });
+
+  it("消息操作栏可生成待确认记忆而不改变消息", async () => {
+    const target = message({ textContent: "记住这条项目决定" });
+    const { props, user } = renderTimeline([target]);
+
+    await user.click(screen.getByRole("button", { name: "记住这条消息" }));
+
+    expect(props.onRemember).toHaveBeenCalledWith(target);
+    expect(screen.getByText("记住这条项目决定")).toBeTruthy();
   });
 
   it("AI 可用时从悬浮操作栏打开快捷处理", async () => {

@@ -92,6 +92,56 @@ export const databaseMigrations: DatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "create_memory_candidates_and_settings",
+    async up(client) {
+      await client.query(`
+        CREATE TABLE memory_candidates (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          source_type VARCHAR(30) NOT NULL
+            CHECK (source_type IN (
+              'MESSAGE', 'ASSISTANT_MESSAGE', 'FILE', 'TASK', 'REMINDER', 'MANUAL'
+            )),
+          source_id UUID,
+          conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+          source_label VARCHAR(160) NOT NULL,
+          source_excerpt TEXT,
+          source_created_at TIMESTAMPTZ NOT NULL,
+          kind VARCHAR(30) NOT NULL
+            CHECK (kind IN (
+              'PREFERENCE', 'PERSON', 'PROJECT', 'DECISION',
+              'PROCEDURE', 'GOAL', 'NOTE', 'TASK_CONTEXT'
+            )),
+          title VARCHAR(120) NOT NULL,
+          content TEXT NOT NULL,
+          importance SMALLINT NOT NULL DEFAULT 3 CHECK (importance BETWEEN 1 AND 5),
+          status VARCHAR(20) NOT NULL DEFAULT 'PENDING'
+            CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at TIMESTAMPTZ
+        );
+
+        CREATE TABLE memory_settings (
+          owner_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          explicit_capture_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE INDEX idx_memory_candidates_owner_pending
+          ON memory_candidates(owner_id, created_at DESC, id DESC)
+          WHERE status = 'PENDING';
+        CREATE UNIQUE INDEX idx_memory_candidates_pending_source
+          ON memory_candidates(owner_id, source_type, source_id)
+          WHERE status = 'PENDING' AND source_id IS NOT NULL;
+        CREATE INDEX idx_memories_owner_tier_active
+          ON memories(owner_id, tier, updated_at DESC, id DESC)
+          WHERE status = 'ACTIVE';
+      `);
+    },
+  },
 ];
 
 export function orderedPendingMigrations(

@@ -8,6 +8,7 @@ import { config } from "../config.js";
 import { query } from "../database.js";
 
 const KNOWLEDGE_INDEX = "near_chat_knowledge_embeddings";
+const MEMORY_INDEX = "near_chat_memory_embeddings";
 
 export type AiRuntimeStatus =
   "DISABLED" | "CONFIGURATION_REQUIRED" | "STARTING" | "READY" | "UNAVAILABLE";
@@ -43,6 +44,18 @@ export interface KnowledgeVectorMatch {
   id: string;
   score: number;
   metadata: Record<string, unknown>;
+}
+
+export interface MemoryVectorRecord {
+  id: string;
+  ownerId: string;
+  tier: "SHORT_TERM" | "LONG_TERM";
+  text: string;
+}
+
+export interface MemoryVectorMatch {
+  id: string;
+  score: number;
 }
 
 interface RuntimeState {
@@ -244,28 +257,32 @@ async function applyRuntimeSettings(settings: AiRuntimeSettings): Promise<AiRunt
 
     const vectorType: VectorType = settings.embedding.dimensions > 2000 ? "halfvec" : "vector";
     const indexes = await vector.listIndexes();
-    if (indexes.includes(KNOWLEDGE_INDEX)) {
-      const index = await vector.describeIndex({ indexName: KNOWLEDGE_INDEX });
-      const staleModel = settings.vectorEmbeddingRevision !== settings.embeddingRevision;
-      if (
-        staleModel ||
-        index.dimension !== settings.embedding.dimensions ||
-        index.vectorType !== vectorType
-      ) {
-        await vector.deleteIndex({ indexName: KNOWLEDGE_INDEX });
+    const staleModel = settings.vectorEmbeddingRevision !== settings.embeddingRevision;
+    const ensureIndex = async (indexName: string, metadataIndexes: string[]) => {
+      if (indexes.includes(indexName)) {
+        const index = await vector.describeIndex({ indexName });
+        if (
+          staleModel ||
+          index.dimension !== settings.embedding.dimensions ||
+          index.vectorType !== vectorType
+        ) {
+          await vector.deleteIndex({ indexName });
+          indexRecreated = true;
+        }
+      } else {
         indexRecreated = true;
       }
-    } else {
-      indexRecreated = true;
-    }
-    await vector.createIndex({
-      indexName: KNOWLEDGE_INDEX,
-      dimension: settings.embedding.dimensions,
-      metric: "cosine",
-      vectorType,
-      indexConfig: { type: "hnsw", hnsw: { m: 16, efConstruction: 64 } },
-      metadataIndexes: ["knowledgeBaseId", "documentId"],
-    });
+      await vector.createIndex({
+        indexName,
+        dimension: settings.embedding.dimensions,
+        metric: "cosine",
+        vectorType,
+        indexConfig: { type: "hnsw", hnsw: { m: 16, efConstruction: 64 } },
+        metadataIndexes,
+      });
+    };
+    await ensureIndex(KNOWLEDGE_INDEX, ["knowledgeBaseId", "documentId"]);
+    await ensureIndex(MEMORY_INDEX, ["ownerId", "tier"]);
 
     const embeddingModel = openAiProvider(settings.embedding, "near-chat-embedding").embedding(
       settings.embedding.model,
@@ -391,6 +408,47 @@ export function searchKnowledgeVectors(
       score: match.score,
       metadata: match.metadata ?? {},
     }));
+  });
+}
+
+/** 私人记忆使用独立索引，元数据过滤确保不同账号和记忆层级不会串读。 */
+export function replaceMemoryVector(memory: MemoryVectorRecord): Promise<void> {
+  return serialized(async () => {
+    const { vector, embeddingModel, dimensions } = readyRuntime();
+    const [embedding] = await embedTexts(embeddingModel, dimensions, [memory.text]);
+    await vector.upsert({
+      indexName: MEMORY_INDEX,
+      vectors: [embedding],
+      ids: [memory.id],
+      metadata: [{ ownerId: memory.ownerId, tier: memory.tier }],
+    });
+  });
+}
+
+export function deleteMemoryVector(memoryId: string): Promise<void> {
+  return serialized(async () => {
+    const { vector } = readyRuntime();
+    await vector.deleteVectors({ indexName: MEMORY_INDEX, ids: [memoryId] });
+  });
+}
+
+export function searchMemoryVectors(
+  ownerId: string,
+  tier: "SHORT_TERM" | "LONG_TERM",
+  text: string,
+  topK: number,
+): Promise<MemoryVectorMatch[]> {
+  return serialized(async () => {
+    const { vector, embeddingModel, dimensions } = readyRuntime();
+    const [queryVector] = await embedTexts(embeddingModel, dimensions, [text]);
+    const matches = await vector.query({
+      indexName: MEMORY_INDEX,
+      queryVector,
+      topK,
+      filter: { ownerId, tier },
+      minScore: 0.18,
+    });
+    return matches.map((match) => ({ id: match.id, score: match.score }));
   });
 }
 

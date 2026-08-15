@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
 import type {
   CreateMemoryInput,
+  MemoryCandidate,
+  MemoryCandidatePage,
   MemoryKind,
   MemoryPage,
   MemoryRecord,
   MemoryScope,
+  MemorySettings,
   MemorySourceReference,
+  MemoryTier,
   UpdateMemoryInput,
 } from "@near-chat/contracts";
+import {
+  deleteMemoryVector,
+  getAiCapabilities,
+  replaceMemoryVector,
+  searchMemoryVectors,
+} from "./ai/ai-runtime.js";
 import { query, transaction } from "./database.js";
 import { ApiError } from "./http.js";
 
@@ -45,6 +55,35 @@ interface MutableMemoryRow {
   status: "ACTIVE" | "ARCHIVED" | "DELETED";
 }
 
+interface MemoryCandidateRow {
+  id: string;
+  kind: MemoryKind;
+  title: string;
+  content: string;
+  importance: number;
+  status: MemoryCandidate["status"];
+  source_type: MemorySourceReference["type"];
+  source_id: string | null;
+  conversation_id: string | null;
+  source_label: string;
+  source_excerpt: string | null;
+  source_created_at: Date;
+  created_at: Date;
+  updated_at: Date;
+  total_count?: number;
+}
+
+interface CandidateMessageRow {
+  id: string;
+  conversation_id: string;
+  text_content: string | null;
+  recalled_at: Date | null;
+  created_at: Date;
+  sender_name: string;
+  conversation_title: string;
+  attachment_names: string[];
+}
+
 const memorySelect = `
   SELECT memory.id,
          memory.tier,
@@ -76,6 +115,24 @@ const memorySelect = `
     FROM memories memory
 `;
 
+const memoryCandidateSelect = `
+  SELECT candidate.id,
+         candidate.kind,
+         candidate.title,
+         candidate.content,
+         candidate.importance::int,
+         candidate.status,
+         candidate.source_type,
+         candidate.source_id,
+         candidate.conversation_id,
+         candidate.source_label,
+         candidate.source_excerpt,
+         candidate.source_created_at,
+         candidate.created_at,
+         candidate.updated_at
+    FROM memory_candidates candidate
+`;
+
 function toIsoString(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
@@ -101,9 +158,76 @@ function toMemoryRecord(row: MemoryRow): MemoryRecord {
   };
 }
 
+function toMemoryCandidate(row: MemoryCandidateRow): MemoryCandidate {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    content: row.content,
+    importance: row.importance,
+    status: row.status,
+    source: {
+      type: row.source_type,
+      id: row.source_id,
+      conversationId: row.conversation_id,
+      label: row.source_label,
+      excerpt: row.source_excerpt,
+      createdAt: row.source_created_at.toISOString(),
+    },
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
 /** ILIKE 仍按字面搜索用户输入，避免 `%` 和 `_` 意外扩大匹配范围。 */
 export function escapeMemorySearchPattern(keyword: string): string {
   return keyword.replace(/[\\%_]/g, "\\$&");
+}
+
+function memoryVectorText(memory: Pick<MemoryRecord, "title" | "content">): string {
+  return `${memory.title}\n${memory.content}`;
+}
+
+/** 向量写入是纯增强路径，失败时数据库中的原生记忆仍然完整可用。 */
+function enqueueMemoryVector(userId: string, memory: MemoryRecord): void {
+  if (!getAiCapabilities().features.knowledgeIndexing) return;
+  void replaceMemoryVector({
+    id: memory.id,
+    ownerId: userId,
+    tier: memory.tier,
+    text: memoryVectorText(memory),
+  }).catch((error) => console.warn("Failed to index memory vector:", error));
+}
+
+function enqueueMemoryVectorDeletion(memoryId: string): void {
+  if (!getAiCapabilities().features.knowledgeIndexing) return;
+  void deleteMemoryVector(memoryId).catch((error) =>
+    console.warn("Failed to delete memory vector:", error),
+  );
+}
+
+async function semanticMemoryIds(
+  userId: string,
+  tier: MemoryTier,
+  keyword: string | undefined,
+): Promise<{ ids: string[]; enhanced: boolean }> {
+  if (!keyword || !getAiCapabilities().features.knowledgeIndexing) {
+    return { ids: [], enhanced: false };
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const matches = await Promise.race([
+      searchMemoryVectors(userId, tier, keyword, 80),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error("记忆语义检索超时")), 1_800);
+      }),
+    ]);
+    return { ids: matches.map((match) => match.id), enhanced: true };
+  } catch {
+    return { ids: [], enhanced: false };
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function activeMemoryById(userId: string, memoryId: string): Promise<MemoryRecord> {
@@ -128,27 +252,41 @@ export async function listMemories(
   input: {
     keyword?: string;
     kind?: MemoryKind;
+    tier: MemoryTier;
     limit: number;
     offset: number;
   },
 ): Promise<MemoryPage> {
   const pattern = input.keyword ? `%${escapeMemorySearchPattern(input.keyword)}%` : null;
+  const semantic = await semanticMemoryIds(userId, input.tier, input.keyword);
   const result = await query<MemoryRow>(
     `SELECT page.*, COUNT(*) OVER()::int AS total_count
        FROM (${memorySelect}
               WHERE memory.owner_id = $1
                 AND memory.status = 'ACTIVE'
-                AND memory.tier = 'LONG_TERM'
+                AND memory.tier = $2
                 AND memory.scope = 'PRIVATE'
-                AND ($2::text IS NULL OR memory.kind = $2)
+                AND (memory.expires_at IS NULL OR memory.expires_at > NOW())
+                AND ($3::text IS NULL OR memory.kind = $3)
                 AND (
-                  $3::text IS NULL
-                  OR memory.title ILIKE $3 ESCAPE '\\'
-                  OR memory.content ILIKE $3 ESCAPE '\\'
+                  $4::text IS NULL
+                  OR memory.title ILIKE $4 ESCAPE '\\'
+                  OR memory.content ILIKE $4 ESCAPE '\\'
+                  OR memory.id = ANY($5::uuid[])
                 )) page
-      ORDER BY page.importance DESC, page.updated_at DESC, page.id DESC
-      LIMIT $4 OFFSET $5`,
-    [userId, input.kind ?? null, pattern, input.limit, input.offset],
+      ORDER BY
+        CASE
+          WHEN $4::text IS NOT NULL AND (
+            page.title ILIKE $4 ESCAPE '\\' OR page.content ILIKE $4 ESCAPE '\\'
+          ) THEN 0
+          ELSE 1
+        END,
+        COALESCE(array_position($5::uuid[], page.id), 2147483647),
+        page.importance DESC,
+        page.updated_at DESC,
+        page.id DESC
+      LIMIT $6 OFFSET $7`,
+    [userId, input.tier, input.kind ?? null, pattern, semantic.ids, input.limit, input.offset],
   );
 
   const total = Number(result.rows[0]?.total_count ?? 0);
@@ -157,6 +295,7 @@ export async function listMemories(
     total,
     offset: input.offset,
     hasMore: input.offset + result.rows.length < total,
+    searchMode: semantic.enhanced ? "HYBRID" : "KEYWORD",
   };
 }
 
@@ -165,12 +304,14 @@ export async function createManualMemory(
   input: CreateMemoryInput,
 ): Promise<MemoryRecord> {
   const memoryId = randomUUID();
+  const tier = input.tier ?? "LONG_TERM";
   await transaction(async (client) => {
     await client.query(
       `INSERT INTO memories
-         (id, owner_id, tier, scope, kind, title, content, importance)
-       VALUES ($1, $2, 'LONG_TERM', 'PRIVATE', $3, $4, $5, $6)`,
-      [memoryId, userId, input.kind, input.title, input.content, input.importance],
+         (id, owner_id, tier, scope, kind, title, content, importance, expires_at)
+       VALUES ($1, $2, $3, 'PRIVATE', $4, $5, $6, $7,
+               CASE WHEN $3::varchar = 'SHORT_TERM' THEN NOW() + INTERVAL '7 days' ELSE NULL END)`,
+      [memoryId, userId, tier, input.kind, input.title, input.content, input.importance],
     );
     await client.query(
       `INSERT INTO memory_revisions
@@ -185,7 +326,302 @@ export async function createManualMemory(
       [randomUUID(), memoryId],
     );
   });
-  return activeMemoryById(userId, memoryId);
+  const memory = await activeMemoryById(userId, memoryId);
+  enqueueMemoryVector(userId, memory);
+  return memory;
+}
+
+/**
+ * 只识别用户明确表达的记忆意图，不把普通聊天内容擅自写入私人记忆。
+ * 返回值可直接进入候选内容；没有明确触发词时返回 null。
+ */
+export function extractExplicitMemoryHint(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const matched = text.match(
+    /^\s*(?:请\s*)?(?:帮我\s*)?(?:记住|记一下|记下来|记录一下)[：:,，\s]+([\s\S]+?)\s*$/u,
+  );
+  const content = matched?.[1]?.trim();
+  return content ? content.slice(0, 10_000) : null;
+}
+
+/** 候选标题保持一行且可扫描；详细原文完整保留在 content 中。 */
+export function memoryCandidateTitle(content: string, fallback = "来自聊天的记忆"): string {
+  const normalized = content.replace(/\s+/gu, " ").trim();
+  if (!normalized) return fallback;
+  return normalized.length > 54 ? `${normalized.slice(0, 53)}…` : normalized;
+}
+
+export async function getMemorySettings(userId: string): Promise<MemorySettings> {
+  const result = await query<{ explicit_capture_enabled: boolean; updated_at: Date }>(
+    `SELECT explicit_capture_enabled, updated_at
+       FROM memory_settings
+      WHERE owner_id = $1`,
+    [userId],
+  );
+  const settings = result.rows[0];
+  return {
+    explicitCaptureEnabled: settings?.explicit_capture_enabled ?? true,
+    shortTermRetentionDays: 7,
+    updatedAt: settings?.updated_at.toISOString() ?? null,
+  };
+}
+
+export async function updateMemorySettings(
+  userId: string,
+  explicitCaptureEnabled: boolean,
+): Promise<MemorySettings> {
+  await query(
+    `INSERT INTO memory_settings (owner_id, explicit_capture_enabled)
+     VALUES ($1, $2)
+     ON CONFLICT (owner_id) DO UPDATE
+       SET explicit_capture_enabled = EXCLUDED.explicit_capture_enabled,
+           updated_at = NOW()`,
+    [userId, explicitCaptureEnabled],
+  );
+  return getMemorySettings(userId);
+}
+
+async function messageForMemoryCandidate(
+  userId: string,
+  messageId: string,
+): Promise<CandidateMessageRow> {
+  const result = await query<CandidateMessageRow>(
+    `SELECT message.id,
+            message.conversation_id,
+            message.text_content,
+            message.recalled_at,
+            message.created_at,
+            sender.display_name AS sender_name,
+            COALESCE(conversation.name, '私聊') AS conversation_title,
+            COALESCE(
+              array_agg(DISTINCT attachment.original_name)
+                FILTER (WHERE attachment.id IS NOT NULL),
+              ARRAY[]::text[]
+            ) AS attachment_names
+       FROM messages message
+       JOIN users sender ON sender.id = message.sender_id
+       JOIN conversations conversation ON conversation.id = message.conversation_id
+       JOIN conversation_members member
+         ON member.conversation_id = message.conversation_id AND member.user_id = $2
+       LEFT JOIN LATERAL (
+         SELECT owned.id, owned.original_name
+           FROM attachments owned
+          WHERE owned.message_id = message.id
+         UNION
+         SELECT linked.id, linked.original_name
+           FROM message_attachment_links message_link
+           JOIN attachments linked ON linked.id = message_link.attachment_id
+          WHERE message_link.message_id = message.id
+       ) attachment ON TRUE
+      WHERE message.id = $1
+      GROUP BY message.id, sender.display_name, conversation.name`,
+    [messageId, userId],
+  );
+  const message = result.rows[0];
+  if (!message) throw new ApiError(404, "消息不存在或你已不在该会话中");
+  if (message.recalled_at) throw new ApiError(409, "已撤回的消息不能加入记忆");
+  return message;
+}
+
+async function candidateById(userId: string, candidateId: string): Promise<MemoryCandidate> {
+  const result = await query<MemoryCandidateRow>(
+    `${memoryCandidateSelect}
+      WHERE candidate.id = $1 AND candidate.owner_id = $2`,
+    [candidateId, userId],
+  );
+  const candidate = result.rows[0];
+  if (!candidate) throw new ApiError(404, "记忆候选不存在");
+  return toMemoryCandidate(candidate);
+}
+
+/**
+ * 将当前用户有权读取的消息快照成候选。重复点击同一条消息会返回原有待确认项，
+ * 不会在列表中制造重复内容。
+ */
+export async function createMessageMemoryCandidate(
+  userId: string,
+  messageId: string,
+  contentOverride?: string,
+): Promise<{ candidate: MemoryCandidate; created: boolean }> {
+  const message = await messageForMemoryCandidate(userId, messageId);
+  const attachmentText = message.attachment_names.length
+    ? `附件：${message.attachment_names.join("、")}`
+    : "";
+  const content =
+    contentOverride?.trim() ||
+    [message.text_content?.trim(), attachmentText].filter(Boolean).join("\n") ||
+    "一条聊天消息";
+  const candidateId = randomUUID();
+  const inserted = await query<{ id: string }>(
+    `INSERT INTO memory_candidates
+       (id, owner_id, source_type, source_id, conversation_id, source_label,
+        source_excerpt, source_created_at, kind, title, content, importance)
+     VALUES ($1, $2, 'MESSAGE', $3, $4, $5, $6, $7, 'NOTE', $8, $9, 3)
+     ON CONFLICT (owner_id, source_type, source_id)
+       WHERE status = 'PENDING' AND source_id IS NOT NULL
+     DO NOTHING
+     RETURNING id`,
+    [
+      candidateId,
+      userId,
+      message.id,
+      message.conversation_id,
+      `${message.conversation_title} · ${message.sender_name}`,
+      [message.text_content?.trim(), attachmentText].filter(Boolean).join("\n").slice(0, 1000) ||
+        null,
+      message.created_at,
+      memoryCandidateTitle(content, `${message.sender_name} 分享的内容`),
+      content,
+    ],
+  );
+  const id = inserted.rows[0]?.id;
+  if (id) return { candidate: await candidateById(userId, id), created: true };
+  const existing = await query<{ id: string }>(
+    `SELECT id FROM memory_candidates
+      WHERE owner_id = $1 AND source_type = 'MESSAGE' AND source_id = $2 AND status = 'PENDING'`,
+    [userId, message.id],
+  );
+  const existingId = existing.rows[0]?.id;
+  if (!existingId) throw new ApiError(409, "这条消息的记忆候选状态刚刚发生变化，请重试");
+  return { candidate: await candidateById(userId, existingId), created: false };
+}
+
+/** 消息发送完成后的轻量识别；调用方应以 fire-and-forget 方式执行。 */
+export async function captureExplicitMessageMemory(
+  userId: string,
+  messageId: string,
+  text: string | null | undefined,
+): Promise<boolean> {
+  const hint = extractExplicitMemoryHint(text);
+  if (!hint) return false;
+  const settings = await getMemorySettings(userId);
+  if (!settings.explicitCaptureEnabled) return false;
+  await createMessageMemoryCandidate(userId, messageId, hint);
+  return true;
+}
+
+export async function listMemoryCandidates(userId: string): Promise<MemoryCandidatePage> {
+  const result = await query<MemoryCandidateRow>(
+    `SELECT page.*, COUNT(*) OVER()::int AS total_count
+       FROM (${memoryCandidateSelect}
+              WHERE candidate.owner_id = $1 AND candidate.status = 'PENDING') page
+      ORDER BY page.created_at DESC, page.id DESC`,
+    [userId],
+  );
+  return {
+    candidates: result.rows.map(toMemoryCandidate),
+    total: Number(result.rows[0]?.total_count ?? 0),
+  };
+}
+
+export async function acceptMemoryCandidate(
+  userId: string,
+  candidateId: string,
+  tier: MemoryTier,
+): Promise<MemoryRecord> {
+  const memoryId = randomUUID();
+  await transaction(async (client) => {
+    const result = await client.query<MemoryCandidateRow>(
+      `${memoryCandidateSelect}
+        WHERE candidate.id = $1 AND candidate.owner_id = $2
+        FOR UPDATE`,
+      [candidateId, userId],
+    );
+    const candidate = result.rows[0];
+    if (!candidate) throw new ApiError(404, "记忆候选不存在");
+    if (candidate.status !== "PENDING") throw new ApiError(409, "这条候选已经处理");
+
+    await client.query(
+      `INSERT INTO memories
+         (id, owner_id, tier, scope, kind, title, content, importance, expires_at)
+       VALUES ($1, $2, $3, 'PRIVATE', $4, $5, $6, $7,
+               CASE WHEN $3::varchar = 'SHORT_TERM' THEN NOW() + INTERVAL '7 days' ELSE NULL END)`,
+      [
+        memoryId,
+        userId,
+        tier,
+        candidate.kind,
+        candidate.title,
+        candidate.content,
+        candidate.importance,
+      ],
+    );
+    await client.query(
+      `INSERT INTO memory_revisions
+         (id, memory_id, revision, kind, title, content, importance, change_type, changed_by)
+       VALUES ($1, $2, 1, $3, $4, $5, $6, 'CREATE', $7)`,
+      [
+        randomUUID(),
+        memoryId,
+        candidate.kind,
+        candidate.title,
+        candidate.content,
+        candidate.importance,
+        userId,
+      ],
+    );
+    await client.query(
+      `INSERT INTO memory_sources
+         (id, memory_id, source_type, source_id, conversation_id, label, excerpt,
+          source_created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        randomUUID(),
+        memoryId,
+        candidate.source_type,
+        candidate.source_id,
+        candidate.conversation_id,
+        candidate.source_label,
+        candidate.source_excerpt,
+        candidate.source_created_at,
+      ],
+    );
+    await client.query(
+      `UPDATE memory_candidates
+          SET status = 'ACCEPTED', resolved_at = NOW(), updated_at = NOW()
+        WHERE id = $1`,
+      [candidateId],
+    );
+  });
+  const memory = await activeMemoryById(userId, memoryId);
+  enqueueMemoryVector(userId, memory);
+  return memory;
+}
+
+export async function rejectMemoryCandidate(userId: string, candidateId: string): Promise<void> {
+  const result = await query(
+    `UPDATE memory_candidates
+        SET status = 'REJECTED', resolved_at = NOW(), updated_at = NOW()
+      WHERE id = $1 AND owner_id = $2 AND status = 'PENDING'`,
+    [candidateId, userId],
+  );
+  if (!result.rowCount) throw new ApiError(404, "记忆候选不存在或已经处理");
+}
+
+/** Embedding 配置或维度变化后后台补齐现有记忆，不阻塞服务开放端口。 */
+export async function queueAllMemoryVectorsForReindex(): Promise<number> {
+  if (!getAiCapabilities().features.knowledgeIndexing) return 0;
+  const result = await query<{
+    id: string;
+    owner_id: string;
+    tier: MemoryTier;
+    title: string;
+    content: string;
+  }>(
+    `SELECT id, owner_id, tier, title, content
+       FROM memories
+      WHERE status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW())
+      ORDER BY updated_at DESC, id DESC`,
+  );
+  for (const memory of result.rows) {
+    void replaceMemoryVector({
+      id: memory.id,
+      ownerId: memory.owner_id,
+      tier: memory.tier,
+      text: `${memory.title}\n${memory.content}`,
+    }).catch((error) => console.warn("Failed to reindex memory vector:", error));
+  }
+  return result.rows.length;
 }
 
 export async function updateMemory(
@@ -243,7 +679,9 @@ export async function updateMemory(
       ],
     );
   });
-  return activeMemoryById(userId, memoryId);
+  const memory = await activeMemoryById(userId, memoryId);
+  enqueueMemoryVector(userId, memory);
+  return memory;
 }
 
 /** 采用软删除并追加 FORGET 修订，后续可实现合规审计和跨终端同步。 */
@@ -286,4 +724,5 @@ export async function forgetMemory(userId: string, memoryId: string): Promise<vo
       ],
     );
   });
+  enqueueMemoryVectorDeletion(memoryId);
 }

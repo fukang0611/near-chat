@@ -15,6 +15,7 @@ import { initializeDatabase, pool } from "./database.js";
 import { initializeMinio } from "./minio.js";
 import { startKnowledgeIndexWorker } from "./knowledge/knowledge-worker.js";
 import { queueAllKnowledgeDocumentsForReindex } from "./knowledge/knowledge-service.js";
+import { queueAllMemoryVectorsForReindex } from "./memory-service.js";
 import { broadcastReceiptChanges, markPendingMessagesDelivered } from "./receipt-service.js";
 import { RealtimeHub } from "./realtime.js";
 
@@ -29,6 +30,7 @@ async function main() {
   const aiRuntime = await initializeAiRuntime(aiSettings);
   if (aiRuntime.indexRecreated) {
     await queueAllKnowledgeDocumentsForReindex();
+    await queueAllMemoryVectorsForReindex();
     await markVectorEmbeddingRevision(aiSettings.embeddingRevision);
   }
   const stopAttachmentCleanup = startAttachmentCleanup();

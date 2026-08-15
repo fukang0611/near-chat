@@ -1,4 +1,5 @@
 import {
+  BrainCircuit,
   Check,
   CheckCheck,
   Copy,
@@ -42,6 +43,7 @@ interface MessageTimelineProps {
   highlightedMessageId?: string | null;
   favoriteMessageIds: ReadonlySet<string>;
   favoriteBusyMessageIds: ReadonlySet<string>;
+  memoryBusyMessageIds: ReadonlySet<string>;
   selectionMode: boolean;
   selectedMessageIds: ReadonlySet<string>;
   aiActionsAvailable: boolean;
@@ -50,6 +52,7 @@ interface MessageTimelineProps {
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onToggleFavorite: (message: Message) => void;
+  onRemember: (message: Message) => void;
   onBeginSelection: (message: Message) => void;
   onToggleSelection: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
@@ -87,6 +90,7 @@ interface MessageBubbleProps {
   reactionsDisabled: boolean;
   favorited: boolean;
   favoriteBusy: boolean;
+  memoryBusy: boolean;
   selectionMode: boolean;
   selected: boolean;
   aiActionsAvailable: boolean;
@@ -94,6 +98,7 @@ interface MessageBubbleProps {
   onAnnotateImage: (message: Message, attachment: Attachment, file: File) => Promise<boolean>;
   onCopy: (message: Message) => void;
   onToggleFavorite: (message: Message) => void;
+  onRemember: (message: Message) => void;
   onBeginSelection: (message: Message) => void;
   onToggleSelection: (message: Message) => void;
   onReact: (message: Message, emoji: MessageReactionEmoji) => Promise<boolean>;
@@ -115,6 +120,7 @@ function MessageBubble({
   reactionsDisabled,
   favorited,
   favoriteBusy,
+  memoryBusy,
   selectionMode,
   selected,
   aiActionsAvailable,
@@ -122,6 +128,7 @@ function MessageBubble({
   onAnnotateImage,
   onCopy,
   onToggleFavorite,
+  onRemember,
   onBeginSelection,
   onToggleSelection,
   onReact,
@@ -392,6 +399,19 @@ function MessageBubble({
                   <Star size={15} fill={favorited ? "currentColor" : "none"} />
                 )}
               </button>
+              <button
+                type="button"
+                onClick={() => onRemember(message)}
+                disabled={memoryBusy}
+                title="记住这条消息"
+                aria-label="记住这条消息"
+              >
+                {memoryBusy ? (
+                  <LoaderCircle className="spin" size={15} />
+                ) : (
+                  <BrainCircuit size={15} />
+                )}
+              </button>
               {message.textContent && (
                 <button
                   type="button"
@@ -482,6 +502,7 @@ export function MessageTimeline({
   highlightedMessageId,
   favoriteMessageIds,
   favoriteBusyMessageIds,
+  memoryBusyMessageIds,
   selectionMode,
   selectedMessageIds,
   aiActionsAvailable,
@@ -490,6 +511,7 @@ export function MessageTimeline({
   onAnnotateImage,
   onCopy,
   onToggleFavorite,
+  onRemember,
   onBeginSelection,
   onToggleSelection,
   onReact,
@@ -567,6 +589,7 @@ export function MessageTimeline({
               reactionsDisabled={isFlashRoomExpired(conversation.expiresAt, now)}
               favorited={favoriteMessageIds.has(message.id)}
               favoriteBusy={favoriteBusyMessageIds.has(message.id)}
+              memoryBusy={memoryBusyMessageIds.has(message.id)}
               selectionMode={selectionMode}
               selected={selectedMessageIds.has(message.id)}
               aiActionsAvailable={aiActionsAvailable}
@@ -574,6 +597,7 @@ export function MessageTimeline({
               onAnnotateImage={onAnnotateImage}
               onCopy={onCopy}
               onToggleFavorite={onToggleFavorite}
+              onRemember={onRemember}
               onBeginSelection={onBeginSelection}
               onToggleSelection={onToggleSelection}
               onReact={onReact}

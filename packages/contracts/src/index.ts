@@ -51,6 +51,8 @@ export interface MemoryPage {
   total: number;
   offset: number;
   hasMore: boolean;
+  /** 未配置或暂时无法调用 Embedding 时固定为 KEYWORD。 */
+  searchMode: "KEYWORD" | "HYBRID";
 }
 
 export interface CreateMemoryInput {
@@ -58,6 +60,8 @@ export interface CreateMemoryInput {
   content: string;
   kind: MemoryKind;
   importance: number;
+  /** 省略时按长期记忆保存；短期记忆由服务端统一设置 7 天有效期。 */
+  tier?: MemoryTier;
 }
 
 export interface UpdateMemoryInput {
@@ -67,6 +71,34 @@ export interface UpdateMemoryInput {
   importance?: number;
   /** 客户端最后读取的版本，用于阻止覆盖其他终端刚完成的修改。 */
   baseRevision: number;
+}
+
+export const MEMORY_CANDIDATE_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] as const;
+export type MemoryCandidateStatus = (typeof MEMORY_CANDIDATE_STATUSES)[number];
+
+/** 从消息中提取、尚待用户确认的私人记忆草稿。 */
+export interface MemoryCandidate {
+  id: string;
+  kind: MemoryKind;
+  title: string;
+  content: string;
+  importance: number;
+  status: MemoryCandidateStatus;
+  source: MemorySourceReference;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryCandidatePage {
+  candidates: MemoryCandidate[];
+  total: number;
+}
+
+export interface MemorySettings {
+  /** 自动识别“记住 / 记一下”等明确表达；普通聊天不会调用模型。 */
+  explicitCaptureEnabled: boolean;
+  shortTermRetentionDays: 7;
+  updatedAt: string | null;
 }
 
 export interface AgentToolContext {

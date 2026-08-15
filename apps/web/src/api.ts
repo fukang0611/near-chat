@@ -1,8 +1,12 @@
 import type {
   CreateMemoryInput,
+  MemoryCandidate,
+  MemoryCandidatePage,
   MemoryKind,
   MemoryPage,
   MemoryRecord,
+  MemorySettings,
+  MemoryTier,
   UpdateMemoryInput,
 } from "@near-chat/contracts";
 import type {
@@ -562,7 +566,13 @@ export const api = {
   deleteFavorite: (favoriteId: string) =>
     request<void>(`/api/message-assets/favorites/${favoriteId}`, { method: "DELETE" }),
   memories: (
-    options: { keyword?: string; kind?: MemoryKind; limit?: number; offset?: number } = {},
+    options: {
+      keyword?: string;
+      kind?: MemoryKind;
+      tier?: MemoryTier;
+      limit?: number;
+      offset?: number;
+    } = {},
   ) => {
     const query = new URLSearchParams({
       limit: String(options.limit ?? 100),
@@ -570,6 +580,7 @@ export const api = {
     });
     if (options.keyword) query.set("q", options.keyword);
     if (options.kind) query.set("kind", options.kind);
+    if (options.tier) query.set("tier", options.tier);
     return request<MemoryPage>(`/api/memories?${query}`);
   },
   createMemory: (input: CreateMemoryInput) =>
@@ -584,6 +595,25 @@ export const api = {
     }),
   forgetMemory: (memoryId: string) =>
     request<void>(`/api/memories/${memoryId}`, { method: "DELETE" }),
+  memoryCandidates: () => request<MemoryCandidatePage>("/api/memory-candidates"),
+  rememberMessage: (messageId: string) =>
+    request<{ candidate: MemoryCandidate; created: boolean }>(
+      `/api/messages/${messageId}/memory-candidate`,
+      { method: "POST" },
+    ),
+  acceptMemoryCandidate: (candidateId: string, tier: MemoryTier) =>
+    request<{ memory: MemoryRecord }>(`/api/memory-candidates/${candidateId}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ tier }),
+    }),
+  rejectMemoryCandidate: (candidateId: string) =>
+    request<void>(`/api/memory-candidates/${candidateId}`, { method: "DELETE" }),
+  memorySettings: () => request<{ settings: MemorySettings }>("/api/memory-settings"),
+  updateMemorySettings: (explicitCaptureEnabled: boolean) =>
+    request<{ settings: MemorySettings }>("/api/memory-settings", {
+      method: "PATCH",
+      body: JSON.stringify({ explicitCaptureEnabled }),
+    }),
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();
     const response = await fetch(`/api/files/${fileId}/content${download ? "?download=1" : ""}`, {

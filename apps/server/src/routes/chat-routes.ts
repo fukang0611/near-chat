@@ -13,6 +13,7 @@ import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { isAllowedFlashRoomExpiry, isFlashRoomExpired } from "../flash-room-service.js";
+import { captureExplicitMessageMemory } from "../memory-service.js";
 import { forwardMessages } from "../message-forward-service.js";
 import { messageKindFromContentType, type MessageKind } from "../message-kind.js";
 import {
@@ -922,6 +923,15 @@ export function createChatRouter(realtime: RealtimeHub) {
       }
 
       response.status(201).json({ message: responseMessage });
+      // 明确的“记住 / 记一下”意图在响应完成后异步进入候选箱；识别或数据库
+      // 暂时失败都不能反向影响消息发送。
+      if (saved.created) {
+        void captureExplicitMessageMemory(
+          user.id,
+          saved.message.id,
+          saved.message.textContent,
+        ).catch((error) => console.warn("Failed to capture explicit memory candidate:", error));
+      }
     },
   );
 

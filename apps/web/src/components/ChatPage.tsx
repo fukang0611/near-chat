@@ -161,6 +161,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>("recent");
   const [favoriteByMessageId, setFavoriteByMessageId] = useState<Record<string, string>>({});
   const [favoriteBusyMessageIds, setFavoriteBusyMessageIds] = useState<Set<string>>(new Set());
+  const [memoryBusyMessageIds, setMemoryBusyMessageIds] = useState<Set<string>>(new Set());
   const [messageSelectionMode, setMessageSelectionMode] = useState(false);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [showForwardDialog, setShowForwardDialog] = useState(false);
@@ -1515,6 +1516,23 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
     }
   };
 
+  const rememberMessage = async (message: Message) => {
+    if (message.deliveryState || message.recalledAt || memoryBusyMessageIds.has(message.id)) return;
+    setMemoryBusyMessageIds((current) => new Set(current).add(message.id));
+    try {
+      const result = await api.rememberMessage(message.id);
+      notify(result.created ? "已加入记忆候选，确认后生效" : "这条消息已在记忆候选中", "success");
+    } catch (error) {
+      notify(errorMessage(error, "暂时无法加入记忆候选"), "error");
+    } finally {
+      setMemoryBusyMessageIds((current) => {
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
+    }
+  };
+
   const forgetFavorite = (favorite: MessageFavorite) => {
     if (!favorite.sourceMessageId) return;
     setFavoriteByMessageId((current) => {
@@ -1879,6 +1897,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 highlightedMessageId={highlightedMessageId}
                 favoriteMessageIds={favoriteMessageIds}
                 favoriteBusyMessageIds={favoriteBusyMessageIds}
+                memoryBusyMessageIds={memoryBusyMessageIds}
                 selectionMode={messageSelectionMode}
                 selectedMessageIds={selectedMessageIds}
                 aiActionsAvailable={Boolean(aiCapabilities?.features.messageActions)}
@@ -1890,6 +1909,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 onAnnotateImage={(message, _attachment, file) => sendAnnotatedImage(message, file)}
                 onCopy={(message) => void copyMessage(message)}
                 onToggleFavorite={(message) => void toggleMessageFavorite(message)}
+                onRemember={(message) => void rememberMessage(message)}
                 onBeginSelection={beginMessageSelection}
                 onToggleSelection={toggleMessageSelection}
                 onReact={toggleMessageReaction}

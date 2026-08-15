@@ -29,6 +29,9 @@ test("数据库迁移拒绝无效或重复版本", () => {
 test("记忆领域迁移保持稳定的首个版本", () => {
   assert.deepEqual(
     databaseMigrations.map(({ version, name }) => ({ version, name })),
-    [{ version: 1, name: "create_memory_domain" }],
+    [
+      { version: 1, name: "create_memory_domain" },
+      { version: 2, name: "create_memory_candidates_and_settings" },
+    ],
   );
 });

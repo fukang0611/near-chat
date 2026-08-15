@@ -1,7 +1,7 @@
-import type { MemoryRecord } from "@near-chat/contracts";
+import type { MemoryCandidate, MemoryRecord } from "@near-chat/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../api";
 import { MemoryCenterDialog } from "./MemoryCenterDialog";
 
@@ -30,7 +30,33 @@ const memory: MemoryRecord = {
   updatedAt: "2026-08-15T08:00:00.000Z",
 };
 
+const candidate: MemoryCandidate = {
+  id: "61fda565-80ed-47ea-94bd-99f0e10b7eb1",
+  kind: "NOTE",
+  title: "周五下午发布",
+  content: "周五下午发布，先完成离线包验收。",
+  importance: 3,
+  status: "PENDING",
+  source: {
+    type: "MESSAGE",
+    id: "2cf752f5-da75-4387-bee6-148d63268e8a",
+    conversationId: "5ff1427e-d6e7-454f-8a6e-f1e90009f3ae",
+    label: "项目群 · 林小满",
+    excerpt: "记住：周五下午发布，先完成离线包验收。",
+    createdAt: "2026-08-15T08:20:00.000Z",
+  },
+  createdAt: "2026-08-15T08:20:01.000Z",
+  updatedAt: "2026-08-15T08:20:01.000Z",
+};
+
 describe("MemoryCenterDialog", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "memoryCandidates").mockResolvedValue({ candidates: [], total: 0 });
+    vi.spyOn(api, "memorySettings").mockResolvedValue({
+      settings: { explicitCaptureEnabled: true, shortTermRetentionDays: 7, updatedAt: null },
+    });
+  });
+
   afterEach(() => vi.restoreAllMocks());
 
   it("加载并使用版本号修订长期记忆", async () => {
@@ -39,6 +65,7 @@ describe("MemoryCenterDialog", () => {
       total: 1,
       offset: 0,
       hasMore: false,
+      searchMode: "KEYWORD",
     });
     const updatedMemory = {
       ...memory,
@@ -74,6 +101,7 @@ describe("MemoryCenterDialog", () => {
       total: 0,
       offset: 0,
       hasMore: false,
+      searchMode: "KEYWORD",
     });
     vi.spyOn(api, "createMemory").mockResolvedValue({ memory });
     const forgetMemory = vi.spyOn(api, "forgetMemory").mockResolvedValue(undefined);
@@ -81,7 +109,7 @@ describe("MemoryCenterDialog", () => {
     render(<MemoryCenterDialog onClose={vi.fn()} />);
     expect(await screen.findByText("还没有长期记忆")).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("button", { name: "新建长期记忆" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "新建长期记忆" })[0]!);
     await userEvent.type(screen.getByLabelText("标题"), memory.title);
     await userEvent.type(screen.getByLabelText("记忆内容"), memory.content);
     await userEvent.click(screen.getByRole("button", { name: "保存记忆" }));
@@ -92,5 +120,57 @@ describe("MemoryCenterDialog", () => {
 
     await waitFor(() => expect(forgetMemory).toHaveBeenCalledWith(memory.id));
     expect(screen.queryByDisplayValue(memory.title)).toBeNull();
+  });
+
+  it("短期记忆创建时显式携带 7 天层级", async () => {
+    vi.spyOn(api, "memories").mockResolvedValue({
+      memories: [],
+      total: 0,
+      offset: 0,
+      hasMore: false,
+      searchMode: "KEYWORD",
+    });
+    const shortMemory: MemoryRecord = {
+      ...memory,
+      tier: "SHORT_TERM",
+      expiresAt: "2026-08-22T08:00:00.000Z",
+    };
+    const createMemory = vi.spyOn(api, "createMemory").mockResolvedValue({ memory: shortMemory });
+
+    render(<MemoryCenterDialog onClose={vi.fn()} />);
+    await userEvent.click(screen.getByRole("tab", { name: "7 天短期" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "新建短期记忆" }).length).toBeGreaterThan(0),
+    );
+    await userEvent.click(screen.getAllByRole("button", { name: "新建短期记忆" })[0]!);
+    await userEvent.type(screen.getByLabelText("标题"), "本周发布重点");
+    await userEvent.type(screen.getByLabelText("记忆内容"), "先完成离线包验收");
+    await userEvent.click(screen.getByRole("button", { name: "保存记忆" }));
+
+    expect(createMemory).toHaveBeenCalledWith(
+      expect.objectContaining({ tier: "SHORT_TERM", title: "本周发布重点" }),
+    );
+  });
+
+  it("消息候选可确认成短期记忆", async () => {
+    vi.mocked(api.memoryCandidates).mockResolvedValue({ candidates: [candidate], total: 1 });
+    vi.spyOn(api, "memories").mockResolvedValue({
+      memories: [],
+      total: 0,
+      offset: 0,
+      hasMore: false,
+      searchMode: "KEYWORD",
+    });
+    const accept = vi.spyOn(api, "acceptMemoryCandidate").mockResolvedValue({
+      memory: { ...memory, tier: "SHORT_TERM", expiresAt: "2026-08-22T08:00:00.000Z" },
+    });
+
+    render(<MemoryCenterDialog onClose={vi.fn()} />);
+    await userEvent.click(screen.getByRole("tab", { name: /待确认/u }));
+    expect(await screen.findByText(candidate.content)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "保留 7 天" }));
+
+    await waitFor(() => expect(accept).toHaveBeenCalledWith(candidate.id, "SHORT_TERM"));
+    expect(screen.queryByText(candidate.content)).toBeNull();
   });
 });
