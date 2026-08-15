@@ -15,6 +15,7 @@ import { initializeDatabase, pool } from "./database.js";
 import { initializeMinio } from "./minio.js";
 import { startKnowledgeIndexWorker } from "./knowledge/knowledge-worker.js";
 import { queueAllKnowledgeDocumentsForReindex } from "./knowledge/knowledge-service.js";
+import { startMemoryCaptureWorker } from "./memory-capture-service.js";
 import { queueAllMemoryVectorsForReindex } from "./memory-service.js";
 import { broadcastReceiptChanges, markPendingMessagesDelivered } from "./receipt-service.js";
 import { RealtimeHub } from "./realtime.js";
@@ -35,6 +36,7 @@ async function main() {
   }
   const stopAttachmentCleanup = startAttachmentCleanup();
   const stopKnowledgeIndexWorker = startKnowledgeIndexWorker();
+  const stopMemoryCaptureWorker = startMemoryCaptureWorker();
   const stopAssistantBrowserSessionCleanup = startAssistantBrowserSessionCleanup();
 
   const realtime = new RealtimeHub();
@@ -59,6 +61,7 @@ async function main() {
     shuttingDown = true;
     stopAttachmentCleanup();
     stopKnowledgeIndexWorker();
+    stopMemoryCaptureWorker();
     stopAssistantTaskWorker();
     stopAssistantReminderWorker();
     stopAssistantBrowserSessionCleanup();

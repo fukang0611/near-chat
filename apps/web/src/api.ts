@@ -609,10 +609,13 @@ export const api = {
   rejectMemoryCandidate: (candidateId: string) =>
     request<void>(`/api/memory-candidates/${candidateId}`, { method: "DELETE" }),
   memorySettings: () => request<{ settings: MemorySettings }>("/api/memory-settings"),
-  updateMemorySettings: (explicitCaptureEnabled: boolean) =>
+  updateMemorySettings: (input: {
+    explicitCaptureEnabled?: boolean;
+    semanticCaptureEnabled?: boolean;
+  }) =>
     request<{ settings: MemorySettings }>("/api/memory-settings", {
       method: "PATCH",
-      body: JSON.stringify({ explicitCaptureEnabled }),
+      body: JSON.stringify(input),
     }),
   fileBlob: async (fileId: string, download = false): Promise<Blob> => {
     const token = getToken();

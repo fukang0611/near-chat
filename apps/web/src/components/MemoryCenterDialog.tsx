@@ -9,6 +9,7 @@ import {
   BrainCircuit,
   Check,
   Clock3,
+  ExternalLink,
   Inbox,
   LoaderCircle,
   Plus,
@@ -28,6 +29,7 @@ import { errorMessage } from "../utils/errors";
 interface MemoryCenterDialogProps {
   onClose: () => void;
   onNotify?: (message: string, tone: "success" | "error" | "info") => void;
+  onOpenMessage?: (conversationId: string, messageId: string) => void;
 }
 
 interface MemoryDraft {
@@ -88,10 +90,10 @@ function expiryLabel(expiresAt: string | null): string | null {
 }
 
 /**
- * 私人记忆中心只调用 NearChat 原生接口。候选生成、短期记忆和手动维护均不依赖
- * LLM；Embedding 可用时服务端会增强搜索，不可用时自动保留关键词结果。
+ * 私人记忆中心只调用 NearChat 原生接口。手动维护与明确意图识别不依赖 LLM；
+ * 智能整理必须由用户主动开启，Embedding 不可用时搜索自动保留关键词结果。
  */
-export function MemoryCenterDialog({ onClose, onNotify }: MemoryCenterDialogProps) {
+export function MemoryCenterDialog({ onClose, onNotify, onOpenMessage }: MemoryCenterDialogProps) {
   const [view, setView] = useState<MemoryView>("LONG_TERM");
   const [keyword, setKeyword] = useState("");
   const [debouncedKeyword, setDebouncedKeyword] = useState("");
@@ -112,7 +114,7 @@ export function MemoryCenterDialog({ onClose, onNotify }: MemoryCenterDialogProp
   const [candidatesError, setCandidatesError] = useState("");
   const [candidateBusyIds, setCandidateBusyIds] = useState<Set<string>>(new Set());
   const [settings, setSettings] = useState<MemorySettings | null>(null);
-  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState<"EXPLICIT" | "SEMANTIC" | null>(null);
   const requestIdRef = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -322,15 +324,30 @@ export function MemoryCenterDialog({ onClose, onNotify }: MemoryCenterDialogProp
   const toggleExplicitCapture = async () => {
     if (!settings || settingsBusy) return;
     const next = !settings.explicitCaptureEnabled;
-    setSettingsBusy(true);
+    setSettingsBusy("EXPLICIT");
     try {
-      const result = await api.updateMemorySettings(next);
+      const result = await api.updateMemorySettings({ explicitCaptureEnabled: next });
       setSettings(result.settings);
       onNotify?.(next ? "已开启明确记忆意图识别" : "已关闭自动识别", "success");
     } catch (failure) {
       onNotify?.(errorMessage(failure, "记忆设置保存失败"), "error");
     } finally {
-      setSettingsBusy(false);
+      setSettingsBusy(null);
+    }
+  };
+
+  const toggleSemanticCapture = async () => {
+    if (!settings || settingsBusy) return;
+    const next = !settings.semanticCaptureEnabled;
+    setSettingsBusy("SEMANTIC");
+    try {
+      const result = await api.updateMemorySettings({ semanticCaptureEnabled: next });
+      setSettings(result.settings);
+      onNotify?.(next ? "已开启会话智能整理" : "已关闭会话智能整理", "success");
+    } catch (failure) {
+      onNotify?.(errorMessage(failure, "记忆设置保存失败"), "error");
+    } finally {
+      setSettingsBusy(null);
     }
   };
 
@@ -415,8 +432,10 @@ export function MemoryCenterDialog({ onClose, onNotify }: MemoryCenterDialogProp
             settings={settings}
             settingsBusy={settingsBusy}
             onReload={loadCandidates}
-            onToggleSettings={toggleExplicitCapture}
+            onToggleExplicitCapture={toggleExplicitCapture}
+            onToggleSemanticCapture={toggleSemanticCapture}
             onHandle={handleCandidate}
+            onOpenMessage={onOpenMessage}
           />
         ) : (
           <>
@@ -493,6 +512,7 @@ export function MemoryCenterDialog({ onClose, onNotify }: MemoryCenterDialogProp
                 onCreate={startCreating}
                 onForgetIntent={setForgetConfirm}
                 onForget={forgetSelectedMemory}
+                onOpenMessage={onOpenMessage}
               />
             </div>
           </>
@@ -608,6 +628,7 @@ interface MemoryEditorProps {
   onCreate: () => void;
   onForgetIntent: (value: boolean) => void;
   onForget: () => Promise<void>;
+  onOpenMessage?: (conversationId: string, messageId: string) => void;
 }
 
 function MemoryEditor(props: MemoryEditorProps) {
@@ -625,9 +646,13 @@ function MemoryEditor(props: MemoryEditorProps) {
     onCreate,
     onForgetIntent,
     onForget,
+    onOpenMessage,
   } = props;
   const short = tier === "SHORT_TERM";
   const label = short ? "短期记忆" : "长期记忆";
+  const messageSource = memory?.sources.find(
+    (source) => source.type === "MESSAGE" && source.id && source.conversationId,
+  );
   if (!creating && !memory) {
     return (
       <section className="memory-editor" aria-label="记忆编辑器">
@@ -720,14 +745,26 @@ function MemoryEditor(props: MemoryEditorProps) {
         </label>
       </div>
       <footer className="memory-editor-footer">
-        <span className="memory-source-note">
-          {short ? <TimerReset size={14} /> : <Sparkles size={14} />}
-          {creating
-            ? short
-              ? "保存后保留 7 天，仅当前账号可见"
-              : "本条将标记为手动来源，仅当前账号可见"
-            : `${memory?.sources[0]?.label ?? "手动创建"} · 版本 ${memory?.revision ?? 1}`}
-        </span>
+        {!creating && messageSource && onOpenMessage ? (
+          <button
+            type="button"
+            className="memory-source-note is-link"
+            title={`定位到 ${messageSource.label}`}
+            onClick={() => onOpenMessage(messageSource.conversationId!, messageSource.id!)}
+            disabled={dirty || saving}
+          >
+            <ExternalLink size={13} /> 原消息 · {messageSource.label}
+          </button>
+        ) : (
+          <span className="memory-source-note">
+            {short ? <TimerReset size={14} /> : <Sparkles size={14} />}
+            {creating
+              ? short
+                ? "保存后保留 7 天，仅当前账号可见"
+                : "本条将标记为手动来源，仅当前账号可见"
+              : `${memory?.sources[0]?.label ?? "手动创建"} · 版本 ${memory?.revision ?? 1}`}
+          </span>
+        )}
         {saveError && (
           <span className="memory-save-error" role="alert">
             {saveError}
@@ -781,10 +818,12 @@ interface CandidatePanelProps {
   error: string;
   busyIds: ReadonlySet<string>;
   settings: MemorySettings | null;
-  settingsBusy: boolean;
+  settingsBusy: "EXPLICIT" | "SEMANTIC" | null;
   onReload: () => Promise<void>;
-  onToggleSettings: () => Promise<void>;
+  onToggleExplicitCapture: () => Promise<void>;
+  onToggleSemanticCapture: () => Promise<void>;
   onHandle: (candidate: MemoryCandidate, action: "REJECT" | MemoryTier) => Promise<void>;
+  onOpenMessage?: (conversationId: string, messageId: string) => void;
 }
 
 function CandidatePanel(props: CandidatePanelProps) {
@@ -796,24 +835,48 @@ function CandidatePanel(props: CandidatePanelProps) {
           <strong>确认后才会进入你的记忆</strong>
           <span>消息快照仅当前账号可见，不会改变或复制原附件</span>
         </div>
-        <label className="memory-capture-setting">
-          <span>
-            <b>识别“记住…”</b>
-            <small>无需模型，不阻塞发送</small>
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={settings?.explicitCaptureEnabled ?? true}
-            aria-label="自动识别明确记忆意图"
-            className={settings?.explicitCaptureEnabled !== false ? "is-on" : ""}
-            onClick={() => void props.onToggleSettings()}
-            disabled={!settings || settingsBusy}
-          >
-            {settingsBusy && <LoaderCircle className="spin" size={11} />}
-            <i />
-          </button>
-        </label>
+        <div className="memory-capture-settings">
+          <label className="memory-capture-setting">
+            <span>
+              <b>识别“记住…”</b>
+              <small>纯规则，不调用模型</small>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings?.explicitCaptureEnabled ?? true}
+              aria-label="自动识别明确记忆意图"
+              className={settings?.explicitCaptureEnabled !== false ? "is-on" : ""}
+              onClick={() => void props.onToggleExplicitCapture()}
+              disabled={!settings || Boolean(settingsBusy)}
+            >
+              {settingsBusy === "EXPLICIT" && <LoaderCircle className="spin" size={11} />}
+              <i />
+            </button>
+          </label>
+          <label className="memory-capture-setting is-semantic">
+            <span>
+              <b>智能整理近期会话</b>
+              <small>
+                {settings
+                  ? `${settings.semanticCaptureMessageThreshold} 条或静默 ${settings.semanticCaptureSilenceMinutes} 分钟 · 需 AI`
+                  : "按批次后台运行 · 需 AI"}
+              </small>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings?.semanticCaptureEnabled ?? false}
+              aria-label="智能整理近期会话"
+              className={settings?.semanticCaptureEnabled ? "is-on" : ""}
+              onClick={() => void props.onToggleSemanticCapture()}
+              disabled={!settings || Boolean(settingsBusy)}
+            >
+              {settingsBusy === "SEMANTIC" && <LoaderCircle className="spin" size={11} />}
+              <i />
+            </button>
+          </label>
+        </div>
       </div>
       <section className="memory-candidate-board" role="tabpanel" aria-label="待确认记忆">
         {loading ? (
@@ -853,9 +916,21 @@ function CandidatePanel(props: CandidatePanelProps) {
                   </header>
                   <strong>{candidate.title}</strong>
                   <p>{candidate.content}</p>
-                  <span className="memory-candidate-source">
-                    <Inbox size={12} /> {candidate.source.label}
-                  </span>
+                  {candidate.source.id && candidate.source.conversationId && props.onOpenMessage ? (
+                    <button
+                      type="button"
+                      className="memory-candidate-source is-link"
+                      onClick={() =>
+                        props.onOpenMessage!(candidate.source.conversationId!, candidate.source.id!)
+                      }
+                    >
+                      <ExternalLink size={12} /> 原消息 · {candidate.source.label}
+                    </button>
+                  ) : (
+                    <span className="memory-candidate-source">
+                      <Inbox size={12} /> {candidate.source.label}
+                    </span>
+                  )}
                   <footer>
                     <button
                       type="button"

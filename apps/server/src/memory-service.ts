@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   CreateMemoryInput,
   MemoryCandidate,
@@ -18,6 +18,7 @@ import {
   replaceMemoryVector,
   searchMemoryVectors,
 } from "./ai/ai-runtime.js";
+import { config } from "./config.js";
 import { query, transaction } from "./database.js";
 import { ApiError } from "./http.js";
 
@@ -70,7 +71,23 @@ interface MemoryCandidateRow {
   source_created_at: Date;
   created_at: Date;
   updated_at: Date;
+  normalized_key?: string | null;
   total_count?: number;
+}
+
+interface MemoryCandidateDraft {
+  kind: MemoryKind;
+  title: string;
+  content: string;
+  importance: number;
+  source: {
+    type: MemorySourceReference["type"];
+    id: string | null;
+    conversationId: string | null;
+    label: string;
+    excerpt: string | null;
+    createdAt: Date;
+  };
 }
 
 interface CandidateMessageRow {
@@ -129,7 +146,8 @@ const memoryCandidateSelect = `
          candidate.source_excerpt,
          candidate.source_created_at,
          candidate.created_at,
-         candidate.updated_at
+         candidate.updated_at,
+         candidate.normalized_key
     FROM memory_candidates candidate
 `;
 
@@ -351,9 +369,57 @@ export function memoryCandidateTitle(content: string, fallback = "来自聊天�
   return normalized.length > 54 ? `${normalized.slice(0, 53)}…` : normalized;
 }
 
+/**
+ * 候选指纹只用于当前账号内的去重，不作为展示文本。NFKC 与标点折叠可以吸收
+ * 全半角、空白和常见排版差异，哈希后不会把聊天内容复制进索引字段。
+ */
+export function normalizeMemoryCandidateContent(content: string): string {
+  return content
+    .normalize("NFKC")
+    .toLocaleLowerCase("zh-CN")
+    .replace(/[\p{P}\p{S}\p{Z}\s]+/gu, "")
+    .trim();
+}
+
+export function memoryCandidateNormalizedKey(kind: MemoryKind, content: string): string {
+  const normalized = normalizeMemoryCandidateContent(content);
+  return createHash("sha256").update(`${kind}\n${normalized}`).digest("hex");
+}
+
+/** 中文候选使用二元字符 Dice 系数，吸收模型轻微改写但避免合并不同事实。 */
+export function memoryCandidateSimilarity(left: string, right: string): number {
+  const a = normalizeMemoryCandidateContent(left);
+  const b = normalizeMemoryCandidateContent(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) < 4) return 0;
+  if (a.includes(b) || b.includes(a))
+    return Math.min(a.length, b.length) / Math.max(a.length, b.length);
+
+  const counts = new Map<string, number>();
+  for (let index = 0; index < a.length - 1; index += 1) {
+    const pair = a.slice(index, index + 2);
+    counts.set(pair, (counts.get(pair) ?? 0) + 1);
+  }
+  let overlap = 0;
+  for (let index = 0; index < b.length - 1; index += 1) {
+    const pair = b.slice(index, index + 2);
+    const count = counts.get(pair) ?? 0;
+    if (count > 0) {
+      overlap += 1;
+      counts.set(pair, count - 1);
+    }
+  }
+  return (2 * overlap) / (a.length + b.length - 2);
+}
+
 export async function getMemorySettings(userId: string): Promise<MemorySettings> {
-  const result = await query<{ explicit_capture_enabled: boolean; updated_at: Date }>(
-    `SELECT explicit_capture_enabled, updated_at
+  const result = await query<{
+    explicit_capture_enabled: boolean;
+    semantic_capture_enabled: boolean;
+    updated_at: Date;
+  }>(
+    `SELECT explicit_capture_enabled, semantic_capture_enabled, updated_at
        FROM memory_settings
       WHERE owner_id = $1`,
     [userId],
@@ -361,6 +427,9 @@ export async function getMemorySettings(userId: string): Promise<MemorySettings>
   const settings = result.rows[0];
   return {
     explicitCaptureEnabled: settings?.explicit_capture_enabled ?? true,
+    semanticCaptureEnabled: settings?.semantic_capture_enabled ?? false,
+    semanticCaptureMessageThreshold: config.ai.memory.messageThreshold,
+    semanticCaptureSilenceMinutes: config.ai.memory.silenceMinutes,
     shortTermRetentionDays: 7,
     updatedAt: settings?.updated_at.toISOString() ?? null,
   };
@@ -368,16 +437,32 @@ export async function getMemorySettings(userId: string): Promise<MemorySettings>
 
 export async function updateMemorySettings(
   userId: string,
-  explicitCaptureEnabled: boolean,
+  input: { explicitCaptureEnabled?: boolean; semanticCaptureEnabled?: boolean },
 ): Promise<MemorySettings> {
-  await query(
-    `INSERT INTO memory_settings (owner_id, explicit_capture_enabled)
-     VALUES ($1, $2)
-     ON CONFLICT (owner_id) DO UPDATE
-       SET explicit_capture_enabled = EXCLUDED.explicit_capture_enabled,
-           updated_at = NOW()`,
-    [userId, explicitCaptureEnabled],
-  );
+  await transaction(async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      `memory-candidate:${userId}`,
+    ]);
+    await client.query(
+      `INSERT INTO memory_settings
+         (owner_id, explicit_capture_enabled, semantic_capture_enabled)
+       VALUES ($1, COALESCE($2::boolean, TRUE), COALESCE($3::boolean, FALSE))
+       ON CONFLICT (owner_id) DO UPDATE
+         SET explicit_capture_enabled = COALESCE($2::boolean, memory_settings.explicit_capture_enabled),
+             semantic_capture_enabled = COALESCE($3::boolean, memory_settings.semantic_capture_enabled),
+             updated_at = NOW()`,
+      [userId, input.explicitCaptureEnabled ?? null, input.semanticCaptureEnabled ?? null],
+    );
+    if (input.semanticCaptureEnabled === false) {
+      // 待处理批次是可重建派生数据；关闭后立即清空，运行中的任务在落库前还会复核开关。
+      await client.query(`DELETE FROM memory_capture_states WHERE owner_id = $1`, [userId]);
+      await client.query(
+        `DELETE FROM memory_capture_jobs
+          WHERE owner_id = $1 AND status IN ('QUEUED', 'FAILED')`,
+        [userId],
+      );
+    }
+  });
   return getMemorySettings(userId);
 }
 
@@ -435,6 +520,128 @@ async function candidateById(userId: string, candidateId: string): Promise<Memor
 }
 
 /**
+ * 同一账号的候选写入使用事务级锁串行化：精确指纹由数据库唯一索引兜底，模型
+ * 轻微改写则通过高阈值相似度合并。这里只合并待确认项，不触碰已接受的记忆。
+ */
+async function upsertMemoryCandidate(
+  userId: string,
+  draft: MemoryCandidateDraft,
+  semanticConversationId?: string,
+): Promise<{ candidate: MemoryCandidate; created: boolean }> {
+  const normalizedKey = memoryCandidateNormalizedKey(draft.kind, draft.content);
+  const result = await transaction(async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      `memory-candidate:${userId}`,
+    ]);
+    if (semanticConversationId) {
+      const allowed = await client.query(
+        `SELECT 1
+           FROM memory_settings settings
+           JOIN conversation_members member ON member.user_id = settings.owner_id
+          WHERE settings.owner_id = $1
+            AND settings.semantic_capture_enabled = TRUE
+            AND member.conversation_id = $2`,
+        [userId, semanticConversationId],
+      );
+      if (!allowed.rowCount) throw new ApiError(409, "会话智能整理已关闭");
+    }
+    const pending = await client.query<MemoryCandidateRow>(
+      `${memoryCandidateSelect}
+        WHERE candidate.owner_id = $1 AND candidate.status = 'PENDING'
+        ORDER BY candidate.updated_at DESC, candidate.id DESC
+        LIMIT 100
+        FOR UPDATE`,
+      [userId],
+    );
+    const sameSource = pending.rows.find(
+      (candidate) =>
+        draft.source.id &&
+        candidate.source_type === draft.source.type &&
+        candidate.source_id === draft.source.id,
+    );
+    const similar = pending.rows.find(
+      (candidate) =>
+        candidate.kind === draft.kind &&
+        (candidate.normalized_key === normalizedKey ||
+          memoryCandidateSimilarity(candidate.content, draft.content) >= 0.86),
+    );
+    const existing = sameSource ?? similar;
+    if (existing) {
+      await client.query(
+        `UPDATE memory_candidates
+            SET title = CASE WHEN length($2) > length(title) THEN $2 ELSE title END,
+                content = CASE WHEN length($3) > length(content) THEN $3 ELSE content END,
+                importance = GREATEST(importance, $4),
+                source_type = CASE WHEN source_created_at <= $10 THEN $5 ELSE source_type END,
+                source_id = CASE WHEN source_created_at <= $10 THEN $6 ELSE source_id END,
+                conversation_id = CASE WHEN source_created_at <= $10 THEN $7 ELSE conversation_id END,
+                source_label = CASE WHEN source_created_at <= $10 THEN $8 ELSE source_label END,
+                source_excerpt = CASE WHEN source_created_at <= $10 THEN $9 ELSE source_excerpt END,
+                source_created_at = GREATEST(source_created_at, $10),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [
+          existing.id,
+          draft.title,
+          draft.content,
+          draft.importance,
+          draft.source.type,
+          draft.source.id,
+          draft.source.conversationId,
+          draft.source.label,
+          draft.source.excerpt,
+          draft.source.createdAt,
+        ],
+      );
+      return { id: existing.id, created: false };
+    }
+
+    const candidateId = randomUUID();
+    const inserted = await client.query<{ id: string }>(
+      `INSERT INTO memory_candidates
+         (id, owner_id, source_type, source_id, conversation_id, source_label,
+          source_excerpt, source_created_at, kind, title, content, importance, normalized_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [
+        candidateId,
+        userId,
+        draft.source.type,
+        draft.source.id,
+        draft.source.conversationId,
+        draft.source.label,
+        draft.source.excerpt,
+        draft.source.createdAt,
+        draft.kind,
+        draft.title,
+        draft.content,
+        draft.importance,
+        normalizedKey,
+      ],
+    );
+    if (inserted.rows[0]) return { id: candidateId, created: true };
+
+    const conflicted = await client.query<{ id: string }>(
+      `SELECT id
+         FROM memory_candidates
+        WHERE owner_id = $1 AND status = 'PENDING'
+          AND (
+            normalized_key = $2
+            OR ($3::uuid IS NOT NULL AND source_type = $4 AND source_id = $3)
+          )
+        ORDER BY updated_at DESC
+        LIMIT 1`,
+      [userId, normalizedKey, draft.source.id, draft.source.type],
+    );
+    const conflictedId = conflicted.rows[0]?.id;
+    if (!conflictedId) throw new ApiError(409, "记忆候选状态刚刚发生变化，请重试");
+    return { id: conflictedId, created: false };
+  });
+  return { candidate: await candidateById(userId, result.id), created: result.created };
+}
+
+/**
  * 将当前用户有权读取的消息快照成候选。重复点击同一条消息会返回原有待确认项，
  * 不会在列表中制造重复内容。
  */
@@ -451,39 +658,57 @@ export async function createMessageMemoryCandidate(
     contentOverride?.trim() ||
     [message.text_content?.trim(), attachmentText].filter(Boolean).join("\n") ||
     "一条聊天消息";
-  const candidateId = randomUUID();
-  const inserted = await query<{ id: string }>(
-    `INSERT INTO memory_candidates
-       (id, owner_id, source_type, source_id, conversation_id, source_label,
-        source_excerpt, source_created_at, kind, title, content, importance)
-     VALUES ($1, $2, 'MESSAGE', $3, $4, $5, $6, $7, 'NOTE', $8, $9, 3)
-     ON CONFLICT (owner_id, source_type, source_id)
-       WHERE status = 'PENDING' AND source_id IS NOT NULL
-     DO NOTHING
-     RETURNING id`,
-    [
-      candidateId,
-      userId,
-      message.id,
-      message.conversation_id,
-      `${message.conversation_title} · ${message.sender_name}`,
-      [message.text_content?.trim(), attachmentText].filter(Boolean).join("\n").slice(0, 1000) ||
+  return upsertMemoryCandidate(userId, {
+    kind: "NOTE",
+    title: memoryCandidateTitle(content, `${message.sender_name} 分享的内容`),
+    content,
+    importance: 3,
+    source: {
+      type: "MESSAGE",
+      id: message.id,
+      conversationId: message.conversation_id,
+      label: `${message.conversation_title} · ${message.sender_name}`,
+      excerpt:
+        [message.text_content?.trim(), attachmentText].filter(Boolean).join("\n").slice(0, 1000) ||
         null,
-      message.created_at,
-      memoryCandidateTitle(content, `${message.sender_name} 分享的内容`),
-      content,
-    ],
+      createdAt: message.created_at,
+    },
+  });
+}
+
+/** 语义整理也只写入待确认候选，用户接受前不会形成真实记忆。 */
+export function createGeneratedMemoryCandidate(
+  userId: string,
+  input: {
+    kind: MemoryKind;
+    title: string;
+    content: string;
+    importance: number;
+    sourceMessageId: string;
+    conversationId: string;
+    sourceLabel: string;
+    sourceExcerpt: string;
+    sourceCreatedAt: Date;
+  },
+): Promise<{ candidate: MemoryCandidate; created: boolean }> {
+  return upsertMemoryCandidate(
+    userId,
+    {
+      kind: input.kind,
+      title: input.title,
+      content: input.content,
+      importance: input.importance,
+      source: {
+        type: "MESSAGE",
+        id: input.sourceMessageId,
+        conversationId: input.conversationId,
+        label: input.sourceLabel,
+        excerpt: input.sourceExcerpt,
+        createdAt: input.sourceCreatedAt,
+      },
+    },
+    input.conversationId,
   );
-  const id = inserted.rows[0]?.id;
-  if (id) return { candidate: await candidateById(userId, id), created: true };
-  const existing = await query<{ id: string }>(
-    `SELECT id FROM memory_candidates
-      WHERE owner_id = $1 AND source_type = 'MESSAGE' AND source_id = $2 AND status = 'PENDING'`,
-    [userId, message.id],
-  );
-  const existingId = existing.rows[0]?.id;
-  if (!existingId) throw new ApiError(409, "这条消息的记忆候选状态刚刚发生变化，请重试");
-  return { candidate: await candidateById(userId, existingId), created: false };
 }
 
 /** 消息发送完成后的轻量识别；调用方应以 fire-and-forget 方式执行。 */
@@ -725,4 +950,22 @@ export async function forgetMemory(userId: string, memoryId: string): Promise<vo
     );
   });
   enqueueMemoryVectorDeletion(memoryId);
+}
+
+/**
+ * 短期记忆到期后转为归档状态；正文与修订仍保留，向量作为派生数据异步删除。
+ * 此任务完全不依赖模型，即使 AI 关闭也会持续执行。
+ */
+export async function archiveExpiredShortTermMemories(): Promise<number> {
+  const archived = await query<{ id: string }>(
+    `UPDATE memories
+        SET status = 'ARCHIVED', updated_at = NOW()
+      WHERE tier = 'SHORT_TERM'
+        AND status = 'ACTIVE'
+        AND expires_at IS NOT NULL
+        AND expires_at <= NOW()
+      RETURNING id`,
+  );
+  for (const memory of archived.rows) enqueueMemoryVectorDeletion(memory.id);
+  return archived.rows.length;
 }

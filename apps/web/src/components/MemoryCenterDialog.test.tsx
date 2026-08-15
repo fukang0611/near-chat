@@ -53,7 +53,14 @@ describe("MemoryCenterDialog", () => {
   beforeEach(() => {
     vi.spyOn(api, "memoryCandidates").mockResolvedValue({ candidates: [], total: 0 });
     vi.spyOn(api, "memorySettings").mockResolvedValue({
-      settings: { explicitCaptureEnabled: true, shortTermRetentionDays: 7, updatedAt: null },
+      settings: {
+        explicitCaptureEnabled: true,
+        semanticCaptureEnabled: false,
+        semanticCaptureMessageThreshold: 20,
+        semanticCaptureSilenceMinutes: 5,
+        shortTermRetentionDays: 7,
+        updatedAt: null,
+      },
     });
   });
 
@@ -172,5 +179,40 @@ describe("MemoryCenterDialog", () => {
 
     await waitFor(() => expect(accept).toHaveBeenCalledWith(candidate.id, "SHORT_TERM"));
     expect(screen.queryByText(candidate.content)).toBeNull();
+  });
+
+  it("可开启智能整理并从候选定位原消息", async () => {
+    vi.mocked(api.memoryCandidates).mockResolvedValue({ candidates: [candidate], total: 1 });
+    vi.spyOn(api, "memories").mockResolvedValue({
+      memories: [],
+      total: 0,
+      offset: 0,
+      hasMore: false,
+      searchMode: "KEYWORD",
+    });
+    const updateSettings = vi.spyOn(api, "updateMemorySettings").mockResolvedValue({
+      settings: {
+        explicitCaptureEnabled: true,
+        semanticCaptureEnabled: true,
+        semanticCaptureMessageThreshold: 20,
+        semanticCaptureSilenceMinutes: 5,
+        shortTermRetentionDays: 7,
+        updatedAt: "2026-08-15T08:30:00.000Z",
+      },
+    });
+    const onOpenMessage = vi.fn();
+
+    render(<MemoryCenterDialog onClose={vi.fn()} onOpenMessage={onOpenMessage} />);
+    await userEvent.click(screen.getByRole("tab", { name: /待确认/u }));
+    await userEvent.click(screen.getByRole("switch", { name: "智能整理近期会话" }));
+    await waitFor(() =>
+      expect(updateSettings).toHaveBeenCalledWith({ semanticCaptureEnabled: true }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /原消息/u }));
+    expect(onOpenMessage).toHaveBeenCalledWith(
+      candidate.source.conversationId,
+      candidate.source.id,
+    );
   });
 });

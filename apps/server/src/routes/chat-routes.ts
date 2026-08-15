@@ -13,6 +13,7 @@ import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError, currentUser } from "../http.js";
 import { isAllowedFlashRoomExpiry, isFlashRoomExpired } from "../flash-room-service.js";
+import { observeConversationMessageForMemory } from "../memory-capture-service.js";
 import { captureExplicitMessageMemory } from "../memory-service.js";
 import { forwardMessages } from "../message-forward-service.js";
 import { messageKindFromContentType, type MessageKind } from "../message-kind.js";
@@ -926,6 +927,9 @@ export function createChatRouter(realtime: RealtimeHub) {
       // 明确的“记住 / 记一下”意图在响应完成后异步进入候选箱；识别或数据库
       // 暂时失败都不能反向影响消息发送。
       if (saved.created) {
+        void observeConversationMessageForMemory(conversationId, saved.message.id).catch((error) =>
+          console.warn("Failed to queue conversation memory observation:", error),
+        );
         void captureExplicitMessageMemory(
           user.id,
           saved.message.id,
@@ -963,6 +967,12 @@ export function createChatRouter(realtime: RealtimeHub) {
       }
 
       response.status(201).json({ messages: responseMessages });
+      for (const result of forwarded) {
+        if (!result.created) continue;
+        void observeConversationMessageForMemory(conversationId, result.message.id).catch((error) =>
+          console.warn("Failed to queue forwarded memory observation:", error),
+        );
+      }
     },
   );
 

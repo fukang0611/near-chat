@@ -134,9 +134,19 @@ export function createMemoryRouter() {
   });
 
   router.patch("/memory-settings", authenticate, async (request, response) => {
-    const input = z.object({ explicitCaptureEnabled: z.boolean() }).parse(request.body);
+    const input = z
+      .object({
+        explicitCaptureEnabled: z.boolean().optional(),
+        semanticCaptureEnabled: z.boolean().optional(),
+      })
+      .refine(
+        (value) =>
+          value.explicitCaptureEnabled !== undefined || value.semanticCaptureEnabled !== undefined,
+        "至少修改一项记忆设置",
+      )
+      .parse(request.body);
     response.json({
-      settings: await updateMemorySettings(currentUser(request).id, input.explicitCaptureEnabled),
+      settings: await updateMemorySettings(currentUser(request).id, input),
     });
   });
 

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractExplicitMemoryHint, memoryCandidateTitle } from "./memory-service.js";
+import {
+  extractExplicitMemoryHint,
+  memoryCandidateNormalizedKey,
+  memoryCandidateSimilarity,
+  memoryCandidateTitle,
+  normalizeMemoryCandidateContent,
+} from "./memory-service.js";
 
 test("只提取明确的聊天记忆意图", () => {
   assert.equal(extractExplicitMemoryHint("记住：周五下午发布"), "周五下午发布");
@@ -18,4 +24,16 @@ test("候选标题压缩空白并保持列表可扫描", () => {
   assert.equal(title.length, 54);
   assert.match(title, /…$/u);
   assert.equal(memoryCandidateTitle("", "附件消息"), "附件消息");
+});
+
+test("候选指纹折叠排版差异且相近内容可被识别", () => {
+  assert.equal(normalizeMemoryCandidateContent(" NearChat，周五 发布！"), "nearchat周五发布");
+  assert.equal(
+    memoryCandidateNormalizedKey("PROJECT", "周五发布"),
+    memoryCandidateNormalizedKey("PROJECT", "周五，发布。"),
+  );
+  assert.ok(
+    memoryCandidateSimilarity("周五发布前完成离线包验收", "周五发布前先完成离线包验收") >= 0.86,
+  );
+  assert.ok(memoryCandidateSimilarity("周五发布", "客户偏好 PDF") < 0.4);
 });

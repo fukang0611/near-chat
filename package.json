@@ -26,7 +26,8 @@
     "smoke:knowledge-extraction": "node scripts/knowledge-extraction-smoke-test.mjs",
     "smoke:assistant-task-tools": "node scripts/assistant-task-tools-smoke-test.mjs",
     "smoke:assistant-threads": "node scripts/assistant-threads-smoke-test.mjs",
-    "smoke:assistant-reminders": "node scripts/assistant-reminders-smoke-test.mjs"
+    "smoke:assistant-reminders": "node scripts/assistant-reminders-smoke-test.mjs",
+    "smoke:memory-capture": "node scripts/memory-capture-smoke-test.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

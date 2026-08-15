@@ -2049,7 +2049,18 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         />
       )}
       {showMemoryCenter && (
-        <MemoryCenterDialog onClose={() => setShowMemoryCenter(false)} onNotify={notify} />
+        <MemoryCenterDialog
+          onClose={() => setShowMemoryCenter(false)}
+          onNotify={notify}
+          onOpenMessage={(conversationId, messageId) => {
+            messageTargetRef.current = { conversationId, messageId };
+            setHighlightedMessageId(null);
+            setSelectedId(conversationId);
+            setMessageLoadVersion((current) => current + 1);
+            setSidebarMode("recent");
+            setShowMemoryCenter(false);
+          }}
+        />
       )}
       {aiActionMessage && aiCapabilities?.features.messageActions && (
         <MessageAiActionDialog

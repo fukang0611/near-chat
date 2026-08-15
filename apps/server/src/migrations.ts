@@ -142,6 +142,57 @@ export const databaseMigrations: DatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: "add_semantic_memory_capture_pipeline",
+    async up(client) {
+      await client.query(`
+        ALTER TABLE memory_settings
+          ADD COLUMN semantic_capture_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+        ALTER TABLE memory_candidates
+          ADD COLUMN normalized_key VARCHAR(64);
+
+        CREATE UNIQUE INDEX idx_memory_candidates_pending_normalized
+          ON memory_candidates(owner_id, normalized_key)
+          WHERE status = 'PENDING' AND normalized_key IS NOT NULL;
+
+        CREATE TABLE memory_capture_states (
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          message_ids UUID[] NOT NULL,
+          message_count INTEGER NOT NULL CHECK (message_count > 0),
+          first_message_at TIMESTAMPTZ NOT NULL,
+          last_message_at TIMESTAMPTZ NOT NULL,
+          due_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (owner_id, conversation_id),
+          CHECK (message_count = cardinality(message_ids))
+        );
+
+        CREATE TABLE memory_capture_jobs (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          message_ids UUID[] NOT NULL CHECK (cardinality(message_ids) > 0),
+          status VARCHAR(20) NOT NULL DEFAULT 'QUEUED'
+            CHECK (status IN ('QUEUED', 'RUNNING', 'COMPLETED', 'FAILED')),
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          error_message VARCHAR(500),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMPTZ
+        );
+
+        CREATE INDEX idx_memory_capture_states_due
+          ON memory_capture_states(due_at, updated_at);
+        CREATE INDEX idx_memory_capture_jobs_poll
+          ON memory_capture_jobs(status, next_attempt_at, created_at);
+      `);
+    },
+  },
 ];
 
 export function orderedPendingMigrations(

@@ -32,6 +32,7 @@ test("记忆领域迁移保持稳定的首个版本", () => {
     [
       { version: 1, name: "create_memory_domain" },
       { version: 2, name: "create_memory_candidates_and_settings" },
+      { version: 3, name: "add_semantic_memory_capture_pipeline" },
     ],
   );
 });

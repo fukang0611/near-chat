@@ -218,6 +218,7 @@ npm run smoke:knowledge-extraction # XLSX 结构化解析、本地 OCR 与检索
 npm run smoke:assistant-task-tools # 自动任务文件、截图、模型回复与浏览器审计
 npm run smoke:assistant-threads # 助理多对话隔离、定位、归档、任务绑定与级联清理
 npm run smoke:assistant-reminders # 日程汇总、到期通知、推迟、完成、恢复与清理
+npm run smoke:memory-capture # 20 条批次、AI 候选、去重、原消息定位与短期记忆
 ```
 
 ## 关键配置
@@ -248,6 +249,9 @@ npm run smoke:assistant-reminders # 日程汇总、到期通知、推迟、完�
 | `AI_KNOWLEDGE_OCR_MAX_PAGES`         | `20`            | 单个扫描 PDF 最多识别页数                  |
 | `AI_KNOWLEDGE_OCR_MAX_IMAGE_BYTES`   | `20971520`      | 单张 OCR 图片上限（20 MiB）                |
 | `AI_ASSISTANT_TASK_POLL_MS`          | `1000`          | 个人助理任务调度轮询间隔（毫秒）           |
+| `AI_MEMORY_MESSAGE_THRESHOLD`        | `20`            | 会话智能整理的批次消息阈值                 |
+| `AI_MEMORY_SILENCE_MINUTES`          | `5`             | 会话静默后触发智能整理的分钟数             |
+| `AI_MEMORY_POLL_MS`                  | `3000`          | 记忆后台任务轮询间隔（毫秒）               |
 | `AI_BROWSER_EXECUTABLE_PATH`         | 镜像内置路径    | Chromium 可执行文件路径                    |
 | `AI_BROWSER_*_TIMEOUT_MS`            | `20000/10000`   | 页面导航与单步操作超时（毫秒）             |
 | `AI_BROWSER_MAX_SESSIONS`            | `4`             | 全局同时运行的浏览器会话上限               |

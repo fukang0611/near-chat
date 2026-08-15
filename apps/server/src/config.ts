@@ -99,6 +99,12 @@ export const config = {
       // 局域网单体部署以秒级轮询换取简单、可恢复的 PostgreSQL 持久调度。
       pollMs: positiveInteger("AI_ASSISTANT_TASK_POLL_MS", 1000),
     },
+    memory: {
+      // 达到消息阈值或会话静默后才批量整理，避免每条消息都调用模型。
+      messageThreshold: positiveInteger("AI_MEMORY_MESSAGE_THRESHOLD", 20),
+      silenceMinutes: positiveInteger("AI_MEMORY_SILENCE_MINUTES", 5),
+      pollMs: positiveInteger("AI_MEMORY_POLL_MS", 3000),
+    },
     browser: {
       // 服务镜像内置 Chromium；该变量只用于自定义基础镜像或本地开发覆盖。
       executablePath: process.env.AI_BROWSER_EXECUTABLE_PATH?.trim() || undefined,

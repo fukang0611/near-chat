@@ -97,6 +97,10 @@ export interface MemoryCandidatePage {
 export interface MemorySettings {
   /** 自动识别“记住 / 记一下”等明确表达；普通聊天不会调用模型。 */
   explicitCaptureEnabled: boolean;
+  /** 用户主动开启后，服务端才会把近期会话交给模型整理为待确认候选。 */
+  semanticCaptureEnabled: boolean;
+  semanticCaptureMessageThreshold: number;
+  semanticCaptureSilenceMinutes: number;
   shortTermRetentionDays: 7;
   updatedAt: string | null;
 }
