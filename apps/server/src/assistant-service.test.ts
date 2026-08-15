@@ -5,6 +5,7 @@ import {
   buildAssistantConversation,
   buildAssistantInstructions,
   buildAssistantPrompt,
+  buildPublicAssistantInstructions,
 } from "./assistant/assistant-service.js";
 import type { KnowledgeSource } from "./knowledge/knowledge-service.js";
 
@@ -31,6 +32,13 @@ test("personal assistant instructions preserve category and user-defined role", 
   assert.match(instructions, /计划拆解/);
   assert.match(instructions, /用户自定义要求/);
   assert.match(instructions, /三步以内/);
+});
+
+test("public assistant instructions exclude private user-defined role text", () => {
+  const instructions = buildPublicAssistantInstructions("ANALYSIS");
+
+  assert.match(instructions, /当前会话成员|当前会话公开资料/);
+  assert.doesNotMatch(instructions, /用户自定义要求/);
 });
 
 test("knowledge sources are numbered and kept separate from the stored user text", () => {

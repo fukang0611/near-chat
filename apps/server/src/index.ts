@@ -9,6 +9,7 @@ import { startAttachmentCleanup } from "./attachment-cleanup.js";
 import { startAssistantBrowserSessionCleanup } from "./assistant/assistant-browser-service.js";
 import { startAssistantReminderWorker } from "./assistant/assistant-reminder-worker.js";
 import { startAssistantTaskWorker } from "./assistant/assistant-task-worker.js";
+import { startAssistantInvocationWorker } from "./assistant/assistant-invocation-service.js";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { initializeDatabase, pool } from "./database.js";
@@ -42,6 +43,7 @@ async function main() {
   const realtime = new RealtimeHub();
   const stopAssistantTaskWorker = startAssistantTaskWorker(realtime);
   const stopAssistantReminderWorker = startAssistantReminderWorker(realtime);
+  const stopAssistantInvocationWorker = startAssistantInvocationWorker();
   realtime.onUserOnline(async (userId) => {
     const changes = await markPendingMessagesDelivered(userId);
     await broadcastReceiptChanges(realtime, changes);
@@ -64,6 +66,7 @@ async function main() {
     stopMemoryCaptureWorker();
     stopAssistantTaskWorker();
     stopAssistantReminderWorker();
+    stopAssistantInvocationWorker();
     stopAssistantBrowserSessionCleanup();
     realtime.close();
     server.close(async () => {

@@ -133,7 +133,7 @@ export async function listChatFiles(
               message.id AS message_id,
               message.conversation_id,
               message.sender_id,
-              sender.display_name AS sender_name,
+              COALESCE(message.actor_name, sender.display_name) AS sender_name,
               message.text_content AS message_text,
               message.created_at
          FROM (
@@ -328,8 +328,8 @@ export async function createMessageFavorite(
                 )
               END AS conversation_title,
               message.sender_id,
-              sender.display_name AS sender_name,
-              sender.avatar_color AS sender_avatar_color,
+              COALESCE(message.actor_name, sender.display_name) AS sender_name,
+              COALESCE(message.actor_avatar_color, sender.avatar_color) AS sender_avatar_color,
               message.type,
               message.text_content,
               message.forwarded_from,

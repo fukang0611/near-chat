@@ -102,7 +102,7 @@ export function buildMessageAiPrompt(input: {
 async function loadMessage(userId: string, messageId: string): Promise<MessageRow> {
   const result = await query<MessageRow>(
     `SELECT message.id, message.text_content, message.recalled_at,
-            sender.display_name AS sender_name,
+            COALESCE(message.actor_name, sender.display_name) AS sender_name,
             COALESCE(conversation.name, '私聊') AS conversation_title
        FROM messages message
        JOIN users sender ON sender.id = message.sender_id

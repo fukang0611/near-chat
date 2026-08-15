@@ -234,6 +234,69 @@ export const databaseMigrations: DatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: "add_chat_assistant_invocations",
+    async up(client) {
+      await client.query(`
+        CREATE TABLE assistant_invocations (
+          id UUID PRIMARY KEY,
+          requester_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          assistant_id UUID NOT NULL REFERENCES ai_assistants(id) ON DELETE CASCADE,
+          conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+          source_message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+          assistant_name VARCHAR(80) NOT NULL,
+          assistant_avatar_color VARCHAR(20) NOT NULL,
+          mode VARCHAR(24) NOT NULL DEFAULT 'PRIVATE_PREVIEW'
+            CHECK (mode IN ('PRIVATE_PREVIEW', 'CONVERSATION_REPLY')),
+          status VARCHAR(24) NOT NULL DEFAULT 'QUEUED'
+            CHECK (status IN (
+              'QUEUED', 'RUNNING', 'WAITING_CONFIRMATION', 'SUCCEEDED', 'FAILED'
+            )),
+          prompt TEXT NOT NULL,
+          result_text TEXT,
+          error_message VARCHAR(500),
+          model_id UUID REFERENCES ai_model_configs(id) ON DELETE SET NULL,
+          result_message_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+          attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          started_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          dismissed_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE (requester_id, source_message_id, assistant_id)
+        );
+
+        ALTER TABLE messages
+          ADD COLUMN actor_type VARCHAR(16) NOT NULL DEFAULT 'USER';
+        ALTER TABLE messages
+          ADD COLUMN actor_assistant_id UUID REFERENCES ai_assistants(id) ON DELETE SET NULL;
+        ALTER TABLE messages
+          ADD COLUMN actor_name VARCHAR(80);
+        ALTER TABLE messages
+          ADD COLUMN actor_avatar_color VARCHAR(20);
+        ALTER TABLE messages
+          ADD COLUMN invocation_id UUID REFERENCES assistant_invocations(id) ON DELETE SET NULL;
+        ALTER TABLE messages
+          ADD CONSTRAINT messages_actor_type_check CHECK (actor_type IN ('USER', 'ASSISTANT'));
+        ALTER TABLE messages
+          ADD CONSTRAINT messages_actor_shape_check CHECK (
+            (actor_type = 'USER' AND actor_name IS NULL AND actor_avatar_color IS NULL)
+            OR
+            (actor_type = 'ASSISTANT' AND actor_name IS NOT NULL AND actor_avatar_color IS NOT NULL)
+          );
+
+        CREATE UNIQUE INDEX idx_messages_invocation
+          ON messages(invocation_id) WHERE invocation_id IS NOT NULL;
+        CREATE INDEX idx_assistant_invocations_requester_active
+          ON assistant_invocations(requester_id, conversation_id, updated_at DESC)
+          WHERE dismissed_at IS NULL AND status <> 'SUCCEEDED';
+        CREATE INDEX idx_assistant_invocations_worker
+          ON assistant_invocations(status, created_at)
+          WHERE status IN ('QUEUED', 'RUNNING');
+      `);
+    },
+  },
 ];
 
 export function orderedPendingMigrations(

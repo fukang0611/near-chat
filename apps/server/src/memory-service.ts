@@ -476,7 +476,7 @@ async function messageForMemoryCandidate(
             message.text_content,
             message.recalled_at,
             message.created_at,
-            sender.display_name AS sender_name,
+            COALESCE(message.actor_name, sender.display_name) AS sender_name,
             COALESCE(conversation.name, '私聊') AS conversation_title,
             COALESCE(
               array_agg(DISTINCT attachment.original_name)

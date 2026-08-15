@@ -1,4 +1,11 @@
-import type { AssistantContextSource, AssistantRetrievalGrants } from "@near-chat/contracts";
+import type {
+  AssistantContextSource,
+  AssistantInvocation,
+  AssistantRetrievalGrants,
+  MessageAssistantMention,
+} from "@near-chat/contracts";
+
+export type { AssistantInvocation };
 
 export interface User {
   id: string;
@@ -79,6 +86,10 @@ export interface Message {
   senderName: string;
   senderAvatarColor: string;
   senderAvatarUrl: string | null;
+  actorType?: "USER" | "ASSISTANT";
+  actorAssistantId?: string | null;
+  invocationId?: string | null;
+  assistantMentions?: MessageAssistantMention[];
   clientMessageId: string;
   type: MessageKind;
   textContent: string | null;
@@ -95,6 +106,8 @@ export interface Message {
   /** 仅存在于客户端待发送队列，服务端消息不会携带该字段。 */
   deliveryState?: "SENDING" | "FAILED";
   sendError?: string;
+  /** 仅存在于客户端待发送队列，服务端以结构化字段验证并创建调用。 */
+  pendingAssistantMention?: { assistantId: string; prompt: string };
 }
 
 export interface MessagePage {

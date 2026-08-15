@@ -1,5 +1,6 @@
 import type {
   AssistantRetrievalGrants,
+  AssistantInvocation,
   CreateMemoryInput,
   MemoryCandidate,
   MemoryCandidatePage,
@@ -55,6 +56,7 @@ export interface SendMessageInput {
   text?: string;
   attachmentIds?: string[];
   replyToMessageId?: string;
+  assistantMention?: { assistantId: string; prompt: string };
 }
 
 export interface ForwardMessageInput {
@@ -242,6 +244,19 @@ export const api = {
     request<{ message: Message }>(`/api/conversations/${conversationId}/messages`, {
       method: "POST",
       body: JSON.stringify(input),
+    }),
+  assistantInvocations: (conversationId: string) =>
+    request<{ invocations: AssistantInvocation[] }>(
+      `/api/conversations/${conversationId}/assistant-invocations`,
+    ),
+  dismissAssistantInvocation: (invocationId: string) =>
+    request<{ invocation: AssistantInvocation }>(
+      `/api/assistant-invocations/${invocationId}/dismiss`,
+      { method: "POST" },
+    ),
+  confirmAssistantInvocation: (invocationId: string) =>
+    request<{ message: Message }>(`/api/assistant-invocations/${invocationId}/confirm`, {
+      method: "POST",
     }),
   forwardMessages: (conversationId: string, items: ForwardMessageInput[]) =>
     request<{ messages: Message[] }>(`/api/conversations/${conversationId}/messages/forward`, {

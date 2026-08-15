@@ -85,7 +85,7 @@ export async function forwardMessages(
               source_message.type,
               source_message.text_content,
               source_message.created_at,
-              source_sender.display_name AS sender_name,
+              COALESCE(source_message.actor_name, source_sender.display_name) AS sender_name,
               CASE
                 WHEN source_conversation.type = 'GROUP'
                   THEN COALESCE(source_conversation.name, '未命名群聊')

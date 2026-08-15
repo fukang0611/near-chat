@@ -100,7 +100,7 @@ async function searchChatMessages(
                 '单聊'
               )
             END AS conversation_title,
-            sender.display_name AS sender_name,
+            COALESCE(message.actor_name, sender.display_name) AS sender_name,
             COALESCE(
               NULLIF(message.text_content, ''),
               (SELECT string_agg(attachment_name.original_name, '、')

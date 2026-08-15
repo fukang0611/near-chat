@@ -34,6 +34,7 @@ test("记忆领域迁移保持稳定的首个版本", () => {
       { version: 2, name: "create_memory_candidates_and_settings" },
       { version: 3, name: "add_semantic_memory_capture_pipeline" },
       { version: 4, name: "add_assistant_retrieval_tools" },
+      { version: 5, name: "add_chat_assistant_invocations" },
     ],
   );
 });

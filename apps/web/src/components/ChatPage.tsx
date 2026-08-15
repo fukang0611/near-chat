@@ -23,9 +23,11 @@ import {
 import { api } from "../api";
 import { useRealtimeConnection } from "../hooks/useRealtimeConnection";
 import type {
+  AiAssistant,
   AiAssistantReminderEvent,
   AiAssistantTaskEvent,
   AiCapabilities,
+  AssistantInvocation,
   Attachment,
   Conversation,
   Message,
@@ -34,6 +36,7 @@ import type {
   User,
 } from "../types";
 import { createClientMessageId } from "../utils/client-id";
+import { assistantMentionPrompt } from "../utils/assistant-mention";
 import { errorMessage } from "../utils/errors";
 import { appendMessageDraft, messageSummary, toMessageReply } from "../utils/message";
 import { messageKindFromContentType } from "../utils/message-kind";
@@ -51,6 +54,7 @@ import {
 import type { ThemeMode } from "../utils/theme";
 import { AdminPanel } from "./AdminPanel";
 import { AssistantWorkspace, type AssistantDirectorySnapshot } from "./AssistantWorkspace";
+import { AssistantInvocationTray } from "./AssistantInvocationTray";
 import { Avatar } from "./Avatar";
 import { ClipboardRelayDialog, type ClipboardRelayContentKind } from "./ClipboardRelayDialog";
 import {
@@ -170,6 +174,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [pendingAttachments, setPendingAttachments] = useState<Record<string, Attachment>>({});
   const [replyTargets, setReplyTargets] = useState<Record<string, Message>>({});
+  const [assistantMentions, setAssistantMentions] = useState<Record<string, AiAssistant>>({});
+  const [assistantInvocations, setAssistantInvocations] = useState<AssistantInvocation[]>([]);
   const [outbox, setOutbox] = useState<Record<string, Message[]>>({});
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(
@@ -213,6 +219,8 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       setSidebarMode((current) => (current === "assistants" ? "recent" : current));
       setAssistantDetailOpen(false);
       setAssistantTarget(null);
+      setAssistantMentions({});
+      setAssistantInvocations([]);
     }
     if (!capabilities.features.knowledgeManagement) setShowKnowledge(false);
     if (!capabilities.features.messageActions) setAiActionMessage(null);
@@ -254,6 +262,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
   const text = selectedId ? (drafts[selectedId] ?? "") : "";
   const pendingAttachment = selectedId ? (pendingAttachments[selectedId] ?? null) : null;
   const replyingTo = selectedId ? (replyTargets[selectedId] ?? null) : null;
+  const selectedAssistantMention = selectedId ? (assistantMentions[selectedId] ?? null) : null;
   const selectedOutbox = useMemo(
     () => (selectedId ? (outbox[selectedId] ?? []) : []),
     [outbox, selectedId],
@@ -523,6 +532,48 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       active = false;
     };
   }, [applyAiCapabilities, user.id]);
+
+  const refreshAssistantInvocations = useCallback(async (conversationId: string) => {
+    const result = await api.assistantInvocations(conversationId);
+    if (selectedIdRef.current === conversationId) setAssistantInvocations(result.invocations);
+    return result.invocations;
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId || !assistantsAvailable) {
+      setAssistantInvocations([]);
+      return;
+    }
+    let active = true;
+    void api
+      .assistantInvocations(selectedId)
+      .then((result) => {
+        if (active) setAssistantInvocations(result.invocations);
+      })
+      // 兼容尚未升级阶段 2B 的服务端；普通聊天不显示错误提示。
+      .catch(() => {
+        if (active) setAssistantInvocations([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [assistantsAvailable, selectedId]);
+
+  useEffect(() => {
+    if (
+      !selectedId ||
+      !assistantInvocations.some(
+        (invocation) => invocation.status === "QUEUED" || invocation.status === "RUNNING",
+      )
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void refreshAssistantInvocations(selectedId).catch(() => undefined),
+      900,
+    );
+    return () => window.clearTimeout(timer);
+  }, [assistantInvocations, refreshAssistantInvocations, selectedId]);
 
   useEffect(() => {
     let active = true;
@@ -1165,6 +1216,7 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         text: message.textContent ?? undefined,
         attachmentIds: message.attachments.map((attachment) => attachment.id),
         replyToMessageId: message.replyTo?.id,
+        assistantMention: message.pendingAssistantMention,
       });
       confirmedClientMessageIdsRef.current.add(message.clientMessageId);
       removeOutboxMessage(conversationId, message.clientMessageId);
@@ -1173,11 +1225,17 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
         setMessages((current) => upsertServerMessage(current, result.message));
       }
       refreshConversationsInBackground();
+      if (message.pendingAssistantMention) {
+        void refreshAssistantInvocations(conversationId).catch(() => undefined);
+      }
       return true;
     } catch (error) {
       // WebSocket 可能先于 HTTP 响应确认消息；此时不能把已送达消息误标为失败。
       if (confirmedClientMessageIdsRef.current.has(message.clientMessageId)) {
         removeOutboxMessage(conversationId, message.clientMessageId);
+        if (message.pendingAssistantMention) {
+          void refreshAssistantInvocations(conversationId).catch(() => undefined);
+        }
         return true;
       }
       const failure = errorMessage(error, "发送失败，请重试");
@@ -1200,12 +1258,20 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
    */
   const enqueueOutgoingMessage = (
     conversationId: string,
-    input: { text?: string; attachment?: Attachment | null; replyTarget?: Message | null },
+    input: {
+      text?: string;
+      attachment?: Attachment | null;
+      replyTarget?: Message | null;
+      assistantMention?: AiAssistant | null;
+    },
   ): Promise<boolean> => {
     const clientMessageId = createClientMessageId();
     const createdAt = new Date().toISOString();
     const normalizedText = input.text?.trim() ?? "";
     const attachment = input.attachment ?? null;
+    const mentionPrompt = input.assistantMention
+      ? assistantMentionPrompt(normalizedText, input.assistantMention.name)
+      : "";
     const type = messageKindFromContentType(attachment?.contentType ?? null);
     const optimisticMessage: Message = {
       id: `local-${clientMessageId}`,
@@ -1214,6 +1280,19 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       senderName: user.displayName,
       senderAvatarColor: user.avatarColor,
       senderAvatarUrl: user.avatarUrl,
+      actorType: "USER",
+      actorAssistantId: null,
+      invocationId: null,
+      assistantMentions: input.assistantMention
+        ? [
+            {
+              invocationId: `local-${clientMessageId}`,
+              assistantId: input.assistantMention.id,
+              assistantName: input.assistantMention.name,
+              assistantAvatarColor: input.assistantMention.avatarColor,
+            },
+          ]
+        : [],
       clientMessageId,
       type,
       textContent: normalizedText || null,
@@ -1224,6 +1303,9 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       attachments: attachment ? [attachment] : [],
       receipt: { recipientCount: 0, deliveredCount: 0, readCount: 0 },
       deliveryState: "SENDING",
+      pendingAssistantMention: input.assistantMention
+        ? { assistantId: input.assistantMention.id, prompt: mentionPrompt }
+        : undefined,
     };
 
     setOutbox((current) => ({
@@ -1240,11 +1322,16 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       notify("闪聊已经结束，只能查看历史消息", "info");
       return;
     }
+    if (selectedAssistantMention && !assistantMentionPrompt(text, selectedAssistantMention.name)) {
+      notify(`请在 @${selectedAssistantMention.name} 后写下需要处理的内容`, "info");
+      return;
+    }
     const conversationId = selectedId;
     void enqueueOutgoingMessage(conversationId, {
       text,
       attachment: pendingAttachment,
       replyTarget: replyingTo,
+      assistantMention: selectedAssistantMention,
     });
     setDrafts((current) => {
       const next = { ...current };
@@ -1261,6 +1348,52 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
       delete next[conversationId];
       return next;
     });
+    setAssistantMentions((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+  };
+
+  const removeAssistantInvocation = (invocationId: string) => {
+    setAssistantInvocations((current) =>
+      current.filter((invocation) => invocation.id !== invocationId),
+    );
+  };
+
+  const dismissAssistantPreview = async (invocation: AssistantInvocation) => {
+    try {
+      await api.dismissAssistantInvocation(invocation.id);
+      removeAssistantInvocation(invocation.id);
+    } catch (error) {
+      notify(errorMessage(error, "助理预览处理失败"), "error");
+    }
+  };
+
+  const useAssistantPreviewAsDraft = async (invocation: AssistantInvocation) => {
+    if (!invocation.resultText) return;
+    setDrafts((current) => ({ ...current, [invocation.conversationId]: invocation.resultText! }));
+    setAssistantMentions((current) => {
+      const next = { ...current };
+      delete next[invocation.conversationId];
+      return next;
+    });
+    await dismissAssistantPreview(invocation);
+  };
+
+  const confirmAssistantPreview = async (invocation: AssistantInvocation) => {
+    try {
+      const result = await api.confirmAssistantInvocation(invocation.id);
+      removeAssistantInvocation(invocation.id);
+      if (selectedIdRef.current === result.message.conversationId) {
+        scrollActionRef.current = { type: "bottom" };
+        setMessages((current) => upsertServerMessage(current, result.message));
+      }
+      refreshConversationsInBackground();
+      notify(`${invocation.assistantName} 的回复已发送`, "success");
+    } catch (error) {
+      notify(errorMessage(error, "助理回复发送失败"), "error");
+    }
   };
 
   const sendVoicePostcard = async (file: File, _durationSeconds: number): Promise<boolean> => {
@@ -1940,6 +2073,13 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
               />
             </div>
 
+            <AssistantInvocationTray
+              invocations={assistantInvocations}
+              onConfirm={confirmAssistantPreview}
+              onUseDraft={useAssistantPreviewAsDraft}
+              onDismiss={dismissAssistantPreview}
+            />
+
             {messageSelectionMode ? (
               <MessageSelectionToolbar
                 selectedCount={selectedMessages.length}
@@ -1961,11 +2101,22 @@ export function ChatPage({ user, theme, onThemeChange, onUserUpdated, onLogout }
                 disabled={selectedFlashExpired}
                 disabledReason="房间已转为只读，历史消息和附件仍可查看。"
                 replyingTo={replyingTo}
+                assistants={assistantsAvailable ? assistantDirectory.assistants : []}
+                assistantMention={selectedAssistantMention}
                 onTextChange={updateDraft}
                 onChooseFile={(file) => void chooseFile(file)}
                 onRemoveAttachment={() => void removePendingAttachment()}
                 onSendVoice={sendVoicePostcard}
                 onSend={send}
+                onAssistantMentionChange={(assistant) => {
+                  if (!selectedId) return;
+                  setAssistantMentions((current) => {
+                    const next = { ...current };
+                    if (assistant) next[selectedId] = assistant;
+                    else delete next[selectedId];
+                    return next;
+                  });
+                }}
                 onCancelReply={() => {
                   if (!selectedId) return;
                   setReplyTargets((current) => {

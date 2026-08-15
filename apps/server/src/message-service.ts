@@ -1,3 +1,4 @@
+import type { MessageAssistantMention } from "@near-chat/contracts";
 import type { PoolClient } from "pg";
 import { publicAvatarUrl } from "./avatar-service.js";
 import { config } from "./config.js";
@@ -46,6 +47,10 @@ export interface MessageDto {
   senderName: string;
   senderAvatarColor: string;
   senderAvatarUrl: string | null;
+  actorType: "USER" | "ASSISTANT";
+  actorAssistantId: string | null;
+  invocationId: string | null;
+  assistantMentions: MessageAssistantMention[];
   clientMessageId: string;
   type: MessageKind;
   textContent: string | null;
@@ -78,6 +83,10 @@ interface MessageRow {
   sender_avatar_color: string;
   sender_avatar_object_key: string | null;
   sender_avatar_version: number;
+  actor_type: "USER" | "ASSISTANT";
+  actor_assistant_id: string | null;
+  invocation_id: string | null;
+  assistant_mentions: MessageAssistantMention[];
   client_message_id: string;
   type: MessageKind;
   text_content: string | null;
@@ -115,10 +124,28 @@ const messageSelect = `
   SELECT m.id,
          m.conversation_id,
          m.sender_id,
-         u.display_name AS sender_name,
-         u.avatar_color AS sender_avatar_color,
-         u.avatar_object_key AS sender_avatar_object_key,
-         u.avatar_version AS sender_avatar_version,
+         COALESCE(m.actor_name, u.display_name) AS sender_name,
+         COALESCE(m.actor_avatar_color, u.avatar_color) AS sender_avatar_color,
+         CASE WHEN m.actor_type = 'ASSISTANT' THEN NULL ELSE u.avatar_object_key END
+           AS sender_avatar_object_key,
+         CASE WHEN m.actor_type = 'ASSISTANT' THEN 0 ELSE u.avatar_version END
+           AS sender_avatar_version,
+         m.actor_type,
+         m.actor_assistant_id,
+         m.invocation_id,
+         COALESCE(
+           (SELECT json_agg(
+              json_build_object(
+                'invocationId', invocation.id,
+                'assistantId', invocation.assistant_id,
+                'assistantName', invocation.assistant_name,
+                'assistantAvatarColor', invocation.assistant_avatar_color
+              ) ORDER BY invocation.created_at, invocation.id
+            )
+              FROM assistant_invocations invocation
+             WHERE invocation.source_message_id = m.id),
+           '[]'::json
+         ) AS assistant_mentions,
          m.client_message_id,
          m.type,
          CASE WHEN m.recalled_at IS NULL THEN m.text_content ELSE NULL END AS text_content,
@@ -130,7 +157,7 @@ const messageSelect = `
            ELSE json_build_object(
              'id', reply.id,
              'senderId', reply.sender_id,
-             'senderName', reply_sender.display_name,
+             'senderName', COALESCE(reply.actor_name, reply_sender.display_name),
              'type', reply.type,
              'textContent', CASE WHEN reply.recalled_at IS NULL THEN reply.text_content ELSE NULL END,
              'attachmentName', CASE WHEN reply.recalled_at IS NULL THEN (
@@ -234,6 +261,10 @@ function toDto(row: MessageRow): MessageDto {
       row.sender_avatar_object_key,
       row.sender_avatar_version,
     ),
+    actorType: row.actor_type,
+    actorAssistantId: row.actor_assistant_id,
+    invocationId: row.invocation_id,
+    assistantMentions: row.assistant_mentions,
     clientMessageId: row.client_message_id,
     type: row.type,
     textContent: row.text_content,

@@ -8,6 +8,7 @@ import { RealtimeHub } from "./realtime.js";
 import { createAdminAiRouter } from "./routes/admin-ai-routes.js";
 import { createAdminRouter } from "./routes/admin-routes.js";
 import { createAssistantRouter } from "./routes/assistant-routes.js";
+import { createAssistantInvocationRouter } from "./routes/assistant-invocation-routes.js";
 import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
@@ -51,6 +52,7 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createAuthRouter(realtime));
   app.use("/api", createAvatarRouter(realtime));
   app.use("/api", createChatRouter(realtime));
+  app.use("/api", createAssistantInvocationRouter(realtime));
   app.use("/api", createTeamRadarRouter(realtime));
   app.use("/api", createMessageAssetsRouter());
   app.use("/api", createMessageAiRouter());

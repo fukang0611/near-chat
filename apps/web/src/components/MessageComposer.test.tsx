@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message } from "../types";
+import type { AiAssistant, Message } from "../types";
 import { MessageComposer } from "./MessageComposer";
 
 const defaultViewport = { width: window.innerWidth, height: window.innerHeight };
@@ -22,6 +22,23 @@ const replyTarget: Message = {
   replyTo: null,
   attachments: [],
   receipt: { recipientCount: 1, deliveredCount: 1, readCount: 0 },
+};
+
+const assistant: AiAssistant = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "分析搭档",
+  description: "归纳当前会话中的公开信息",
+  category: "ANALYSIS",
+  instructions: "先归纳事实。",
+  avatarColor: "#2F9D83",
+  modelId: null,
+  model: null,
+  knowledgeBaseIds: [],
+  toolGrants: { crossConversationSearch: false, privateMemoryRead: false },
+  messageCount: 0,
+  lastMessageAt: null,
+  createdAt: "2026-08-15T08:00:00.000Z",
+  updatedAt: "2026-08-15T08:00:00.000Z",
 };
 
 function renderComposer(overrides: Partial<React.ComponentProps<typeof MessageComposer>> = {}) {
@@ -92,6 +109,61 @@ describe("MessageComposer", () => {
     await user.click(screen.getByRole("button", { name: "录制语音明信片" }));
     expect(screen.getByRole("dialog", { name: "语音明信片" })).toBeTruthy();
     expect(screen.getByText(/录一段不超过 60 秒/)).toBeTruthy();
+  });
+
+  it("通过结构化菜单选择个人助理并写入可见标签", async () => {
+    const onTextChange = vi.fn();
+    const onAssistantMentionChange = vi.fn();
+    const { user } = renderComposer({
+      text: "请帮我",
+      replyingTo: null,
+      assistants: [assistant],
+      onTextChange,
+      onAssistantMentionChange,
+    });
+    const textarea = screen.getByPlaceholderText("发消息给 林小满") as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(4, 4);
+
+    await user.click(screen.getByRole("button", { name: "提及智能助理" }));
+    expect(screen.getByRole("listbox", { name: "选择智能助理" })).toBeTruthy();
+    await user.click(screen.getByRole("option", { name: /分析搭档/ }));
+
+    expect(onTextChange).toHaveBeenCalledWith("请帮我 @分析搭档 ");
+    expect(onAssistantMentionChange).toHaveBeenCalledWith(assistant);
+  });
+
+  it("重复点击助理入口只关闭菜单且不会插入第二个 @", async () => {
+    const onTextChange = vi.fn();
+    const { user } = renderComposer({
+      text: "请帮我",
+      replyingTo: null,
+      assistants: [assistant],
+      onTextChange,
+    });
+
+    const trigger = screen.getByRole("button", { name: "提及智能助理" });
+    await user.click(trigger);
+    expect(screen.getByRole("listbox", { name: "选择智能助理" })).toBeTruthy();
+    await user.click(trigger);
+
+    expect(screen.queryByRole("listbox", { name: "选择智能助理" })).toBeNull();
+    expect(onTextChange).toHaveBeenCalledTimes(1);
+    expect(onTextChange).toHaveBeenCalledWith("@请帮我");
+  });
+
+  it("只有助理标签而没有具体请求时保持发送按钮禁用", () => {
+    renderComposer({
+      text: "@分析搭档 ",
+      replyingTo: null,
+      assistants: [assistant],
+      assistantMention: assistant,
+    });
+
+    expect((screen.getByRole("button", { name: "发送消息" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByText("先生成仅你可见的预览")).toBeTruthy();
   });
 
   it("闪聊到期后保留内容但锁定全部发送入口", async () => {

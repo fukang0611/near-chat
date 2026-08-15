@@ -137,6 +137,45 @@ export interface AssistantContextSource {
   createdAt: string;
 }
 
+export const ASSISTANT_INVOCATION_STATUSES = [
+  "QUEUED",
+  "RUNNING",
+  "WAITING_CONFIRMATION",
+  "SUCCEEDED",
+  "FAILED",
+] as const;
+export type AssistantInvocationStatus = (typeof ASSISTANT_INVOCATION_STATUSES)[number];
+
+export type AssistantInvocationMode = "PRIVATE_PREVIEW" | "CONVERSATION_REPLY";
+
+/** 普通聊天消息中由客户端结构化提交、服务端验证并持久化的助理提及。 */
+export interface MessageAssistantMention {
+  invocationId: string;
+  assistantId: string;
+  assistantName: string;
+  assistantAvatarColor: string;
+}
+
+/**
+ * 聊天内助理调用的私有视图。该对象只会返回给发起用户，不会随会话消息广播给其他成员。
+ */
+export interface AssistantInvocation {
+  id: string;
+  conversationId: string;
+  sourceMessageId: string;
+  assistantId: string;
+  assistantName: string;
+  assistantAvatarColor: string;
+  mode: AssistantInvocationMode;
+  status: AssistantInvocationStatus;
+  prompt: string;
+  resultText: string | null;
+  errorMessage: string | null;
+  resultMessageId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AgentRuntimeRequest {
   modelId: string | null;
   instructions: string;

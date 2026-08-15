@@ -452,6 +452,101 @@ describe("ChatPage message scrolling", () => {
     expect(screen.queryByRole("dialog", { name: "智能助理" })).toBeNull();
   });
 
+  it("从聊天输入器结构化提及助理并提交私有预览请求", async () => {
+    const user = userEvent.setup();
+    const smartAssistant = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "分析搭档",
+      description: "只根据当前会话归纳信息",
+      category: "ANALYSIS",
+      instructions: "私人说明不会进入公开回复。",
+      avatarColor: "#2F9D83",
+      modelId: null,
+      model: null,
+      knowledgeBaseIds: [],
+      toolGrants: { crossConversationSearch: true, privateMemoryRead: true },
+      messageCount: 0,
+      lastMessageAt: null,
+      createdAt: "2026-08-15T08:00:00.000Z",
+      updatedAt: "2026-08-15T08:00:00.000Z",
+    } satisfies AiAssistant;
+    vi.mocked(api.aiCapabilities).mockResolvedValueOnce({
+      capabilities: {
+        enabled: true,
+        status: "READY",
+        reason: "AI 已就绪",
+        features: {
+          knowledgeManagement: true,
+          knowledgeIndexing: true,
+          knowledgeSearch: true,
+          knowledgeAnswer: true,
+          personalAssistants: true,
+          messageActions: true,
+        },
+        provider: {
+          chatModel: "gpt-test",
+          embeddingModel: "embedding-test",
+          embeddingDimensions: 1024,
+        },
+      },
+    });
+    vi.spyOn(api, "aiAssistants").mockResolvedValue({ assistants: [smartAssistant] });
+    vi.spyOn(api, "aiModels").mockResolvedValue({
+      models: [],
+      selectedModelId: null,
+      defaultModelId: null,
+    });
+    vi.spyOn(api, "knowledgeBases").mockResolvedValue({ knowledgeBases: [] });
+    vi.spyOn(api, "aiAssistantThreads").mockResolvedValue({ threads: [] });
+    vi.spyOn(api, "aiAssistantFiles").mockResolvedValue({ files: [] });
+    vi.spyOn(api, "assistantInvocations").mockResolvedValue({ invocations: [] });
+    const sendMessage = vi
+      .spyOn(api, "sendMessage")
+      .mockImplementation(async (conversationId, input) => ({
+        message: {
+          ...message(conversationId, input.text ?? ""),
+          id: "message-assistant-mention",
+          clientMessageId: input.clientMessageId,
+          assistantMentions: [
+            {
+              invocationId: "33333333-3333-4333-8333-333333333333",
+              assistantId: smartAssistant.id,
+              assistantName: smartAssistant.name,
+              assistantAvatarColor: smartAssistant.avatarColor,
+            },
+          ],
+        },
+      }));
+
+    render(
+      <ChatPage
+        user={currentUser}
+        theme="light"
+        onThemeChange={vi.fn()}
+        onUserUpdated={vi.fn()}
+        onLogout={vi.fn()}
+      />,
+    );
+    await screen.findByText("conversation-one 的最新消息");
+    await user.click(await screen.findByRole("button", { name: "提及智能助理" }));
+    await user.click(screen.getByRole("option", { name: /分析搭档/ }));
+    await user.type(screen.getByPlaceholderText("发消息给 第一会话"), "总结发布安排");
+    await user.click(screen.getByRole("button", { name: "发送消息" }));
+
+    await waitFor(() =>
+      expect(sendMessage).toHaveBeenCalledWith(
+        "conversation-one",
+        expect.objectContaining({
+          text: "@分析搭档 总结发布安排",
+          assistantMention: {
+            assistantId: smartAssistant.id,
+            prompt: "总结发布安排",
+          },
+        }),
+      ),
+    );
+  });
+
   it("接收 Electron 剪贴板事件并在确认目标后复用标准发送链路", async () => {
     const user = userEvent.setup();
     let relayListener: ((payload: DesktopClipboardRelayPayload) => void) | null = null;

@@ -1,4 +1,5 @@
 import {
+  AtSign,
   FileText,
   Laugh,
   LoaderCircle,
@@ -6,6 +7,7 @@ import {
   Paperclip,
   Reply,
   Send,
+  Sparkles,
   TimerOff,
   X,
 } from "lucide-react";
@@ -16,10 +18,12 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import type { Attachment, Message } from "../types";
+import type { AiAssistant, Attachment, Message } from "../types";
+import { assistantMentionPrompt, removeAssistantMention } from "../utils/assistant-mention";
 import { formatBytes } from "../utils/format";
 import { MAX_MESSAGE_TEXT_LENGTH, messageSummary } from "../utils/message";
 import { EmojiPicker } from "./EmojiPicker";
@@ -44,12 +48,15 @@ interface MessageComposerProps {
   disabled?: boolean;
   disabledReason?: string;
   replyingTo: Message | null;
+  assistants?: AiAssistant[];
+  assistantMention?: AiAssistant | null;
   onTextChange: (value: string) => void;
   onChooseFile: (file: File | undefined) => void;
   onRemoveAttachment: () => void;
   onSendVoice: (file: File, durationSeconds: number) => Promise<boolean>;
   onSend: () => void;
   onCancelReply: () => void;
+  onAssistantMentionChange?: (assistant: AiAssistant | null) => void;
 }
 
 /**
@@ -66,12 +73,15 @@ export function MessageComposer({
   disabled = false,
   disabledReason = "当前会话暂时无法发送消息",
   replyingTo,
+  assistants = [],
+  assistantMention = null,
   onTextChange,
   onChooseFile,
   onRemoveAttachment,
   onSendVoice,
   onSend,
   onCancelReply,
+  onAssistantMentionChange,
 }: MessageComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -79,6 +89,13 @@ export function MessageComposer({
   const emojiAnchorRef = useRef<HTMLDivElement>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
+  const [mentionMenu, setMentionMenu] = useState<{
+    start: number;
+    end: number;
+    query: string;
+    value: string;
+  } | null>(null);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
   const selectionRef = useRef({ start: text.length, end: text.length });
 
   const closeEmojiPicker = useCallback(() => setShowEmojiPicker(false), []);
@@ -160,14 +177,79 @@ export function MessageComposer({
     return () => window.removeEventListener("pointerdown", closeOutside);
   }, [closeEmojiPicker, showEmojiPicker]);
 
+  useEffect(() => {
+    if (!mentionMenu) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setMentionMenu(null);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setMentionMenu(null);
+    };
+    window.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mentionMenu]);
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (disabled) return;
     onSend();
   };
 
+  const matchingAssistants = useMemo(() => {
+    const query = mentionMenu?.query.trim().toLocaleLowerCase() ?? "";
+    return assistants
+      .filter(
+        (assistant) =>
+          !query ||
+          assistant.name.toLocaleLowerCase().includes(query) ||
+          assistant.description.toLocaleLowerCase().includes(query),
+      )
+      .slice(0, 8);
+  }, [assistants, mentionMenu?.query]);
+
+  const selectAssistantMention = (assistant: AiAssistant) => {
+    if (!mentionMenu) return;
+    const nextText = `${mentionMenu.value.slice(0, mentionMenu.start)}@${assistant.name} ${mentionMenu.value.slice(
+      mentionMenu.end,
+    )}`;
+    const nextPosition = mentionMenu.start + assistant.name.length + 2;
+    onTextChange(nextText);
+    onAssistantMentionChange?.(assistant);
+    setMentionMenu(null);
+    selectionRef.current = { start: nextPosition, end: nextPosition };
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextPosition, nextPosition);
+    });
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (disabled) return;
+    if (mentionMenu && matchingAssistants.length > 0) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        setMentionActiveIndex(
+          (current) =>
+            (current + direction + matchingAssistants.length) % matchingAssistants.length,
+        );
+        return;
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        selectAssistantMention(matchingAssistants[mentionActiveIndex] ?? matchingAssistants[0]!);
+        return;
+      }
+    }
+    if (mentionMenu && event.key === "Escape") {
+      event.preventDefault();
+      setMentionMenu(null);
+      return;
+    }
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       onSend();
@@ -181,7 +263,12 @@ export function MessageComposer({
     onChooseFile(file);
   };
 
-  const canSend = !disabled && !sending && !upload && Boolean(text.trim() || pendingAttachment);
+  const canSend =
+    !disabled &&
+    !sending &&
+    !upload &&
+    Boolean(text.trim() || pendingAttachment) &&
+    (!assistantMention || Boolean(assistantMentionPrompt(text, assistantMention.name)));
 
   const rememberSelection = () => {
     const textarea = textareaRef.current;
@@ -215,6 +302,55 @@ export function MessageComposer({
       if (!textarea) return;
       textarea.focus();
       textarea.setSelectionRange(nextPosition, nextPosition);
+    });
+  };
+
+  const updateText = (value: string, caret: number) => {
+    onTextChange(value);
+    if (assistantMention && !value.includes(`@${assistantMention.name}`)) {
+      onAssistantMentionChange?.(null);
+    }
+    if (assistants.length === 0 || assistantMention) {
+      setMentionMenu(null);
+      return;
+    }
+    const beforeCaret = value.slice(0, caret);
+    const match = /(?:^|\s)@([^@\n\s]*)$/.exec(beforeCaret);
+    if (!match) {
+      setMentionMenu(null);
+      return;
+    }
+    const atOffset = match[0].lastIndexOf("@");
+    setMentionMenu({
+      start: beforeCaret.length - match[0].length + atOffset,
+      end: caret,
+      query: match[1] ?? "",
+      value,
+    });
+    setMentionActiveIndex(0);
+  };
+
+  const openAssistantMenu = () => {
+    if (disabled || assistantMention || assistants.length === 0) return;
+    // 工具栏按钮同时承担开关职责，面板已经打开时只关闭，不重复写入新的 @ 字符。
+    if (mentionMenu) {
+      setMentionMenu(null);
+      textareaRef.current?.focus();
+      return;
+    }
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? text.length;
+    const end = textarea?.selectionEnd ?? start;
+    const needsSpace = start > 0 && !/\s/.test(text[start - 1] ?? "");
+    const prefix = needsSpace ? " @" : "@";
+    const nextText = `${text.slice(0, start)}${prefix}${text.slice(end)}`;
+    const atIndex = start + (needsSpace ? 1 : 0);
+    onTextChange(nextText);
+    setMentionMenu({ start: atIndex, end: atIndex + 1, query: "", value: nextText });
+    setMentionActiveIndex(0);
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(atIndex + 1, atIndex + 1);
     });
   };
 
@@ -273,6 +409,26 @@ export function MessageComposer({
             </div>
           )}
 
+          {assistantMention && (
+            <div className="composer-assistant-mention">
+              <span style={{ background: assistantMention.avatarColor }}>
+                <AtSign size={13} />
+              </span>
+              <strong>{assistantMention.name}</strong>
+              <small>先生成仅你可见的预览</small>
+              <button
+                type="button"
+                onClick={() => {
+                  onTextChange(removeAssistantMention(text, assistantMention.name));
+                  onAssistantMentionChange?.(null);
+                }}
+                aria-label={`移除助理 ${assistantMention.name}`}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
+
           {disabled && (
             <div className="composer-lock-note" role="status">
               <TimerOff size={16} />
@@ -286,7 +442,7 @@ export function MessageComposer({
           <textarea
             ref={textareaRef}
             value={text}
-            onChange={(event) => onTextChange(event.target.value)}
+            onChange={(event) => updateText(event.target.value, event.target.selectionStart)}
             onSelect={rememberSelection}
             onClick={rememberSelection}
             onKeyUp={rememberSelection}
@@ -297,6 +453,39 @@ export function MessageComposer({
             maxLength={MAX_MESSAGE_TEXT_LENGTH}
             disabled={disabled}
           />
+
+          {mentionMenu && (
+            <div className="assistant-mention-menu" role="listbox" aria-label="选择智能助理">
+              <header>
+                <Sparkles size={13} />
+                选择个人助理
+                <span>结果先私下预览</span>
+              </header>
+              {matchingAssistants.length > 0 ? (
+                matchingAssistants.map((assistant, index) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={index === mentionActiveIndex}
+                    className={index === mentionActiveIndex ? "is-active" : ""}
+                    key={assistant.id}
+                    onPointerEnter={() => setMentionActiveIndex(index)}
+                    onClick={() => selectAssistantMention(assistant)}
+                  >
+                    <i style={{ background: assistant.avatarColor }}>
+                      <Sparkles size={13} />
+                    </i>
+                    <span>
+                      <strong>{assistant.name}</strong>
+                      <small>{assistant.description || "个人智能助理"}</small>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p>没有匹配的助理</p>
+              )}
+            </div>
+          )}
 
           <div className="composer-actions">
             <div>
@@ -318,6 +507,17 @@ export function MessageComposer({
               >
                 <Paperclip size={19} />
               </button>
+              {assistants.length > 0 && (
+                <button
+                  type="button"
+                  onClick={openAssistantMenu}
+                  disabled={disabled || Boolean(assistantMention)}
+                  aria-label="提及智能助理"
+                  title={assistantMention ? "一次消息只能提及一个助理" : "@ 智能助理"}
+                >
+                  <AtSign size={18} />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShowVoiceRecorder(true)}

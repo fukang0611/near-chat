@@ -16,7 +16,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
+import { type CSSProperties, Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import type { Attachment, Conversation, Message } from "../types";
 import { isFlashRoomExpired } from "../utils/flash-room";
 import { formatClock, formatMessageDay, isSameCalendarDay } from "../utils/format";
@@ -83,6 +83,7 @@ function receiptText(message: Message): { label: string; read: boolean; delivere
 interface MessageBubbleProps {
   message: Message;
   mine: boolean;
+  authoredByCurrentUser: boolean;
   highlighted: boolean;
   now: number;
   confirmRecall: boolean;
@@ -113,6 +114,7 @@ interface MessageBubbleProps {
 function MessageBubble({
   message,
   mine,
+  authoredByCurrentUser,
   highlighted,
   now,
   confirmRecall,
@@ -153,9 +155,10 @@ function MessageBubble({
   const failed = message.deliveryState === "FAILED";
   const sending = message.deliveryState === "SENDING";
   const selectable = !recalled && !message.deliveryState;
-  const receipt = mine && !message.deliveryState && !recalled ? receiptText(message) : null;
+  const receipt =
+    authoredByCurrentUser && !message.deliveryState && !recalled ? receiptText(message) : null;
   const canRecall =
-    mine &&
+    authoredByCurrentUser &&
     !message.deliveryState &&
     !recalled &&
     new Date(message.recallableUntil).getTime() >= now;
@@ -199,7 +202,7 @@ function MessageBubble({
   return (
     <div
       id={`message-${message.id}`}
-      className={`message-row ${mine ? "is-mine" : "is-peer"} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""} ${failed ? "is-failed" : ""} ${selectionMode ? "is-selection-mode" : ""} ${selectable ? "is-selectable" : ""} ${selected ? "is-selected" : ""}`}
+      className={`message-row ${mine ? "is-mine" : "is-peer"} ${message.actorType === "ASSISTANT" ? "is-assistant-actor" : ""} ${hasAttachment ? "has-attachment" : ""} ${hasText ? "has-text" : ""} ${highlighted ? "message-highlight" : ""} ${failed ? "is-failed" : ""} ${selectionMode ? "is-selection-mode" : ""} ${selectable ? "is-selectable" : ""} ${selected ? "is-selected" : ""}`}
       onClickCapture={(event) => {
         if (!selectionMode || !selectable) return;
         if ((event.target as HTMLElement).closest(".message-select-toggle")) return;
@@ -219,17 +222,44 @@ function MessageBubble({
           {selected && <Check size={14} />}
         </button>
       )}
-      {!mine && (
-        <Avatar
-          name={message.senderName}
-          color={message.senderAvatarColor}
-          src={message.senderAvatarUrl}
-          size="small"
-        />
-      )}
+      {!mine &&
+        (message.actorType === "ASSISTANT" ? (
+          <span
+            className="assistant-message-avatar"
+            style={{ "--message-assistant-color": message.senderAvatarColor } as CSSProperties}
+            aria-hidden="true"
+          >
+            <Sparkles size={16} />
+          </span>
+        ) : (
+          <Avatar
+            name={message.senderName}
+            color={message.senderAvatarColor}
+            src={message.senderAvatarUrl}
+            size="small"
+          />
+        ))}
       <div className="message-stack">
-        {!mine && <span className="sender-name">{message.senderName}</span>}
+        {!mine && (
+          <span className="sender-name">
+            {message.senderName}
+            {message.actorType === "ASSISTANT" && (
+              <i className="assistant-actor-badge">
+                <Sparkles size={10} /> AI 助理
+              </i>
+            )}
+          </span>
+        )}
         <div className="message-content">
+          {(message.assistantMentions?.length ?? 0) > 0 && !recalled && (
+            <div className="message-assistant-mention-line">
+              <Sparkles size={12} />
+              {message.assistantMentions!.map((mention) => (
+                <span key={mention.invocationId}>@{mention.assistantName}</span>
+              ))}
+              <small>助理协作</small>
+            </div>
+          )}
           {message.forwardedFrom && !recalled && (
             <div className="message-forwarded-origin">
               <Forward size={12} />
@@ -254,7 +284,7 @@ function MessageBubble({
           {recalled ? (
             <div className="message-recalled">
               <RotateCcw size={14} />
-              {mine ? "你撤回了一条消息" : `${message.senderName} 撤回了一条消息`}
+              {authoredByCurrentUser ? "你撤回了一条消息" : `${message.senderName} 撤回了一条消息`}
             </div>
           ) : (
             <>
@@ -581,7 +611,8 @@ export function MessageTimeline({
             )}
             <MessageBubble
               message={message}
-              mine={message.senderId === currentUserId}
+              mine={message.senderId === currentUserId && message.actorType !== "ASSISTANT"}
+              authoredByCurrentUser={message.senderId === currentUserId}
               highlighted={highlightedMessageId === message.id}
               now={now}
               confirmRecall={recallCandidateId === message.id}

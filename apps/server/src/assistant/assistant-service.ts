@@ -306,6 +306,19 @@ export function buildAssistantInstructions(
   ].join("\n");
 }
 
+/**
+ * 聊天公开回复不继承用户写入的私人角色说明和知识库绑定，只保留类别能力。
+ * 这样即使私人说明中包含敏感背景，也不会被群聊 Mention 间接带出。
+ */
+export function buildPublicAssistantInstructions(category: AiAssistantCategory): string {
+  return [
+    CATEGORY_GUIDANCE[category],
+    "你正在生成一条可公开分享给当前会话成员的回复。",
+    "只使用本轮明确提供的当前会话公开资料和通用知识，不引用个人助理的私人设置、记忆或其他会话。",
+    "表达简洁、自然；资料不足时明确说明。",
+  ].join("\n");
+}
+
 export function buildAssistantPrompt(
   question: string,
   sources: KnowledgeSource[],

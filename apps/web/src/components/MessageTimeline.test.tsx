@@ -133,6 +133,23 @@ describe("MessageTimeline", () => {
     expect(screen.queryByText("一条普通消息")).toBeNull();
   });
 
+  it("正式助理回复使用独立图形身份但仍允许发起人撤回", () => {
+    const assistantReply = message({
+      actorType: "ASSISTANT",
+      actorAssistantId: "11111111-1111-4111-8111-111111111111",
+      invocationId: "33333333-3333-4333-8333-333333333333",
+      senderName: "分析搭档",
+      senderAvatarColor: "#2F9D83",
+      textContent: "根据当前会话，周五 16:30 发布。",
+    });
+    const { container } = renderTimeline([assistantReply]);
+
+    expect(screen.getByText("AI 助理")).toBeTruthy();
+    expect(container.querySelector(".assistant-message-avatar")).toBeTruthy();
+    expect(container.querySelector(".message-row")?.classList.contains("is-peer")).toBe(true);
+    expect(screen.getByRole("button", { name: "撤回" })).toBeTruthy();
+  });
+
   it("消息可从纯图标操作栏收藏并展示选中状态", async () => {
     const favorite = message({ id: "45a5a477-83fd-4ad0-bccd-2c4244502c53" });
     const rendered = renderTimeline([favorite]);

@@ -32,6 +32,7 @@ import {
 import { MESSAGE_REACTION_EMOJIS } from "../reaction-service.js";
 import { RealtimeHub } from "../realtime.js";
 import { activeUserStatus } from "../status-service.js";
+import { createAssistantInvocation } from "../assistant/assistant-invocation-service.js";
 
 interface MemberRow {
   user_id: string;
@@ -77,8 +78,25 @@ const sendMessageSchema = z
     text: z.string().trim().max(5_000).optional(),
     attachmentIds: z.array(z.string().uuid()).max(5).default([]),
     replyToMessageId: z.string().uuid().optional(),
+    assistantMention: z
+      .object({
+        assistantId: z.string().uuid(),
+        prompt: z.string().trim().min(1, "请告诉助理需要处理什么").max(4_000),
+      })
+      .optional(),
   })
-  .refine((value) => Boolean(value.text) || value.attachmentIds.length > 0, "消息内容不能为空");
+  .superRefine((value, context) => {
+    if (!value.text && value.attachmentIds.length === 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "消息内容不能为空" });
+    }
+    if (value.assistantMention && !value.text) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["assistantMention"],
+        message: "助理提及必须包含可见的文字消息",
+      });
+    }
+  });
 
 const createGroupSchema = z
   .object({
@@ -322,7 +340,7 @@ export function createChatRouter(realtime: RealtimeHub) {
                   m.created_at,
                   m.sender_id,
                   m.recalled_at,
-                  sender.display_name AS sender_name
+                  COALESCE(m.actor_name, sender.display_name) AS sender_name
              FROM messages m
              JOIN users sender ON sender.id = m.sender_id
             WHERE m.conversation_id = c.id
@@ -902,6 +920,15 @@ export function createChatRouter(realtime: RealtimeHub) {
            ON CONFLICT DO NOTHING`,
           [effectiveMessageId, conversationId, user.id],
         );
+        if (input.assistantMention) {
+          await createAssistantInvocation(client, {
+            requesterId: user.id,
+            assistantId: input.assistantMention.assistantId,
+            conversationId,
+            sourceMessageId: effectiveMessageId,
+            prompt: input.assistantMention.prompt,
+          });
+        }
         return { message: await findMessage(effectiveMessageId, client), created: true };
       });
 
