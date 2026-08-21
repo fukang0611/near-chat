@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import { query, transaction } from "../database.js";
 import { ApiError } from "../http.js";
+import { lockOwnerSyncStream } from "../sync-projection.js";
+import { projectBusinessEntityForSync } from "../sync-service.js";
 
 const ASSISTANT_THREAD_LIMIT = 30;
 
@@ -12,6 +14,7 @@ export interface AssistantThreadRow {
   title: string;
   archived: boolean;
   is_default: boolean;
+  revision: number;
   message_count: string;
   last_message_at: Date | null;
   created_at: Date;
@@ -20,11 +23,11 @@ export interface AssistantThreadRow {
 
 const THREAD_COLUMNS = `
   thread.id, thread.assistant_id, thread.owner_id, thread.title,
-  thread.archived, thread.is_default,
+  thread.archived, thread.is_default, thread.revision,
   (SELECT COUNT(*)::text FROM ai_assistant_messages message
-    WHERE message.thread_id = thread.id) AS message_count,
+    WHERE message.thread_id = thread.id AND message.deleted_at IS NULL) AS message_count,
   (SELECT MAX(message.created_at) FROM ai_assistant_messages message
-    WHERE message.thread_id = thread.id) AS last_message_at,
+    WHERE message.thread_id = thread.id AND message.deleted_at IS NULL) AS last_message_at,
   thread.created_at, thread.updated_at`;
 
 function publicThread(row: AssistantThreadRow) {
@@ -34,6 +37,7 @@ function publicThread(row: AssistantThreadRow) {
     title: row.title,
     archived: row.archived,
     isDefault: row.is_default,
+    revision: row.revision,
     messageCount: Number(row.message_count),
     lastMessageAt: row.last_message_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -54,6 +58,7 @@ export async function selectAiAssistantThread(
      JOIN ai_assistants assistant ON assistant.id = thread.assistant_id
     WHERE thread.id = $1 AND thread.assistant_id = $2
       AND thread.owner_id = $3 AND assistant.owner_id = $3
+      AND thread.deleted_at IS NULL AND assistant.deleted_at IS NULL
     ${lock ? "FOR UPDATE OF thread" : ""}`;
   const result = client
     ? await client.query<AssistantThreadRow>(statement, [threadId, assistantId, userId])
@@ -98,10 +103,11 @@ export async function defaultAiAssistantThreadId(
        FROM ai_assistant_threads thread
        JOIN ai_assistants assistant ON assistant.id = thread.assistant_id
       WHERE thread.assistant_id = $1 AND thread.owner_id = $2 AND assistant.owner_id = $2
+        AND thread.deleted_at IS NULL AND assistant.deleted_at IS NULL
       ORDER BY thread.archived, thread.is_default DESC,
                COALESCE(
                  (SELECT MAX(message.created_at) FROM ai_assistant_messages message
-                   WHERE message.thread_id = thread.id),
+                   WHERE message.thread_id = thread.id AND message.deleted_at IS NULL),
                  thread.updated_at
                ) DESC,
                thread.created_at
@@ -122,11 +128,12 @@ export async function listAiAssistantThreads(
        FROM ai_assistant_threads thread
        JOIN ai_assistants assistant ON assistant.id = thread.assistant_id
       WHERE thread.assistant_id = $1 AND thread.owner_id = $2 AND assistant.owner_id = $2
+        AND thread.deleted_at IS NULL AND assistant.deleted_at IS NULL
         AND ($3::boolean OR thread.archived = FALSE)
       ORDER BY thread.archived,
                COALESCE(
                  (SELECT MAX(message.created_at) FROM ai_assistant_messages message
-                   WHERE message.thread_id = thread.id),
+                   WHERE message.thread_id = thread.id AND message.deleted_at IS NULL),
                  thread.updated_at
                ) DESC,
                thread.created_at DESC`,
@@ -137,14 +144,17 @@ export async function listAiAssistantThreads(
 
 export async function createAiAssistantThread(userId: string, assistantId: string, title: string) {
   const threadId = await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     const assistant = await client.query(
-      `SELECT id FROM ai_assistants WHERE id = $1 AND owner_id = $2 FOR UPDATE`,
+      `SELECT id FROM ai_assistants
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+        FOR UPDATE`,
       [assistantId, userId],
     );
     if (!assistant.rowCount) throw new ApiError(404, "智能助理不存在");
     const count = await client.query<{ total: string }>(
       `SELECT COUNT(*)::text AS total FROM ai_assistant_threads
-        WHERE assistant_id = $1 AND owner_id = $2`,
+        WHERE assistant_id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
       [assistantId, userId],
     );
     if (Number(count.rows[0]?.total ?? 0) >= ASSISTANT_THREAD_LIMIT) {
@@ -156,7 +166,13 @@ export async function createAiAssistantThread(userId: string, assistantId: strin
        VALUES ($1, $2, $3, $4)`,
       [id, assistantId, userId, title],
     );
-    await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
+    await client.query(
+      `UPDATE ai_assistants SET revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+      [assistantId, userId],
+    );
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", id);
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
     return id;
   });
   return publicThread(await selectAiAssistantThread(userId, assistantId, threadId));
@@ -166,15 +182,27 @@ export async function updateAiAssistantThread(
   userId: string,
   assistantId: string,
   threadId: string,
-  input: { title?: string; archived?: boolean },
+  input: { title?: string; archived?: boolean; baseRevision: number },
 ) {
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
+    const assistant = await client.query(
+      `SELECT id FROM ai_assistants
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+        FOR UPDATE`,
+      [assistantId, userId],
+    );
+    if (!assistant.rowCount) throw new ApiError(404, "智能助理不存在");
     const current = await selectAiAssistantThread(userId, assistantId, threadId, client, true);
+    if (current.revision !== input.baseRevision) {
+      throw new ApiError(409, "这条助理对话已在其他终端更新，请刷新后再保存");
+    }
     const archived = input.archived ?? current.archived;
     if (archived && !current.archived) {
       const active = await client.query<{ total: string }>(
         `SELECT COUNT(*)::text AS total FROM ai_assistant_threads
-          WHERE assistant_id = $1 AND owner_id = $2 AND archived = FALSE`,
+          WHERE assistant_id = $1 AND owner_id = $2 AND archived = FALSE
+            AND deleted_at IS NULL`,
         [assistantId, userId],
       );
       if (Number(active.rows[0]?.total ?? 0) <= 1) {
@@ -190,11 +218,17 @@ export async function updateAiAssistantThread(
     }
     await client.query(
       `UPDATE ai_assistant_threads
-          SET title = $4, archived = $5, updated_at = NOW()
-        WHERE id = $1 AND assistant_id = $2 AND owner_id = $3`,
+          SET title = $4, archived = $5, revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND assistant_id = $2 AND owner_id = $3 AND deleted_at IS NULL`,
       [threadId, assistantId, userId, input.title ?? current.title, archived],
     );
-    await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
+    await client.query(
+      `UPDATE ai_assistants SET revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+      [assistantId, userId],
+    );
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", threadId);
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
   });
   return publicThread(await selectAiAssistantThread(userId, assistantId, threadId));
 }
@@ -206,9 +240,10 @@ export async function findAiAssistantMessageThread(
 ): Promise<string> {
   const result = await query<{ thread_id: string }>(
     `SELECT message.thread_id
-       FROM ai_assistant_messages message
+      FROM ai_assistant_messages message
        JOIN ai_assistants assistant ON assistant.id = message.assistant_id
-      WHERE message.id = $1 AND message.assistant_id = $2 AND assistant.owner_id = $3`,
+      WHERE message.id = $1 AND message.assistant_id = $2 AND assistant.owner_id = $3
+        AND message.deleted_at IS NULL AND assistant.deleted_at IS NULL`,
     [messageId, assistantId, userId],
   );
   if (!result.rows[0]) throw new ApiError(404, "助理消息不存在");

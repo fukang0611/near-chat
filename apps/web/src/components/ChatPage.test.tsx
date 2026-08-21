@@ -372,6 +372,7 @@ describe("ChatPage message scrolling", () => {
     });
     const smartAssistant = {
       id: "assistant-analysis",
+      revision: 1,
       name: "分析搭档",
       description: "帮我理清复杂信息",
       category: "ANALYSIS",
@@ -418,6 +419,7 @@ describe("ChatPage message scrolling", () => {
         {
           id: "abababab-abab-4bab-8bab-abababababab",
           assistantId: smartAssistant.id,
+          revision: 1,
           title: "默认对话",
           archived: false,
           isDefault: true,
@@ -456,6 +458,7 @@ describe("ChatPage message scrolling", () => {
     const user = userEvent.setup();
     const smartAssistant = {
       id: "11111111-1111-4111-8111-111111111111",
+      revision: 1,
       name: "分析搭档",
       description: "只根据当前会话归纳信息",
       category: "ANALYSIS",

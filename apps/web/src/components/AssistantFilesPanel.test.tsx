@@ -7,6 +7,7 @@ import { AssistantFilesPanel } from "./AssistantFilesPanel";
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
+  revision: 1,
   name: "资料助理",
   description: "读取项目资料",
   category: "ANALYSIS",

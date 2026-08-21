@@ -5,3 +5,12 @@ out/
 .DS_Store
 *.log
 .idea/
+
+# 本地环境与密钥配置；仅提交脱敏的示例文件。
+.env.*
+!.env.example
+
+# Graphify 本地代码图谱与项目级集成文件
+.codex/
+AGENTS.md
+graphify-out/

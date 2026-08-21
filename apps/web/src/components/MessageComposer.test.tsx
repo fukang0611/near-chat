@@ -26,6 +26,7 @@ const replyTarget: Message = {
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
+  revision: 1,
   name: "分析搭档",
   description: "归纳当前会话中的公开信息",
   category: "ANALYSIS",

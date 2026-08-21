@@ -23,8 +23,25 @@ function bool(name: string, fallback: boolean): boolean {
   return value.toLowerCase() === "true";
 }
 
+export function normalizePublicBaseUrl(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  let url: URL;
+  try {
+    url = new URL(normalized);
+  } catch {
+    throw new Error("PUBLIC_BASE_URL 必须是有效的 HTTPS 地址");
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+    throw new Error("PUBLIC_BASE_URL 必须使用 HTTPS，且不能包含凭据、查询参数或片段");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "");
+  return url.toString().replace(/\/$/, "");
+}
+
 export const config = {
   port: integer("APP_PORT", 3000),
+  publicBaseUrl: normalizePublicBaseUrl(process.env.PUBLIC_BASE_URL),
   databaseUrl:
     process.env.DATABASE_URL ?? "postgres://near_chat:near_chat@localhost:5432/near_chat",
   jwtSecret: process.env.JWT_SECRET ?? "near-chat-local-dev-secret-change-before-sharing",

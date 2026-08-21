@@ -15,8 +15,8 @@ NearChat 后续提供四种运行状态：
 | 完全离线 | 未连接          | 不可用 | 本地检索、记忆、任务和提醒；远程模型暂不可用 |
 | 混合模式 | 重连服务器      | 可选   | 增量同步允许同步的个人数据并恢复团队聊天     |
 
-“离线可用”首先表示不依赖 NearChat 服务器。完全没有互联网时，关键词检索、已经生成的
-本地向量检索、任务、提醒和记录继续可用；远程 LLM 推理需要等待网络恢复。端侧模型不在
+“离线可用”首先表示不依赖 NearChat 服务器。完全没有互联网时，Room FTS 关键词检索、
+任务、提醒和记录继续可用；远程 LLM 与 Embedding 请求需要等待网络恢复。端侧模型不在
 首个移动版本范围内。
 
 ## 2. 总体架构
@@ -26,7 +26,7 @@ flowchart TB
   subgraph Client[客户端]
     Web[Web]
     Desktop[Electron]
-    Mobile[Android APK]
+    Mobile[Android 客户端]
   end
 
   subgraph Domain[NearChat 原生业务层]
@@ -217,7 +217,7 @@ QUEUED -> RUNNING -> WAITING_CONFIRMATION -> SUCCEEDED / FAILED
 
 现有 `ai_assistant_reminders` 后续迁移到通用提醒，并保留可选的助理、线程和来源定位。
 
-## 6. Android APK
+## 6. Android 客户端
 
 ### 6.1 技术方案
 
@@ -252,20 +252,22 @@ interface AgentRuntime {
 ```
 
 手机使用 Room 保存助理、对话、记忆、任务、提醒、记录、同步游标和离线操作；API Key 只
-进入 Android Keystore。Embedding 不可用时使用 Room FTS；已生成的向量在断网后仍可用于
-本地相似度检索。
+进入 Android Keystore。首个版本的本地检索以 Room FTS4 为准；Agent 协议保留 Embedding
+接口，但向量持久化与端侧相似度索引不属于本轮实现。
 
 ### 6.3 首版边界
 
 - 不包含端侧大模型。
-- 断开服务器后不能收发团队聊天，但可以查看已缓存内容。
+- 本轮不同步或缓存团队聊天；断开服务器后继续使用的是七类个人与助理实体。
 - 不在首版同步全部历史附件，只按需下载或上传。
-- 不在后台精确执行长时间 AI 任务；普通提醒使用系统通知，AI 任务交给 WorkManager 延迟执行。
+- 不在后台精确执行长时间 AI 任务；普通提醒使用系统通知，WorkManager 只负责持久 outbox 的
+  延迟推送，模型生成仍在用户打开客户端时执行。
 
 ## 7. 设备同步
 
-新增 `devices`、`sync_operations`、`sync_changes` 和 `sync_cursors`。手机离线写入本地数据库
-和 outbox，连接恢复后批量推送；服务器通过 `operationId` 保证幂等。
+新增 `sync_devices`、`sync_entity_snapshots`、`sync_operations`、`sync_changes` 和
+`sync_cursors`。手机离线写入本地数据库和 outbox，连接恢复后批量推送；服务器通过
+`ownerId + operationId + request fingerprint` 保证幂等并拒绝同标识复用为不同请求。
 
 主要接口：
 
@@ -274,7 +276,13 @@ POST /api/sync/devices/register
 POST /api/sync/bootstrap
 POST /api/sync/push
 GET  /api/sync/pull?cursor=...&limit=...
+POST /api/sync/memory-conflicts/:operationId/resolve
 ```
+
+`bootstrap` 使用服务端签名的续传令牌分页执行投影回填和快照下发，并在第一页冻结
+watermark；只有完整末页才提交初始 cursor，随后立即通过 `pull` 收敛分页期间产生的写入。
+`bootstrap`、`pull` 和 `push` 都按最终 UTF-8 JSON 字节预算分批，避免合法的大消息历史形成
+无法恢复的 413 或移动端内存峰值。
 
 第一版同步记忆、个人任务、提醒、记录、助理配置、助理线程和纯文本消息。模型密钥、浏览器
 运行态、大体积附件全集和未明确选择的聊天历史不进入同步协议。
@@ -296,8 +304,8 @@ apps/server/src/connectors/
   connector-provider.ts
   connector-service.ts
   connector-worker.ts
-  dingtalk/
-  wecom/
+  dingtalk-connector.ts
+  wecom-callback.ts
 ```
 
 建议表：`connector_configs`、`connector_bindings`、`connector_identities`、
@@ -324,21 +332,23 @@ Web 和 Electron 的智能助理工作区增加“记忆”入口，并继续保
 浏览器。记忆中心支持短期/长期切换、来源筛选、搜索、原消息定位、编辑、删除、置顶和候选
 确认。聊天输入器提供助理 Mention 与紧凑执行状态，不使用持续占据内容区的大通知条。
 
-Android 底部导航默认提供“助理、记忆、任务、我的”；连接服务器后增加“会话、联系人”。
-所有页面明确显示个人模式、已连接团队、离线、正在同步和存在冲突等状态。
+Android 首版底部导航提供“助理、记忆、任务、记录、我的”；团队会话与联系人
+不在本轮移动端范围。所有页面明确显示个人模式、已连接团队、离线、正在同步和存在冲突等状态。
 
 ## 10. 实施阶段
 
-| 阶段 | 交付内容                                        | 状态   |
-| ---- | ----------------------------------------------- | ------ |
-| 0    | 有序数据库迁移、共享协议和 Agent Runtime 基础   | 已完成 |
-| 1    | 手动记忆、7 天短期记忆、自动候选和混合检索      | 已完成 |
-| 2    | 跨会话工具、聊天 Mention、私人预览和公开回复    | 已完成 |
-| 3    | Capacitor APK、Room、本地助理与完全离线数据能力 | 待实施 |
-| 4    | 设备注册、增量同步、冲突和 tombstone            | 待实施 |
-| 5    | 钉钉 Stream、企业微信推送与双向能力验证         | 待实施 |
+| 阶段 | 交付内容                                        | 状态                               |
+| ---- | ----------------------------------------------- | ---------------------------------- |
+| 0    | 有序数据库迁移、共享协议和 Agent Runtime 基础   | 已完成                             |
+| 1    | 手动记忆、7 天短期记忆、自动候选和混合检索      | 已完成                             |
+| 2    | 跨会话工具、聊天 Mention、私人预览和公开回复    | 已完成                             |
+| 3    | Capacitor Android、Room、本地助理与离线事务能力 | 源码与原生编译完成，待实机验收     |
+| 4    | 设备注册、增量同步、冲突和 tombstone            | 代码与实库集成完成，待双设备验收   |
+| 5    | 钉钉 Stream、企业微信推送与双向连接器           | 代码与协议测试完成，待企业凭据验收 |
 
-每个阶段必须完成类型检查、单元测试、生产构建和真实界面验收，并形成独立 Git 提交后推送。
+每个阶段的源码交付必须完成类型检查、单元测试和生产构建；需要设备、签名、公网回调或企业
+凭据的验收单独记录，不用“构建通过”代替。Android 安装包、签名和正式发布按本轮约定延后，
+等待后续功能完成后统一进行。本轮不要求创建提交或推送远端。
 
 ### 10.1 阶段 1 当前进度
 
@@ -369,6 +379,31 @@ Android 底部导航默认提供“助理、记忆、任务、我的”；连接
   跨会话与私人记忆工具，并使用不含个人自定义说明和知识库绑定的公开助理角色。
 - AI 未配置、关闭或故障时，Mention 会呈现可恢复的失败状态，普通聊天发送链路保持独立；
   明亮、暗色和窄屏布局均已覆盖，真实模型冒烟测试验证了预览、信息隔离和确认发布流程。
+
+### 10.3 阶段 3–5 当前进度
+
+- 阶段 3：新增 `apps/mobile` Capacitor Android 工程；Room v3 使用七类结构化领域表、FTS4、
+  outbox、冲突和游标表，本地提醒由 Local Notifications 调度。模型与团队凭据通过 Android
+  Keystore AES-GCM 保护；正式构建强制 HTTPS，调试构建使用 HTTP 时显示明文风险。移动端
+  `LocalAgentRuntime` 共享 Agent/Tool 协议，并通过显式授权工具检索本地记忆。
+- 阶段 4：服务端提供设备注册、签名令牌分页 bootstrap、幂等 push 与按字节预算分页的游标
+  pull；bootstrap 冻结 watermark，只有快照完整下发后才提交初始 cursor。七类实体直接写入
+  真实业务表并在同一事务生成快照和增量，不再形成 JSON 快照与业务表双事实源；同一 owner
+  的同步水位与业务投影按固定锁序提交，避免并发事务造成游标永久漏增量。完成状态单调推进，
+  长期记忆并发更新保留待合并稿，助理层级删除会为消息、线程和助理生成 tombstone。
+  WorkManager 可在 WebView 未运行时推送持久 outbox，冲突和拉取由前台按权威版本收敛。
+- 阶段 5：钉钉使用 `dingtalk-stream` 的机器人 CALLBACK，事件事务提交后才 ACK；企业微信同时
+  支持官方群机器人 Webhook 推送和自建应用签名验证、AES-CBC 回调解密及应用消息回复。身份、
+  会话绑定、消息关联、事件结果缓存、事务 outbox、lease 恢复和幂等投递均持久化；失败事件
+  与投递任务可在管理中心分页查看、重试或取消，所有写操作进入审计日志。任务、AI 提醒和
+  通用个人提醒都能按绑定进入连接器投递队列。企业微信双向回调只使用服务端根据
+  `PUBLIC_BASE_URL` 生成的规范 HTTPS 地址，不从管理员当前访问的浏览器地址猜测公网入口。
+- 自动化验证已覆盖 TypeScript 类型检查、单元测试、生产 Web/Server/Mobile Web 构建、
+  Android Kotlin/Room 单元测试与 instrumentation 源码编译，以及临时全新 PostgreSQL 从 v1
+  到 v9 的迁移和七类同步、冲突、级联删除、唯一 revision、提醒 outbox 与同步投影。
+- 尚需使用两台 Android 实机和企业钉钉/企业微信凭据、公网 HTTPS 回调完成真实闭环验收；
+  这些设备、地址与凭据不进入仓库，也不会在普通构建期要求提供。安装包、签名与发布继续按
+  本轮约定延期。
 
 ## 11. 必须验收的场景
 

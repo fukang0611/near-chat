@@ -3,6 +3,8 @@ import type { PoolClient } from "pg";
 import { config } from "../config.js";
 import { query, transaction } from "../database.js";
 import { ApiError } from "../http.js";
+import { lockAllOwnerSyncStreams } from "../sync-projection.js";
+import { projectBusinessEntityForSync } from "../sync-service.js";
 
 const SETTINGS_ID = 1;
 const SECRET_FORMAT = "v1";
@@ -481,36 +483,66 @@ export async function deleteAiModel(
   modelId: string,
 ): Promise<{ settings: AdminAiSettings; runtime: AiRuntimeSettings }> {
   await ensureAiSettings();
-  await transaction(async (client) => {
-    const settings = await selectSettings(client, true);
-    const found = await client.query<{ id: string }>(
-      `SELECT id FROM ai_model_configs WHERE id = $1 FOR UPDATE`,
-      [modelId],
-    );
-    if (!found.rows[0]) throw new ApiError(404, "模型配置不存在");
-    const replacement = await client.query<{ id: string }>(
-      `SELECT id FROM ai_model_configs
-        WHERE id <> $1 AND enabled = TRUE
-        ORDER BY updated_at DESC LIMIT 1`,
-      [modelId],
-    );
-    const nextDefault =
-      settings.default_chat_model_id === modelId
-        ? (replacement.rows[0]?.id ?? null)
-        : settings.default_chat_model_id;
-    if (settings.enabled && !nextDefault) {
-      throw new ApiError(400, "AI 已启用，不能删除唯一可用的默认模型");
-    }
-    await client.query(`DELETE FROM ai_model_configs WHERE id = $1`, [modelId]);
-    await client.query(
-      `UPDATE ai_settings
-          SET default_chat_model_id = $2, revision = revision + 1,
-              updated_by = $3, updated_at = NOW()
-        WHERE id = $1`,
-      [SETTINGS_ID, nextDefault, actorId],
-    );
-  });
+  await transaction((client) => deleteAiModelWithClient(client, actorId, modelId));
   return reloadPublicAndRuntime();
+}
+
+/** 模型 FK 置空与移动同步投影必须处于同一事务，避免已有设备永久保留失效 modelId。 */
+export async function deleteAiModelWithClient(
+  client: PoolClient,
+  actorId: string,
+  modelId: string,
+): Promise<void> {
+  // 删除模型会通过 FK SET NULL 动态改写多个 owner 的助理和消息；必须先阻断所有 owner stream，
+  // 再读取受影响行，避免并发新增的引用没有对应同步投影。
+  await lockAllOwnerSyncStreams(client);
+  const settings = await selectSettings(client, true);
+  const found = await client.query<{ id: string }>(
+    `SELECT id FROM ai_model_configs WHERE id = $1 FOR UPDATE`,
+    [modelId],
+  );
+  if (!found.rows[0]) throw new ApiError(404, "模型配置不存在");
+  const replacement = await client.query<{ id: string }>(
+    `SELECT id FROM ai_model_configs
+      WHERE id <> $1 AND enabled = TRUE
+      ORDER BY updated_at DESC LIMIT 1`,
+    [modelId],
+  );
+  const nextDefault =
+    settings.default_chat_model_id === modelId
+      ? (replacement.rows[0]?.id ?? null)
+      : settings.default_chat_model_id;
+  if (settings.enabled && !nextDefault) {
+    throw new ApiError(400, "AI 已启用，不能删除唯一可用的默认模型");
+  }
+  const assistants = await client.query<{ id: string; owner_id: string }>(
+    `SELECT id,owner_id FROM ai_assistants
+      WHERE model_id=$1 AND deleted_at IS NULL
+      ORDER BY id FOR UPDATE`,
+    [modelId],
+  );
+  const messages = await client.query<{ id: string; owner_id: string }>(
+    `SELECT message.id,assistant.owner_id
+       FROM ai_assistant_messages message
+       JOIN ai_assistants assistant ON assistant.id=message.assistant_id
+      WHERE message.model_id=$1 AND message.deleted_at IS NULL
+      ORDER BY message.id FOR UPDATE OF message`,
+    [modelId],
+  );
+  await client.query(`DELETE FROM ai_model_configs WHERE id = $1`, [modelId]);
+  await client.query(
+    `UPDATE ai_settings
+        SET default_chat_model_id = $2, revision = revision + 1,
+            updated_by = $3, updated_at = NOW()
+      WHERE id = $1`,
+    [SETTINGS_ID, nextDefault, actorId],
+  );
+  for (const assistant of assistants.rows) {
+    await projectBusinessEntityForSync(client, assistant.owner_id, "ASSISTANT", assistant.id);
+  }
+  for (const message of messages.rows) {
+    await projectBusinessEntityForSync(client, message.owner_id, "ASSISTANT_MESSAGE", message.id);
+  }
 }
 
 export async function listUserAiModels(userId: string): Promise<{

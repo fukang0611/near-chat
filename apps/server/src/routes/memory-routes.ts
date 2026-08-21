@@ -59,6 +59,7 @@ const updateMemorySchema = z
       input.importance !== undefined,
     { message: "至少修改一个记忆字段" },
   );
+const forgetMemorySchema = z.object({ baseRevision: z.number().int().positive() });
 
 /** 记忆接口不经过 AI 能力开关，模型未配置时仍然完整可用。 */
 export function createMemoryRouter() {
@@ -95,7 +96,11 @@ export function createMemoryRouter() {
   });
 
   router.delete("/memories/:memoryId", authenticate, async (request, response) => {
-    await forgetMemory(currentUser(request).id, z.string().uuid().parse(request.params.memoryId));
+    await forgetMemory(
+      currentUser(request).id,
+      z.string().uuid().parse(request.params.memoryId),
+      forgetMemorySchema.parse(request.body).baseRevision,
+    );
     response.status(204).end();
   });
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getAiCapabilities } from "../ai/ai-runtime.js";
 import { config } from "../config.js";
+import { queueBoundConnectorDeliveriesWithClient } from "../connectors/connector-service.js";
 import { transaction } from "../database.js";
 import type { RealtimeHub } from "../realtime.js";
 import {
@@ -45,14 +46,31 @@ interface DueTaskRow {
   run_requested_at: Date | null;
 }
 
-async function recoverStaleRuns(): Promise<void> {
+export async function recoverStaleAssistantTaskRuns(): Promise<void> {
   await transaction(async (client) => {
-    const stale = await client.query<{ task_id: string }>(
-      `UPDATE ai_assistant_task_runs
+    const stale = await client.query<{
+      id: string;
+      task_id: string;
+      owner_id: string;
+      assistant_id: string;
+      thread_id: string;
+      title: string;
+      thread_archived: boolean;
+      assistant_deleted: boolean;
+      thread_deleted: boolean;
+    }>(
+      `UPDATE ai_assistant_task_runs run
           SET status = 'FAILED', completed_at = NOW(),
               error_message = '服务重启或执行超时，任务已终止'
-        WHERE status = 'RUNNING' AND started_at < NOW() - INTERVAL '15 minutes'
-        RETURNING task_id`,
+         FROM ai_assistant_tasks task
+         JOIN ai_assistants assistant ON assistant.id=task.assistant_id
+         JOIN ai_assistant_threads thread ON thread.id=task.thread_id
+        WHERE run.task_id=task.id AND run.status = 'RUNNING'
+          AND run.started_at < NOW() - INTERVAL '15 minutes'
+        RETURNING run.id,run.task_id,task.owner_id,task.assistant_id,task.thread_id,
+                  task.title,thread.archived AS thread_archived,
+                  assistant.deleted_at IS NOT NULL AS assistant_deleted,
+                  thread.deleted_at IS NOT NULL AS thread_deleted`,
     );
     if (stale.rows.length === 0) return;
     await client.query(
@@ -62,6 +80,25 @@ async function recoverStaleRuns(): Promise<void> {
         WHERE id = ANY($1::uuid[]) AND last_status = 'RUNNING'`,
       [[...new Set(stale.rows.map((run) => run.task_id))]],
     );
+    for (const run of stale.rows) {
+      if (run.thread_archived || run.assistant_deleted || run.thread_deleted) continue;
+      const summary = `自动任务“${run.title}”执行失败：服务重启或执行超时，任务已终止`;
+      await queueBoundConnectorDeliveriesWithClient(client, {
+        ownerId: run.owner_id,
+        kind: "TASK_RESULT",
+        sourceId: run.id,
+        payload: {
+          text: summary,
+          summary,
+          status: "FAILED",
+          taskId: run.task_id,
+          runId: run.id,
+          assistantId: run.assistant_id,
+          threadId: run.thread_id,
+          messageId: null,
+        },
+      });
+    }
   });
 }
 
@@ -86,6 +123,7 @@ async function claimAssistantTask(): Promise<ClaimedAssistantTask | null> {
                 OR (task.enabled = TRUE AND task.next_run_at <= NOW())
               )
           AND thread.archived = FALSE
+          AND assistant.deleted_at IS NULL AND thread.deleted_at IS NULL
           AND NOT EXISTS (
                 SELECT 1 FROM ai_assistant_task_runs run
                  WHERE run.task_id = task.id AND run.status = 'RUNNING'
@@ -161,7 +199,12 @@ async function claimAssistantTask(): Promise<ClaimedAssistantTask | null> {
 async function finishAssistantTask(
   task: ClaimedAssistantTask,
   result:
-    | { messageId: string; browserRunId: string | null; toolSummary: Record<string, unknown> }
+    | {
+        messageId: string;
+        preview: string;
+        browserRunId: string | null;
+        toolSummary: Record<string, unknown>;
+      }
     | { error: string; browserRunId: string | null; toolSummary: Record<string, unknown> },
 ): Promise<boolean> {
   return transaction(async (client) => {
@@ -192,7 +235,27 @@ async function finishAssistantTask(
         "error" in result ? result.error : null,
       ],
     );
-    return Boolean(updated.rowCount);
+    if (!updated.rowCount) return false;
+    const failed = "error" in result;
+    const summary = failed
+      ? `自动任务“${task.title}”执行失败：${result.error}`
+      : `自动任务“${task.title}”已完成：${result.preview}`;
+    await queueBoundConnectorDeliveriesWithClient(client, {
+      ownerId: task.ownerId,
+      kind: "TASK_RESULT",
+      sourceId: task.runId,
+      payload: {
+        text: summary,
+        summary,
+        status: failed ? "FAILED" : "SUCCEEDED",
+        taskId: task.taskId,
+        runId: task.runId,
+        assistantId: task.assistantId,
+        threadId: task.threadId,
+        messageId: failed ? null : result.messageId,
+      },
+    });
+    return true;
   });
 }
 
@@ -276,6 +339,7 @@ async function processAssistantTask(task: ClaimedAssistantTask, realtime: Realti
     if (
       !(await finishAssistantTask(task, {
         messageId: reply.id,
+        preview,
         browserRunId,
         toolSummary,
       }))
@@ -328,7 +392,7 @@ export function startAssistantTaskWorker(realtime: RealtimeHub): () => void {
     running = true;
     try {
       if (Date.now() - lastRecoveryAt > 60_000) {
-        await recoverStaleRuns();
+        await recoverStaleAssistantTaskRuns();
         lastRecoveryAt = Date.now();
       }
       // 每轮限制数量，避免积压任务长期占用 Node 事件循环。

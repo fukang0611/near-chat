@@ -15,6 +15,7 @@ import { AssistantWorkspace } from "./AssistantWorkspace";
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
+  revision: 1,
   name: "分析搭档",
   description: "帮我理清复杂信息",
   category: "ANALYSIS",
@@ -87,6 +88,7 @@ function assistantThread(
         ? "abababab-abab-4bab-8bab-abababababab"
         : "cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd",
     assistantId,
+    revision: 1,
     title: "默认对话",
     archived: false,
     isDefault: true,
@@ -327,6 +329,7 @@ describe("AssistantWorkspace", () => {
     await waitFor(() =>
       expect(api.updateAiAssistantThread).toHaveBeenCalledWith(assistant.id, projectThread.id, {
         archived: true,
+        baseRevision: projectThread.revision,
       }),
     );
     expect(screen.queryByRole("tab", { name: /项目讨论/ })).toBeNull();

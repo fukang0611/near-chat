@@ -516,6 +516,13 @@ export function AssistantWorkspace({
       try {
         const result = await api.createAiAssistantThread(selectedId, title);
         setThreads((current) => [result.thread, ...current]);
+        setAssistants((current) =>
+          current.map((assistant) =>
+            assistant.id === selectedId
+              ? { ...assistant, revision: assistant.revision + 1 }
+              : assistant,
+          ),
+        );
         setSelectedThreadIds((current) => ({ ...current, [selectedId]: result.thread.id }));
         setShowArchivedThreads(false);
         showNotice("success", `已创建“${result.thread.title}”`);
@@ -533,11 +540,23 @@ export function AssistantWorkspace({
   const renameThread = useCallback(
     async (threadId: string, title: string) => {
       if (!selectedId || threadBusyId) return false;
+      const currentThread = threads.find((thread) => thread.id === threadId);
+      if (!currentThread) return false;
       setThreadBusyId(threadId);
       try {
-        const result = await api.updateAiAssistantThread(selectedId, threadId, { title });
+        const result = await api.updateAiAssistantThread(selectedId, threadId, {
+          title,
+          baseRevision: currentThread.revision,
+        });
         setThreads((current) =>
           current.map((thread) => (thread.id === result.thread.id ? result.thread : thread)),
+        );
+        setAssistants((current) =>
+          current.map((assistant) =>
+            assistant.id === selectedId
+              ? { ...assistant, revision: assistant.revision + 1 }
+              : assistant,
+          ),
         );
         showNotice("success", "对话名称已更新");
         return true;
@@ -548,7 +567,7 @@ export function AssistantWorkspace({
         setThreadBusyId(null);
       }
     },
-    [selectedId, showNotice, threadBusyId],
+    [selectedId, showNotice, threadBusyId, threads],
   );
 
   const toggleThreadArchived = useCallback(
@@ -558,9 +577,17 @@ export function AssistantWorkspace({
       try {
         await api.updateAiAssistantThread(selectedId, thread.id, {
           archived: !thread.archived,
+          baseRevision: thread.revision,
         });
         const result = await api.aiAssistantThreads(selectedId, true);
         setThreads(result.threads);
+        setAssistants((current) =>
+          current.map((assistant) =>
+            assistant.id === selectedId
+              ? { ...assistant, revision: assistant.revision + 1 }
+              : assistant,
+          ),
+        );
         if (!thread.archived && selectedThreadId === thread.id) {
           const nextThread = result.threads.find((item) => !item.archived);
           if (nextThread) {
@@ -641,7 +668,10 @@ export function AssistantWorkspace({
         instructions: form.instructions.trim(),
       };
       if (editorMode === "edit" && selectedAssistant) {
-        const result = await api.updateAiAssistant(selectedAssistant.id, input);
+        const result = await api.updateAiAssistant(selectedAssistant.id, {
+          ...input,
+          baseRevision: selectedAssistant.revision,
+        });
         setAssistants((current) =>
           current.map((assistant) =>
             assistant.id === result.assistant.id ? result.assistant : assistant,
@@ -667,7 +697,7 @@ export function AssistantWorkspace({
     if (!selectedAssistant || saving) return;
     setSaving(true);
     try {
-      await api.deleteAiAssistant(selectedAssistant.id);
+      await api.deleteAiAssistant(selectedAssistant.id, selectedAssistant.revision);
       const remaining = assistants.filter((assistant) => assistant.id !== selectedAssistant.id);
       setAssistants(remaining);
       onSelectedIdChange(remaining[0]?.id ?? null);
@@ -684,7 +714,11 @@ export function AssistantWorkspace({
   const clearMessages = async () => {
     if (!selectedAssistant || !selectedThread || selectedThread.archived) return;
     try {
-      await api.clearAiAssistantMessages(selectedAssistant.id, selectedThread.id);
+      await api.clearAiAssistantMessages(
+        selectedAssistant.id,
+        selectedThread.id,
+        selectedThread.revision,
+      );
       setMessages([]);
       const otherLastMessageAt = threads
         .filter((thread) => thread.id !== selectedThread.id && thread.lastMessageAt)
@@ -704,11 +738,25 @@ export function AssistantWorkspace({
                 ...assistant,
                 messageCount: Math.max(0, assistant.messageCount - selectedThread.messageCount),
                 lastMessageAt: otherLastMessageAt ?? null,
+                revision: assistant.revision + 1,
               }
             : assistant,
         ),
       );
       setNotice({ tone: "success", text: `“${selectedThread.title}”已清空` });
+      setThreads((current) =>
+        current.map((thread) =>
+          thread.id === selectedThread.id
+            ? {
+                ...thread,
+                messageCount: 0,
+                lastMessageAt: null,
+                revision: thread.revision + 1,
+                updatedAt: new Date().toISOString(),
+              }
+            : thread,
+        ),
+      );
     } catch (error) {
       setNotice({ tone: "error", text: errorMessage(error, "清空失败") });
     } finally {
@@ -752,6 +800,7 @@ export function AssistantWorkspace({
                 messageCount: thread.messageCount + result.messages.length,
                 lastMessageAt,
                 updatedAt: lastMessageAt,
+                revision: thread.revision + 1,
               }
             : thread,
         ),
@@ -763,6 +812,7 @@ export function AssistantWorkspace({
                 ...assistant,
                 messageCount: assistant.messageCount + result.messages.length,
                 lastMessageAt,
+                revision: assistant.revision + 1,
               }
             : assistant,
         ),

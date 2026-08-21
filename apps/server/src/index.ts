@@ -17,6 +17,10 @@ import { initializeMinio } from "./minio.js";
 import { startKnowledgeIndexWorker } from "./knowledge/knowledge-worker.js";
 import { queueAllKnowledgeDocumentsForReindex } from "./knowledge/knowledge-service.js";
 import { startMemoryCaptureWorker } from "./memory-capture-service.js";
+import {
+  startConfiguredDingTalkStreams,
+  startConnectorWorker,
+} from "./connectors/connector-worker.js";
 import { queueAllMemoryVectorsForReindex } from "./memory-service.js";
 import { broadcastReceiptChanges, markPendingMessagesDelivered } from "./receipt-service.js";
 import { RealtimeHub } from "./realtime.js";
@@ -44,6 +48,9 @@ async function main() {
   const stopAssistantTaskWorker = startAssistantTaskWorker(realtime);
   const stopAssistantReminderWorker = startAssistantReminderWorker(realtime);
   const stopAssistantInvocationWorker = startAssistantInvocationWorker();
+  const stopConnectorWorker = startConnectorWorker();
+  // Stream 配置错误只禁用对应外部能力，绝不能阻断 NearChat 核心服务启动。
+  const stopDingTalkStreams = await startConfiguredDingTalkStreams();
   realtime.onUserOnline(async (userId) => {
     const changes = await markPendingMessagesDelivered(userId);
     await broadcastReceiptChanges(realtime, changes);
@@ -67,6 +74,8 @@ async function main() {
     stopAssistantTaskWorker();
     stopAssistantReminderWorker();
     stopAssistantInvocationWorker();
+    stopConnectorWorker();
+    stopDingTalkStreams();
     stopAssistantBrowserSessionCleanup();
     realtime.close();
     server.close(async () => {

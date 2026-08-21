@@ -232,6 +232,7 @@ npm run smoke:assistant-mention # 结构化 Mention、私有预览、确认后�
 | 变量                                 | 默认值          | 用途                                       |
 | ------------------------------------ | --------------- | ------------------------------------------ |
 | `DATABASE_URL`                       | 本地 PostgreSQL | 业务数据库连接地址                         |
+| `PUBLIC_BASE_URL`                    | 空              | 企业微信回调使用的公网 HTTPS 规范根地址    |
 | `JWT_SECRET`                         | 仅供本地开发    | 登录令牌签名密钥                           |
 | `MINIO_*`                            | 本地 MinIO      | 对象存储连接与 Bucket                      |
 | `FILE_MAX_BYTES`                     | `524288000`     | 单文件最大 500 MiB                         |
@@ -268,7 +269,13 @@ npm run smoke:assistant-mention # 结构化 Mention、私有预览、确认后�
 apps/
 ├── server/      Express、WebSocket、PostgreSQL 与 MinIO 服务
 ├── web/         React + Vite Web 客户端
-└── desktop/     Electron 主进程、预加载桥接与配置界面
+├── desktop/     Electron 主进程、预加载桥接与配置界面
+└── mobile/      React + Capacitor Android 本地优先客户端
+
+packages/
+├── contracts/      跨客户端基础协议
+├── domain/         个人事务与同步纯领域规则
+└── agent-protocol/ 移动端 Agent Runtime 与 HTTP 输送层
 
 deploy/rancher/  Rancher / Kubernetes 部署资源
 docs/            方案、桌面端说明、发布记录与截图
@@ -280,7 +287,7 @@ scripts/         分阶段端到端冒烟测试
 - 面向可信局域网内部团队使用，未按公网 SaaS 的威胁模型设计。
 - 当前实时在线状态位于单个应用进程，暂不支持多副本水平扩容。
 - 单文件默认上限为 500 MiB，上传流量由应用服务代理。
-- 暂不提供端到端加密、音视频通话、消息漫游同步策略或移动原生客户端。
+- 暂不提供端到端加密、音视频通话或团队聊天全量移动漫游。Android 客户端源码已纳入工程，安装包、签名和正式发布延后统一进行。
 - 通知权限最终由浏览器或操作系统控制；局域网 HTTP 浏览器页面无法申请系统通知。
 - AI 知识库要求 PostgreSQL 安装 `vector` 扩展；未满足时仅 AI 降级，核心服务仍可用。
 - 浏览器页面状态只保存在隔离的内存会话中；服务重启或空闲超时后执行会标记过期，历史步骤与截图仍可查看。

@@ -297,6 +297,374 @@ export const databaseMigrations: DatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "create_personal_sync_and_connector_domains",
+    async up(client) {
+      await client.query(`
+        CREATE TABLE personal_tasks (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title VARCHAR(160) NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          due_at TIMESTAMPTZ,
+          completed_at TIMESTAMPTZ,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          deleted_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE personal_reminders (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title VARCHAR(160) NOT NULL,
+          note TEXT NOT NULL DEFAULT '',
+          scheduled_at TIMESTAMPTZ NOT NULL,
+          completed_at TIMESTAMPTZ,
+          notified_at TIMESTAMPTZ,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          deleted_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE personal_records (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title VARCHAR(160) NOT NULL,
+          content TEXT NOT NULL,
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          deleted_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX idx_personal_tasks_owner ON personal_tasks(owner_id, completed_at, updated_at DESC) WHERE deleted_at IS NULL;
+        CREATE INDEX idx_personal_reminders_owner ON personal_reminders(owner_id, scheduled_at) WHERE deleted_at IS NULL;
+        CREATE INDEX idx_personal_records_owner ON personal_records(owner_id, updated_at DESC) WHERE deleted_at IS NULL;
+
+        CREATE TABLE sync_devices (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          installation_id UUID NOT NULL,
+          name VARCHAR(120) NOT NULL,
+          platform VARCHAR(32) NOT NULL,
+          app_version VARCHAR(40) NOT NULL,
+          last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          revoked_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(owner_id, installation_id)
+        );
+        CREATE TABLE sync_entity_snapshots (
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          entity_type VARCHAR(32) NOT NULL CHECK (entity_type IN (
+            'MEMORY', 'PERSONAL_TASK', 'PERSONAL_REMINDER', 'PERSONAL_RECORD',
+            'ASSISTANT', 'ASSISTANT_THREAD', 'ASSISTANT_MESSAGE'
+          )),
+          entity_id UUID NOT NULL,
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+          deleted_at TIMESTAMPTZ,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY(owner_id, entity_type, entity_id)
+        );
+        CREATE TABLE sync_operations (
+          operation_id UUID PRIMARY KEY,
+          device_id UUID NOT NULL REFERENCES sync_devices(id) ON DELETE CASCADE,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          entity_type VARCHAR(32) NOT NULL,
+          entity_id UUID NOT NULL,
+          operation VARCHAR(12) NOT NULL CHECK (operation IN ('UPSERT', 'DELETE')),
+          base_revision INTEGER,
+          outcome JSONB NOT NULL,
+          device_created_at TIMESTAMPTZ NOT NULL,
+          received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE sync_changes (
+          sequence BIGSERIAL PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          entity_type VARCHAR(32) NOT NULL,
+          entity_id UUID NOT NULL,
+          operation VARCHAR(12) NOT NULL CHECK (operation IN ('UPSERT', 'DELETE')),
+          revision INTEGER NOT NULL,
+          payload JSONB NOT NULL,
+          occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE sync_cursors (
+          device_id UUID PRIMARY KEY REFERENCES sync_devices(id) ON DELETE CASCADE,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          last_sequence BIGINT NOT NULL DEFAULT 0,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX idx_sync_changes_owner_sequence ON sync_changes(owner_id, sequence);
+        CREATE INDEX idx_sync_snapshots_owner ON sync_entity_snapshots(owner_id, updated_at DESC);
+
+        CREATE TABLE connector_configs (
+          id UUID PRIMARY KEY,
+          provider VARCHAR(32) NOT NULL CHECK (provider IN ('DINGTALK_STREAM', 'WECOM_WEBHOOK', 'WECOM_CALLBACK')),
+          name VARCHAR(120) NOT NULL,
+          enabled BOOLEAN NOT NULL DEFAULT FALSE,
+          config_encrypted TEXT NOT NULL,
+          created_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE connector_events (
+          id UUID PRIMARY KEY,
+          connector_id UUID NOT NULL REFERENCES connector_configs(id) ON DELETE CASCADE,
+          external_event_id VARCHAR(200) NOT NULL,
+          payload JSONB NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'RECEIVED' CHECK (status IN ('RECEIVED', 'PROCESSED', 'FAILED')),
+          error_message VARCHAR(500),
+          received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          processed_at TIMESTAMPTZ,
+          UNIQUE(connector_id, external_event_id)
+        );
+        CREATE TABLE connector_delivery_jobs (
+          id UUID PRIMARY KEY,
+          connector_id UUID NOT NULL REFERENCES connector_configs(id) ON DELETE CASCADE,
+          kind VARCHAR(40) NOT NULL,
+          payload JSONB NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'QUEUED' CHECK (status IN ('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          error_message VARCHAR(500),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX idx_connector_delivery_jobs_poll ON connector_delivery_jobs(status, next_attempt_at, created_at);
+      `);
+    },
+  },
+  {
+    version: 7,
+    name: "harden_sync_and_connector_delivery",
+    async up(client) {
+      await client.query(`
+        ALTER TABLE ai_assistants
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          ADD COLUMN deleted_at TIMESTAMPTZ;
+        ALTER TABLE ai_assistant_threads
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          ADD COLUMN deleted_at TIMESTAMPTZ;
+        ALTER TABLE ai_assistant_messages
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          ADD COLUMN deleted_at TIMESTAMPTZ;
+
+        DROP INDEX IF EXISTS idx_ai_assistant_threads_default;
+        CREATE UNIQUE INDEX idx_ai_assistant_threads_default
+          ON ai_assistant_threads(assistant_id)
+          WHERE is_default = TRUE AND deleted_at IS NULL;
+        CREATE INDEX idx_ai_assistants_owner_sync
+          ON ai_assistants(owner_id, updated_at DESC) WHERE deleted_at IS NULL;
+        CREATE INDEX idx_ai_assistant_threads_owner_sync
+          ON ai_assistant_threads(owner_id, assistant_id, updated_at DESC) WHERE deleted_at IS NULL;
+        CREATE INDEX idx_ai_assistant_messages_thread_sync
+          ON ai_assistant_messages(thread_id, created_at, id) WHERE deleted_at IS NULL;
+
+        ALTER TABLE sync_operations DROP CONSTRAINT sync_operations_pkey;
+        ALTER TABLE sync_operations
+          ADD COLUMN request_fingerprint VARCHAR(64),
+          ADD CONSTRAINT sync_operations_pkey PRIMARY KEY(owner_id, operation_id),
+          ADD CONSTRAINT sync_operations_request_fingerprint_check
+            CHECK (request_fingerprint IS NULL OR char_length(request_fingerprint) = 64);
+        CREATE UNIQUE INDEX uq_sync_changes_entity_revision
+          ON sync_changes(owner_id, entity_type, entity_id, revision);
+
+        CREATE TABLE memory_sync_conflicts (
+          id UUID PRIMARY KEY,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          memory_id UUID NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+          operation_id UUID NOT NULL,
+          base_revision INTEGER,
+          server_revision INTEGER NOT NULL CHECK (server_revision > 0),
+          incoming_payload JSONB NOT NULL,
+          status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+            CHECK (status IN ('PENDING', 'RESOLVED', 'DISMISSED')),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          resolved_at TIMESTAMPTZ,
+          UNIQUE(owner_id, operation_id)
+        );
+        CREATE INDEX idx_memory_sync_conflicts_pending
+          ON memory_sync_conflicts(owner_id, status, created_at DESC)
+          WHERE status = 'PENDING';
+        CREATE INDEX idx_sync_snapshots_tombstones
+          ON sync_entity_snapshots(deleted_at) WHERE deleted_at IS NOT NULL;
+        CREATE INDEX idx_personal_tasks_tombstones
+          ON personal_tasks(deleted_at) WHERE deleted_at IS NOT NULL;
+        CREATE INDEX idx_personal_reminders_tombstones
+          ON personal_reminders(deleted_at) WHERE deleted_at IS NOT NULL;
+        CREATE INDEX idx_personal_records_tombstones
+          ON personal_records(deleted_at) WHERE deleted_at IS NOT NULL;
+
+        ALTER TABLE connector_configs
+          ADD COLUMN revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          ADD COLUMN last_error VARCHAR(500),
+          ADD COLUMN started_at TIMESTAMPTZ;
+
+        ALTER TABLE connector_events
+          DROP CONSTRAINT IF EXISTS connector_events_status_check;
+        ALTER TABLE connector_events
+          ADD COLUMN event_kind VARCHAR(80) NOT NULL DEFAULT 'UNKNOWN',
+          ADD COLUMN external_conversation_id VARCHAR(200),
+          ADD COLUMN external_user_id VARCHAR(200),
+          ADD COLUMN result JSONB NOT NULL DEFAULT '{}'::jsonb,
+          ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          ADD COLUMN next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          ADD COLUMN lease_expires_at TIMESTAMPTZ,
+          ADD CONSTRAINT connector_events_status_check
+            CHECK (status IN ('RECEIVED', 'PROCESSING', 'PROCESSED', 'FAILED'));
+        CREATE INDEX idx_connector_events_poll
+          ON connector_events(status, next_attempt_at, received_at);
+
+        ALTER TABLE connector_delivery_jobs
+          ADD COLUMN idempotency_key VARCHAR(200),
+          ADD COLUMN lease_expires_at TIMESTAMPTZ;
+        UPDATE connector_delivery_jobs
+           SET idempotency_key = id::text
+         WHERE idempotency_key IS NULL;
+        ALTER TABLE connector_delivery_jobs
+          ALTER COLUMN idempotency_key SET NOT NULL;
+        CREATE UNIQUE INDEX idx_connector_delivery_idempotency
+          ON connector_delivery_jobs(connector_id, idempotency_key);
+
+        CREATE TABLE connector_identities (
+          id UUID PRIMARY KEY,
+          connector_id UUID NOT NULL REFERENCES connector_configs(id) ON DELETE CASCADE,
+          external_user_id VARCHAR(200) NOT NULL,
+          near_chat_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+          display_name VARCHAR(160) NOT NULL DEFAULT '',
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(connector_id, external_user_id)
+        );
+
+        CREATE TABLE connector_bindings (
+          id UUID PRIMARY KEY,
+          connector_id UUID NOT NULL REFERENCES connector_configs(id) ON DELETE CASCADE,
+          owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          external_conversation_id VARCHAR(200) NOT NULL,
+          near_chat_conversation_id UUID REFERENCES conversations(id) ON DELETE SET NULL,
+          assistant_id UUID REFERENCES ai_assistants(id) ON DELETE SET NULL,
+          delivery_kinds VARCHAR(40)[] NOT NULL DEFAULT '{}'::varchar[],
+          delivery_target_encrypted TEXT,
+          enabled BOOLEAN NOT NULL DEFAULT TRUE,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(connector_id, external_conversation_id),
+          CHECK (delivery_kinds <@ ARRAY['TASK_RESULT','REMINDER','SUMMARY','TEXT']::varchar[])
+        );
+        CREATE INDEX idx_connector_bindings_owner
+          ON connector_bindings(owner_id, enabled, updated_at DESC);
+
+        CREATE TABLE connector_message_links (
+          id UUID PRIMARY KEY,
+          connector_id UUID NOT NULL REFERENCES connector_configs(id) ON DELETE CASCADE,
+          external_message_id VARCHAR(200) NOT NULL,
+          near_chat_message_id UUID,
+          direction VARCHAR(12) NOT NULL CHECK (direction IN ('INBOUND', 'OUTBOUND')),
+          event_id UUID REFERENCES connector_events(id) ON DELETE SET NULL,
+          delivery_job_id UUID REFERENCES connector_delivery_jobs(id) ON DELETE SET NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(connector_id, external_message_id, direction)
+        );
+        CREATE INDEX idx_connector_message_links_near_chat
+          ON connector_message_links(near_chat_message_id)
+          WHERE near_chat_message_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    version: 8,
+    name: "harden_connector_operations_and_message_idempotency",
+    async up(client) {
+      await client.query(`
+        ALTER TABLE ai_assistant_messages
+          ADD COLUMN connector_event_id UUID
+            REFERENCES connector_events(id) ON DELETE SET NULL;
+        CREATE UNIQUE INDEX uq_ai_assistant_messages_connector_event_role
+          ON ai_assistant_messages(connector_event_id, role)
+          WHERE connector_event_id IS NOT NULL;
+
+        ALTER TABLE connector_bindings
+          ADD COLUMN delivery_target_expires_at TIMESTAMPTZ;
+
+        ALTER TABLE connector_events
+          DROP CONSTRAINT IF EXISTS connector_events_status_check;
+        ALTER TABLE connector_events
+          ADD CONSTRAINT connector_events_status_check
+            CHECK (status IN ('RECEIVED', 'PROCESSING', 'PROCESSED', 'FAILED', 'CANCELLED'));
+
+        ALTER TABLE connector_delivery_jobs
+          DROP CONSTRAINT IF EXISTS connector_delivery_jobs_status_check;
+        ALTER TABLE connector_delivery_jobs
+          ADD CONSTRAINT connector_delivery_jobs_status_check
+            CHECK (status IN ('QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'));
+
+        CREATE INDEX idx_connector_events_operations
+          ON connector_events(status, received_at DESC, id DESC);
+        CREATE INDEX idx_connector_delivery_jobs_operations
+          ON connector_delivery_jobs(status, updated_at DESC, id DESC);
+      `);
+    },
+  },
+  {
+    version: 9,
+    name: "minimize_memory_sync_tombstones",
+    async up(client) {
+      await client.query(`
+        UPDATE sync_entity_snapshots
+           SET payload = jsonb_build_object(
+             'id', entity_id,
+             'revision', revision,
+             'deletedAt', CASE
+               WHEN jsonb_typeof(payload->'deletedAt') = 'string' THEN payload->'deletedAt'
+               ELSE to_jsonb(deleted_at)
+             END
+           )
+         WHERE entity_type = 'MEMORY'
+           AND deleted_at IS NOT NULL;
+
+        UPDATE sync_changes
+           SET payload = jsonb_build_object(
+             'id', entity_id,
+             'revision', revision,
+             'deletedAt', CASE
+               WHEN jsonb_typeof(payload->'deletedAt') = 'string' THEN payload->'deletedAt'
+               ELSE to_jsonb(occurred_at)
+             END
+           )
+         WHERE entity_type = 'MEMORY'
+           AND operation = 'DELETE';
+
+        UPDATE sync_operations
+           SET outcome = jsonb_set(
+             outcome,
+             '{applied,payload}',
+             jsonb_build_object(
+               'id', entity_id,
+               'revision', COALESCE(
+                 outcome #> '{applied,revision}',
+                 outcome #> '{applied,payload,revision}'
+               ),
+               'deletedAt', CASE
+                 WHEN jsonb_typeof(outcome #> '{applied,payload,deletedAt}') = 'string'
+                   THEN outcome #> '{applied,payload,deletedAt}'
+                 ELSE COALESCE(
+                   outcome #> '{applied,occurredAt}',
+                   to_jsonb(received_at)
+                 )
+               END
+             ),
+             true
+           )
+         WHERE entity_type = 'MEMORY'
+           AND operation = 'DELETE'
+           AND jsonb_typeof(outcome->'applied') = 'object';
+      `);
+    },
+  },
 ];
 
 export function orderedPendingMigrations(

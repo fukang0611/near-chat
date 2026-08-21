@@ -12,6 +12,7 @@ import { AssistantBrowserPanel } from "./AssistantBrowserPanel";
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
+  revision: 1,
   name: "网页观察员",
   description: "读取内部页面",
   category: "ANALYSIS",

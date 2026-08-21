@@ -125,7 +125,7 @@ describe("MemoryCenterDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: "遗忘" }));
     await userEvent.click(screen.getByRole("button", { name: "确认遗忘" }));
 
-    await waitFor(() => expect(forgetMemory).toHaveBeenCalledWith(memory.id));
+    await waitFor(() => expect(forgetMemory).toHaveBeenCalledWith(memory.id, memory.revision));
     expect(screen.queryByDisplayValue(memory.title)).toBeNull();
   });
 

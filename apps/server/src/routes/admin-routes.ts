@@ -188,6 +188,39 @@ export function createAdminRouter(realtime: RealtimeHub) {
                       avatar_object_key, avatar_version`,
         [userId, input.displayName ?? null, input.enabled ?? null],
       );
+      if (updated.rows[0] && input.enabled === false) {
+        // 账号禁用是完整撤权：绑定不会在重新启用账号时自动复活，未开始的外部回复和
+        // 主动投递在同一事务取消；已处于 PROCESSING/RUNNING 的极窄窗口可能完成。
+        await client.query(
+          `UPDATE connector_bindings SET enabled=FALSE,updated_at=NOW()
+            WHERE owner_id=$1 AND enabled=TRUE`,
+          [userId],
+        );
+        await client.query(
+          `UPDATE connector_events event
+              SET status='CANCELLED',lease_expires_at=NULL,
+                  error_message=COALESCE(event.error_message,'所属账号已停用')
+            WHERE event.status IN ('RECEIVED','FAILED')
+              AND EXISTS (
+                SELECT 1 FROM connector_bindings binding
+                 WHERE binding.owner_id=$1
+                   AND binding.connector_id=event.connector_id
+                   AND binding.external_conversation_id=event.external_conversation_id
+              )`,
+          [userId],
+        );
+        await client.query(
+          `UPDATE connector_delivery_jobs job
+              SET status='CANCELLED',lease_expires_at=NULL,
+                  error_message=COALESCE(job.error_message,'所属账号已停用'),updated_at=NOW()
+            WHERE job.status IN ('QUEUED','FAILED')
+              AND EXISTS (
+                SELECT 1 FROM connector_bindings binding
+                 WHERE binding.owner_id=$1 AND binding.id::text=job.payload->>'bindingId'
+              )`,
+          [userId],
+        );
+      }
       if (updated.rows[0]) {
         await recordAudit(
           {

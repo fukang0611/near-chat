@@ -12,6 +12,12 @@ import { query, transaction } from "../database.js";
 import { ApiError } from "../http.js";
 import { searchKnowledge, type KnowledgeSource } from "../knowledge/knowledge-service.js";
 import {
+  authoritativeAssistantMessageSyncPayload,
+  type AuthoritativeAssistantMessageSyncPayload,
+} from "../sync-entity-adapter.js";
+import { lockOwnerSyncStream } from "../sync-projection.js";
+import { projectBusinessEntityForSync } from "../sync-service.js";
+import {
   type AssistantFileContext,
   type AssistantMessageFileBundle,
   linkAssistantFilesToMessage,
@@ -30,6 +36,13 @@ const ASSISTANT_LIST_LIMIT = 20;
 const ASSISTANT_MESSAGE_LIMIT = 100;
 const ASSISTANT_SOURCE_LIMIT = 6;
 
+/** 普通 REST/连接器/定时任务在持久化前统一执行跨端同步下行门禁。 */
+export function validateAssistantMessageForPersistence(
+  payload: Record<string, unknown>,
+): AuthoritativeAssistantMessageSyncPayload {
+  return authoritativeAssistantMessageSyncPayload(payload, 400);
+}
+
 export type AiAssistantCategory = "GENERAL" | "WRITING" | "ANALYSIS" | "PLANNING";
 
 export interface SaveAiAssistantInput {
@@ -43,7 +56,7 @@ export interface SaveAiAssistantInput {
   toolGrants: AssistantRetrievalGrants;
 }
 
-export type UpdateAiAssistantInput = Partial<SaveAiAssistantInput>;
+export type UpdateAiAssistantInput = Partial<SaveAiAssistantInput> & { baseRevision: number };
 
 interface AssistantRow {
   id: string;
@@ -59,6 +72,7 @@ interface AssistantRow {
   knowledge_base_ids: string[];
   cross_conversation_search: boolean;
   private_memory_read: boolean;
+  revision: number;
   message_count: string;
   last_message_at: Date | null;
   created_at: Date;
@@ -75,6 +89,7 @@ interface AssistantMessageRow {
   model_name: string | null;
   provider_model: string | null;
   sources: KnowledgeSource[];
+  revision: number;
   created_at: Date;
 }
 
@@ -93,6 +108,7 @@ interface AssistantContextSourceRow {
 const ASSISTANT_COLUMNS = `
   assistant.id, assistant.owner_id, assistant.name, assistant.description,
   assistant.category, assistant.instructions, assistant.avatar_color, assistant.model_id,
+  assistant.revision,
   model.name AS model_name, model.provider_model,
   COALESCE(
     (SELECT array_agg(binding.knowledge_base_id ORDER BY binding.knowledge_base_id)
@@ -113,9 +129,9 @@ const ASSISTANT_COLUMNS = `
     FALSE
   ) AS private_memory_read,
   (SELECT COUNT(*)::text FROM ai_assistant_messages message
-    WHERE message.assistant_id = assistant.id) AS message_count,
+    WHERE message.assistant_id = assistant.id AND message.deleted_at IS NULL) AS message_count,
   (SELECT MAX(message.created_at) FROM ai_assistant_messages message
-    WHERE message.assistant_id = assistant.id) AS last_message_at,
+    WHERE message.assistant_id = assistant.id AND message.deleted_at IS NULL) AS last_message_at,
   assistant.created_at, assistant.updated_at`;
 
 function publicAssistant(row: AssistantRow) {
@@ -136,6 +152,7 @@ function publicAssistant(row: AssistantRow) {
       crossConversationSearch: row.cross_conversation_search,
       privateMemoryRead: row.private_memory_read,
     },
+    revision: row.revision,
     messageCount: Number(row.message_count),
     lastMessageAt: row.last_message_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
@@ -159,6 +176,7 @@ function publicMessage(
         ? { id: row.model_id, name: row.model_name, providerModel: row.provider_model }
         : null,
     sources: Array.isArray(row.sources) ? row.sources : [],
+    revision: row.revision,
     contextSources,
     referencedFiles: files.referencedFiles,
     generatedFiles: files.generatedFiles,
@@ -207,7 +225,8 @@ async function selectAssistant(
                  FROM ai_assistants assistant
                  LEFT JOIN ai_model_configs model
                    ON model.id = assistant.model_id AND model.enabled = TRUE
-                WHERE assistant.id = $1 AND assistant.owner_id = $2${lock ? " FOR UPDATE OF assistant" : ""}`;
+                WHERE assistant.id = $1 AND assistant.owner_id = $2
+                  AND assistant.deleted_at IS NULL${lock ? " FOR UPDATE OF assistant" : ""}`;
   const result = client
     ? await client.query<AssistantRow>(sql, [assistantId, userId])
     : await query<AssistantRow>(sql, [assistantId, userId]);
@@ -368,10 +387,10 @@ export async function listAiAssistants(userId: string) {
        FROM ai_assistants assistant
        LEFT JOIN ai_model_configs model
          ON model.id = assistant.model_id AND model.enabled = TRUE
-      WHERE assistant.owner_id = $1
+      WHERE assistant.owner_id = $1 AND assistant.deleted_at IS NULL
       ORDER BY COALESCE(
                  (SELECT MAX(message.created_at) FROM ai_assistant_messages message
-                   WHERE message.assistant_id = assistant.id),
+                   WHERE message.assistant_id = assistant.id AND message.deleted_at IS NULL),
                  assistant.updated_at
                ) DESC,
                assistant.created_at DESC`,
@@ -382,8 +401,10 @@ export async function listAiAssistants(userId: string) {
 
 export async function createAiAssistant(userId: string, input: SaveAiAssistantInput) {
   return transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     const count = await client.query<{ total: string }>(
-      `SELECT COUNT(*)::text AS total FROM ai_assistants WHERE owner_id = $1`,
+      `SELECT COUNT(*)::text AS total FROM ai_assistants
+        WHERE owner_id = $1 AND deleted_at IS NULL`,
       [userId],
     );
     if (Number(count.rows[0]?.total ?? 0) >= ASSISTANT_LIST_LIMIT) {
@@ -408,9 +429,11 @@ export async function createAiAssistant(userId: string, input: SaveAiAssistantIn
         input.modelId,
       ],
     );
-    await createDefaultAiAssistantThread(client, userId, assistantId);
+    const defaultThreadId = await createDefaultAiAssistantThread(client, userId, assistantId);
     await replaceKnowledgeBindings(client, assistantId, input.knowledgeBaseIds);
     await upsertToolGrants(client, userId, assistantId, input.toolGrants);
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", defaultThreadId);
     return publicAssistant(await selectAssistant(userId, assistantId, client));
   });
 }
@@ -421,7 +444,11 @@ export async function updateAiAssistant(
   input: UpdateAiAssistantInput,
 ) {
   return transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     const current = await selectAssistant(userId, assistantId, client, true);
+    if (current.revision !== input.baseRevision) {
+      throw new ApiError(409, "这个助理已在其他终端更新，请刷新后再保存");
+    }
     const modelId = input.modelId === undefined ? current.model_id : input.modelId;
     const knowledgeBaseIds = input.knowledgeBaseIds ?? current.knowledge_base_ids;
     if (input.modelId !== undefined) await validateModel(client, modelId);
@@ -430,8 +457,8 @@ export async function updateAiAssistant(
     await client.query(
       `UPDATE ai_assistants
           SET name = $3, description = $4, category = $5, instructions = $6,
-              avatar_color = $7, model_id = $8, updated_at = NOW()
-        WHERE id = $1 AND owner_id = $2`,
+              avatar_color = $7, model_id = $8, revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
       [
         assistantId,
         userId,
@@ -449,12 +476,37 @@ export async function updateAiAssistant(
     if (input.toolGrants !== undefined) {
       await upsertToolGrants(client, userId, assistantId, input.toolGrants);
     }
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
     return publicAssistant(await selectAssistant(userId, assistantId, client));
   });
 }
 
-export async function deleteAiAssistant(userId: string, assistantId: string): Promise<void> {
+export async function deleteAiAssistant(
+  userId: string,
+  assistantId: string,
+  baseRevision: number,
+): Promise<void> {
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
+    const assistant = await selectAssistant(userId, assistantId, client, true);
+    if (assistant.revision !== baseRevision) {
+      throw new ApiError(409, "这个助理已在其他终端更新，请刷新后再删除");
+    }
+    const threads = await client.query<{ id: string }>(
+      `SELECT id FROM ai_assistant_threads
+        WHERE assistant_id = $1 AND owner_id = $2
+        ORDER BY id
+        FOR UPDATE`,
+      [assistantId, userId],
+    );
+    const messages = await client.query<{ id: string }>(
+      `SELECT message.id
+         FROM ai_assistant_messages message
+        WHERE message.assistant_id = $1
+        ORDER BY message.id
+        FOR UPDATE`,
+      [assistantId],
+    );
     const attachments = await client.query<{ attachment_id: string }>(
       `SELECT assistant_file.attachment_id
          FROM ai_assistant_files assistant_file
@@ -463,8 +515,18 @@ export async function deleteAiAssistant(userId: string, assistantId: string): Pr
         FOR SHARE OF assistant_file`,
       [assistantId, userId],
     );
+    // 先投影仍存在的父子业务行，硬删触发 FK 级联后才能为每个实体生成可靠 tombstone。
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
+    for (const thread of threads.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", thread.id);
+    }
+    for (const message of messages.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", message.id);
+    }
     const result = await client.query(
-      `DELETE FROM ai_assistants WHERE id = $1 AND owner_id = $2 RETURNING id`,
+      `DELETE FROM ai_assistants
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+        RETURNING id`,
       [assistantId, userId],
     );
     if (!result.rows[0]) throw new ApiError(404, "智能助理不存在");
@@ -472,6 +534,13 @@ export async function deleteAiAssistant(userId: string, assistantId: string): Pr
       client,
       attachments.rows.map((row) => row.attachment_id),
     );
+    for (const message of messages.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", message.id);
+    }
+    for (const thread of threads.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", thread.id);
+    }
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
   });
   await closeAiAssistantBrowserSessions(userId, assistantId);
 }
@@ -487,15 +556,16 @@ export async function listAiAssistantMessages(
     `SELECT timeline.id, timeline.assistant_id, timeline.thread_id,
             timeline.role, timeline.content,
             timeline.model_id, timeline.model_name, timeline.provider_model,
-            timeline.sources, timeline.created_at
+            timeline.sources, timeline.revision, timeline.created_at
        FROM (
          SELECT message.id, message.assistant_id, message.thread_id,
                 message.role, message.content,
                 message.model_id, model.name AS model_name, model.provider_model,
-                message.sources, message.created_at
+                message.sources, message.revision, message.created_at
            FROM ai_assistant_messages message
            LEFT JOIN ai_model_configs model ON model.id = message.model_id
           WHERE message.assistant_id = $1 AND message.thread_id = $2
+            AND message.deleted_at IS NULL
           ORDER BY message.created_at DESC, message.id DESC
           LIMIT $3
        ) timeline
@@ -516,18 +586,52 @@ export async function clearAiAssistantMessages(
   userId: string,
   assistantId: string,
   threadId: string,
+  baseRevision: number,
 ): Promise<void> {
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     await selectAssistant(userId, assistantId, client, true);
-    await requireActiveAiAssistantThread(userId, assistantId, threadId, client, true);
+    const thread = await requireActiveAiAssistantThread(
+      userId,
+      assistantId,
+      threadId,
+      client,
+      true,
+    );
+    if (thread.revision !== baseRevision) {
+      throw new ApiError(409, "这条助理对话已在其他终端更新，请刷新后再清空");
+    }
+    const existing = await client.query<{ id: string }>(
+      `SELECT id FROM ai_assistant_messages
+        WHERE assistant_id = $1 AND thread_id = $2 AND deleted_at IS NULL
+        ORDER BY created_at, id
+        FOR UPDATE`,
+      [assistantId, threadId],
+    );
+    for (const message of existing.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", message.id);
+    }
     await client.query(
       `DELETE FROM ai_assistant_messages WHERE assistant_id = $1 AND thread_id = $2`,
       [assistantId, threadId],
     );
-    await client.query(`UPDATE ai_assistant_threads SET updated_at = NOW() WHERE id = $1`, [
-      threadId,
-    ]);
-    await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
+    for (const message of existing.rows) {
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", message.id);
+    }
+    await client.query(
+      `UPDATE ai_assistant_threads
+          SET revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+      [threadId, userId],
+    );
+    await client.query(
+      `UPDATE ai_assistants
+          SET revision = revision + 1, updated_at = NOW()
+        WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+      [assistantId, userId],
+    );
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", threadId);
+    await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
   });
 }
 
@@ -615,6 +719,42 @@ async function saveAssistantContextSources(
   }
 }
 
+async function persistedConnectorEventMessages(
+  connectorEventId: string,
+  assistantId: string,
+  threadId: string,
+): Promise<ReturnType<typeof publicMessage>[] | null> {
+  const result = await query<AssistantMessageRow>(
+    `SELECT message.id,message.assistant_id,message.thread_id,message.role,message.content,
+            message.model_id,model.name AS model_name,model.provider_model,
+            message.sources,message.revision,message.created_at
+       FROM ai_assistant_messages message
+       LEFT JOIN ai_model_configs model ON model.id=message.model_id
+      WHERE message.connector_event_id=$1 AND message.deleted_at IS NULL
+      ORDER BY message.created_at,message.id`,
+    [connectorEventId],
+  );
+  if (result.rows.length === 0) return null;
+  if (
+    result.rows.length !== 2 ||
+    result.rows.some(
+      (message) => message.assistant_id !== assistantId || message.thread_id !== threadId,
+    ) ||
+    !result.rows.some((message) => message.role === "USER") ||
+    !result.rows.some((message) => message.role === "ASSISTANT")
+  ) {
+    throw new Error("连接器事件已关联到不完整或不一致的助理消息");
+  }
+  const messageIds = result.rows.map((message) => message.id);
+  const [bundles, contextSources] = await Promise.all([
+    loadAssistantMessageFileBundles(assistantId, messageIds),
+    loadAssistantContextSources(messageIds),
+  ]);
+  return result.rows.map((message) =>
+    publicMessage(message, bundles.get(message.id), contextSources.get(message.id)),
+  );
+}
+
 async function generateAndSaveAssistantReply(
   userId: string,
   assistantId: string,
@@ -622,9 +762,18 @@ async function generateAndSaveAssistantReply(
   content: string,
   includeHistory: boolean,
   fileIds: string[] = [],
+  connectorEventId?: string,
 ) {
   const assistant = await selectAssistant(userId, assistantId);
   await requireActiveAiAssistantThread(userId, assistantId, threadId);
+  if (connectorEventId) {
+    const persisted = await persistedConnectorEventMessages(
+      connectorEventId,
+      assistantId,
+      threadId,
+    );
+    if (persisted) return { assistantName: assistant.name, messages: persisted };
+  }
   const modelId = await resolveUserAiModelId(userId, assistant.model_id ?? undefined);
   if (!modelId) throw new ApiError(503, "当前没有可用的对话模型");
 
@@ -634,6 +783,7 @@ async function generateAndSaveAssistantReply(
           `SELECT role, content
              FROM ai_assistant_messages
             WHERE assistant_id = $1 AND thread_id = $2
+              AND deleted_at IS NULL
             ORDER BY created_at DESC, id DESC
             LIMIT $3`,
           [assistantId, threadId, ASSISTANT_HISTORY_LIMIT],
@@ -654,58 +804,107 @@ async function generateAndSaveAssistantReply(
     toolContext,
   });
 
-  const messages = await transaction(async (client) => {
-    // 生成期间用户可能删除助理；写入前重新校验，避免留下孤立消息。
-    await selectAssistant(userId, assistantId, client, true);
-    await requireActiveAiAssistantThread(userId, assistantId, threadId, client, true);
-    const userMessageId = randomUUID();
-    const assistantMessageId = randomUUID();
-    const userCreatedAt = new Date();
-    const assistantCreatedAt = new Date(userCreatedAt.getTime() + 1);
-    await client.query(
-      `INSERT INTO ai_assistant_messages
-         (id, assistant_id, thread_id, role, content, model_id, sources, created_at)
-       VALUES ($1, $2, $3, 'USER', $4, NULL, '[]'::jsonb, $5),
-              ($6, $2, $3, 'ASSISTANT', $7, $8, $9::jsonb, $10)`,
-      [
-        userMessageId,
+  const userMessageId = randomUUID();
+  const assistantMessageId = randomUUID();
+  const userCreatedAt = new Date();
+  const assistantCreatedAt = new Date(userCreatedAt.getTime() + 1);
+  const userSyncPayload = validateAssistantMessageForPersistence({
+    id: userMessageId,
+    assistantId,
+    threadId,
+    role: "USER",
+    content,
+    modelId: null,
+    sources: [],
+    revision: 1,
+    createdAt: userCreatedAt.toISOString(),
+  });
+  const assistantSyncPayload = validateAssistantMessageForPersistence({
+    id: assistantMessageId,
+    assistantId,
+    threadId,
+    role: "ASSISTANT",
+    content: reply.text,
+    modelId,
+    sources,
+    revision: 1,
+    createdAt: assistantCreatedAt.toISOString(),
+  });
+
+  let messages: ReturnType<typeof publicMessage>[];
+  try {
+    messages = await transaction(async (client) => {
+      await lockOwnerSyncStream(client, userId);
+      // 生成期间用户可能删除助理；写入前重新校验，避免留下孤立消息。
+      await selectAssistant(userId, assistantId, client, true);
+      await requireActiveAiAssistantThread(userId, assistantId, threadId, client, true);
+      await client.query(
+        `INSERT INTO ai_assistant_messages
+           (id,assistant_id,thread_id,role,content,model_id,sources,created_at,connector_event_id)
+         VALUES ($1,$2,$3,'USER',$4,NULL,'[]'::jsonb,$5,$11),
+                ($6,$2,$3,'ASSISTANT',$7,$8,$9::jsonb,$10,$11)`,
+        [
+          userMessageId,
+          assistantId,
+          threadId,
+          userSyncPayload.content,
+          userCreatedAt,
+          assistantMessageId,
+          assistantSyncPayload.content,
+          modelId,
+          JSON.stringify(assistantSyncPayload.sources),
+          assistantCreatedAt,
+          connectorEventId ?? null,
+        ],
+      );
+      await linkAssistantFilesToMessage(client, assistantId, userMessageId, fileIds);
+      await saveAssistantContextSources(client, assistantMessageId, reply.contextSources);
+      await client.query(
+        `UPDATE ai_assistant_threads
+            SET revision = revision + 1, updated_at = NOW()
+          WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+        [threadId, userId],
+      );
+      await client.query(
+        `UPDATE ai_assistants
+            SET revision = revision + 1, updated_at = NOW()
+          WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL`,
+        [assistantId, userId],
+      );
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", userMessageId);
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_MESSAGE", assistantMessageId);
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT_THREAD", threadId);
+      await projectBusinessEntityForSync(client, userId, "ASSISTANT", assistantId);
+      const saved = await client.query<AssistantMessageRow>(
+        `SELECT message.id,message.assistant_id,message.thread_id,message.role,message.content,
+                message.model_id,model.name AS model_name,model.provider_model,
+                message.sources,message.revision,message.created_at
+           FROM ai_assistant_messages message
+           LEFT JOIN ai_model_configs model ON model.id=message.model_id
+          WHERE message.id=ANY($1::uuid[])
+          ORDER BY message.created_at,message.id`,
+        [[userMessageId, assistantMessageId]],
+      );
+      const messageIds = saved.rows.map((message) => message.id);
+      const [bundles, contextSources] = await Promise.all([
+        loadAssistantMessageFileBundles(assistantId, messageIds, client),
+        loadAssistantContextSources(messageIds, client),
+      ]);
+      return saved.rows.map((message) =>
+        publicMessage(message, bundles.get(message.id), contextSources.get(message.id)),
+      );
+    });
+  } catch (error) {
+    if (connectorEventId && (error as { code?: string }).code === "23505") {
+      const persisted = await persistedConnectorEventMessages(
+        connectorEventId,
         assistantId,
         threadId,
-        content,
-        userCreatedAt,
-        assistantMessageId,
-        reply.text,
-        modelId,
-        JSON.stringify(sources),
-        assistantCreatedAt,
-      ],
-    );
-    await linkAssistantFilesToMessage(client, assistantId, userMessageId, fileIds);
-    await saveAssistantContextSources(client, assistantMessageId, reply.contextSources);
-    await client.query(`UPDATE ai_assistant_threads SET updated_at = NOW() WHERE id = $1`, [
-      threadId,
-    ]);
-    await client.query(`UPDATE ai_assistants SET updated_at = NOW() WHERE id = $1`, [assistantId]);
-    const messages = await client.query<AssistantMessageRow>(
-      `SELECT message.id, message.assistant_id, message.thread_id,
-              message.role, message.content,
-              message.model_id, model.name AS model_name, model.provider_model,
-              message.sources, message.created_at
-         FROM ai_assistant_messages message
-         LEFT JOIN ai_model_configs model ON model.id = message.model_id
-        WHERE message.id = ANY($1::uuid[])
-        ORDER BY message.created_at, message.id`,
-      [[userMessageId, assistantMessageId]],
-    );
-    const messageIds = messages.rows.map((message) => message.id);
-    const [bundles, contextSources] = await Promise.all([
-      loadAssistantMessageFileBundles(assistantId, messageIds, client),
-      loadAssistantContextSources(messageIds, client),
-    ]);
-    return messages.rows.map((message) =>
-      publicMessage(message, bundles.get(message.id), contextSources.get(message.id)),
-    );
-  });
+      );
+      if (persisted) return { assistantName: assistant.name, messages: persisted };
+    }
+    throw error;
+  }
   return { assistantName: assistant.name, messages };
 }
 
@@ -718,6 +917,27 @@ export async function sendAiAssistantMessage(
 ) {
   return (
     await generateAndSaveAssistantReply(userId, assistantId, threadId, content, true, fileIds)
+  ).messages;
+}
+
+/** 连接器事件重试时优先复用已提交的 USER/ASSISTANT 消息，不会再次调用模型。 */
+export async function sendAiAssistantMessageFromConnectorEvent(
+  userId: string,
+  assistantId: string,
+  threadId: string,
+  content: string,
+  connectorEventId: string,
+) {
+  return (
+    await generateAndSaveAssistantReply(
+      userId,
+      assistantId,
+      threadId,
+      content,
+      true,
+      [],
+      connectorEventId,
+    )
   ).messages;
 }
 

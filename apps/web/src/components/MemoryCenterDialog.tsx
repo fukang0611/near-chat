@@ -309,7 +309,7 @@ export function MemoryCenterDialog({
     setSaving(true);
     setSaveError("");
     try {
-      await api.forgetMemory(selectedMemory.id);
+      await api.forgetMemory(selectedMemory.id, selectedMemory.revision);
       const remaining = memories.filter((memory) => memory.id !== selectedMemory.id);
       setMemories(remaining);
       setTotal((current) => Math.max(0, current - 1));
@@ -318,6 +318,7 @@ export function MemoryCenterDialog({
       onNotify?.("已遗忘这条记忆", "success");
     } catch (forgetFailure) {
       setSaveError(errorMessage(forgetFailure, "暂时无法遗忘这条记忆"));
+      if (forgetFailure instanceof ApiError && forgetFailure.status === 409) await loadMemories();
     } finally {
       setSaving(false);
     }

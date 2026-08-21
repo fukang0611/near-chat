@@ -21,6 +21,8 @@ import {
 import { config } from "./config.js";
 import { query, transaction } from "./database.js";
 import { ApiError } from "./http.js";
+import { lockOwnerSyncStream, lockOwnerSyncStreams } from "./sync-projection.js";
+import { projectBusinessEntityForSync } from "./sync-service.js";
 
 interface MemoryRow {
   id: string;
@@ -324,6 +326,7 @@ export async function createManualMemory(
   const memoryId = randomUUID();
   const tier = input.tier ?? "LONG_TERM";
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     await client.query(
       `INSERT INTO memories
          (id, owner_id, tier, scope, kind, title, content, importance, expires_at)
@@ -343,6 +346,7 @@ export async function createManualMemory(
        VALUES ($1, $2, 'MANUAL', '用户手动创建', NOW())`,
       [randomUUID(), memoryId],
     );
+    await projectBusinessEntityForSync(client, userId, "MEMORY", memoryId);
   });
   const memory = await activeMemoryById(userId, memoryId);
   enqueueMemoryVector(userId, memory);
@@ -746,6 +750,7 @@ export async function acceptMemoryCandidate(
 ): Promise<MemoryRecord> {
   const memoryId = randomUUID();
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     const result = await client.query<MemoryCandidateRow>(
       `${memoryCandidateSelect}
         WHERE candidate.id = $1 AND candidate.owner_id = $2
@@ -807,6 +812,7 @@ export async function acceptMemoryCandidate(
         WHERE id = $1`,
       [candidateId],
     );
+    await projectBusinessEntityForSync(client, userId, "MEMORY", memoryId);
   });
   const memory = await activeMemoryById(userId, memoryId);
   enqueueMemoryVector(userId, memory);
@@ -855,6 +861,7 @@ export async function updateMemory(
   input: UpdateMemoryInput,
 ): Promise<MemoryRecord> {
   await transaction(async (client) => {
+    await lockOwnerSyncStream(client, userId);
     const existing = await client.query<MutableMemoryRow>(
       `SELECT id, kind, title, content, importance::int, revision, status
          FROM memories
@@ -903,6 +910,7 @@ export async function updateMemory(
         userId,
       ],
     );
+    await projectBusinessEntityForSync(client, userId, "MEMORY", memoryId);
   });
   const memory = await activeMemoryById(userId, memoryId);
   enqueueMemoryVector(userId, memory);
@@ -910,45 +918,61 @@ export async function updateMemory(
 }
 
 /** 采用软删除并追加 FORGET 修订，后续可实现合规审计和跨终端同步。 */
-export async function forgetMemory(userId: string, memoryId: string): Promise<void> {
-  await transaction(async (client) => {
-    const existing = await client.query<MutableMemoryRow>(
-      `SELECT id, kind, title, content, importance::int, revision, status
-         FROM memories
-        WHERE id = $1 AND owner_id = $2
-        FOR UPDATE`,
-      [memoryId, userId],
-    );
-    const memory = existing.rows[0];
-    if (!memory || memory.status !== "ACTIVE") {
-      throw new ApiError(404, "记忆不存在或已被遗忘");
-    }
-    const nextRevision = memory.revision + 1;
-    await client.query(
-      `UPDATE memories
-          SET status = 'DELETED',
-              revision = $3,
-              updated_at = NOW(),
-              deleted_at = NOW()
-        WHERE id = $1 AND owner_id = $2`,
-      [memoryId, userId, nextRevision],
-    );
-    await client.query(
-      `INSERT INTO memory_revisions
-         (id, memory_id, revision, kind, title, content, importance, change_type, changed_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'FORGET', $8)`,
-      [
-        randomUUID(),
-        memoryId,
-        nextRevision,
-        memory.kind,
-        memory.title,
-        memory.content,
-        memory.importance,
-        userId,
-      ],
-    );
-  });
+export async function forgetMemoryWithClient(
+  client: import("pg").PoolClient,
+  userId: string,
+  memoryId: string,
+  baseRevision: number,
+): Promise<void> {
+  await lockOwnerSyncStream(client, userId);
+  const existing = await client.query<MutableMemoryRow>(
+    `SELECT id, kind, title, content, importance::int, revision, status
+       FROM memories
+      WHERE id = $1 AND owner_id = $2
+      FOR UPDATE`,
+    [memoryId, userId],
+  );
+  const memory = existing.rows[0];
+  if (!memory || memory.status !== "ACTIVE") {
+    throw new ApiError(404, "记忆不存在或已被遗忘");
+  }
+  if (memory.revision !== baseRevision) {
+    throw new ApiError(409, "这条记忆已在其他终端更新，请刷新后再遗忘");
+  }
+  const nextRevision = memory.revision + 1;
+  await client.query(
+    `UPDATE memories
+        SET status = 'DELETED',
+            revision = $3,
+            updated_at = NOW(),
+            deleted_at = NOW()
+      WHERE id = $1 AND owner_id = $2`,
+    [memoryId, userId, nextRevision],
+  );
+  await client.query(
+    `INSERT INTO memory_revisions
+       (id, memory_id, revision, kind, title, content, importance, change_type, changed_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'FORGET', $8)`,
+    [
+      randomUUID(),
+      memoryId,
+      nextRevision,
+      memory.kind,
+      memory.title,
+      memory.content,
+      memory.importance,
+      userId,
+    ],
+  );
+  await projectBusinessEntityForSync(client, userId, "MEMORY", memoryId);
+}
+
+export async function forgetMemory(
+  userId: string,
+  memoryId: string,
+  baseRevision: number,
+): Promise<void> {
+  await transaction((client) => forgetMemoryWithClient(client, userId, memoryId, baseRevision));
   enqueueMemoryVectorDeletion(memoryId);
 }
 
@@ -957,15 +981,37 @@ export async function forgetMemory(userId: string, memoryId: string): Promise<vo
  * 此任务完全不依赖模型，即使 AI 关闭也会持续执行。
  */
 export async function archiveExpiredShortTermMemories(): Promise<number> {
-  const archived = await query<{ id: string }>(
-    `UPDATE memories
-        SET status = 'ARCHIVED', updated_at = NOW()
-      WHERE tier = 'SHORT_TERM'
-        AND status = 'ACTIVE'
-        AND expires_at IS NOT NULL
-        AND expires_at <= NOW()
-      RETURNING id`,
-  );
-  for (const memory of archived.rows) enqueueMemoryVectorDeletion(memory.id);
-  return archived.rows.length;
+  const archived = await transaction(async (client) => {
+    // 先做无锁候选读取，再按 owner 排序获取 stream 锁；后续 UPDATE 只触及已锁 owner。
+    // 读取后才变为到期的其他 owner 会留给下一轮，不能在未持锁时顺带更新。
+    const owners = await client.query<{ owner_id: string }>(
+      `SELECT DISTINCT owner_id
+         FROM memories
+        WHERE tier = 'SHORT_TERM'
+          AND status = 'ACTIVE'
+          AND expires_at IS NOT NULL
+          AND expires_at <= NOW()
+        ORDER BY owner_id`,
+    );
+    const ownerIds = owners.rows.map((row) => row.owner_id);
+    if (ownerIds.length === 0) return [];
+    await lockOwnerSyncStreams(client, ownerIds);
+    const result = await client.query<{ id: string; owner_id: string }>(
+      `UPDATE memories
+          SET status = 'ARCHIVED', revision = revision + 1, updated_at = NOW()
+        WHERE tier = 'SHORT_TERM'
+          AND status = 'ACTIVE'
+          AND expires_at IS NOT NULL
+          AND expires_at <= NOW()
+          AND owner_id = ANY($1::uuid[])
+        RETURNING id, owner_id`,
+      [ownerIds],
+    );
+    for (const memory of result.rows) {
+      await projectBusinessEntityForSync(client, memory.owner_id, "MEMORY", memory.id);
+    }
+    return result.rows;
+  });
+  for (const memory of archived) enqueueMemoryVectorDeletion(memory.id);
+  return archived.length;
 }

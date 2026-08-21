@@ -53,6 +53,7 @@ import { ApiError, currentUser } from "../http.js";
 const idSchema = z.string().uuid();
 const categorySchema = z.enum(["GENERAL", "WRITING", "ANALYSIS", "PLANNING"]);
 const avatarColorSchema = z.string().regex(/^#[0-9A-F]{6}$/i, "头像颜色格式不正确");
+const baseRevisionSchema = z.number().int().positive("版本号必须是正整数");
 const knowledgeBaseIdsSchema = z
   .array(z.string().uuid())
   .max(10, "一个助理最多绑定 10 个知识库")
@@ -83,6 +84,7 @@ const assistantFields = {
 const createAssistantSchema = z.object(assistantFields);
 const updateAssistantSchema = z
   .object({
+    baseRevision: baseRevisionSchema,
     name: assistantFields.name.optional(),
     description: assistantFields.description.optional(),
     category: assistantFields.category.optional(),
@@ -92,7 +94,18 @@ const updateAssistantSchema = z
     knowledgeBaseIds: assistantFields.knowledgeBaseIds.optional(),
     toolGrants: assistantFields.toolGrants.optional(),
   })
-  .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
+  .refine(
+    (input) =>
+      input.name !== undefined ||
+      input.description !== undefined ||
+      input.category !== undefined ||
+      input.instructions !== undefined ||
+      input.avatarColor !== undefined ||
+      input.modelId !== undefined ||
+      input.knowledgeBaseIds !== undefined ||
+      input.toolGrants !== undefined,
+    "没有需要更新的内容",
+  );
 const sendMessageSchema = z.object({
   content: z.string().trim().min(1, "请输入消息").max(4000, "消息不能超过 4000 个字"),
   fileIds: z
@@ -106,10 +119,15 @@ const createThreadSchema = z.object({
 });
 const updateThreadSchema = z
   .object({
+    baseRevision: baseRevisionSchema,
     title: createThreadSchema.shape.title.optional(),
     archived: z.boolean().optional(),
   })
-  .refine((input) => Object.keys(input).length > 0, "没有需要更新的内容");
+  .refine(
+    (input) => input.title !== undefined || input.archived !== undefined,
+    "没有需要更新的内容",
+  );
+const destructiveThreadSchema = z.object({ baseRevision: baseRevisionSchema });
 const addAssistantFileSchema = z.object({
   attachmentId: idSchema,
   origin: z.enum(["CHAT", "UPLOAD"]),
@@ -226,7 +244,12 @@ export function createAssistantRouter() {
 
   router.delete("/ai/assistants/:assistantId", authenticate, async (request, response) => {
     requirePersonalAssistants();
-    await deleteAiAssistant(currentUser(request).id, idSchema.parse(request.params.assistantId));
+    const { baseRevision } = destructiveThreadSchema.parse(request.body);
+    await deleteAiAssistant(
+      currentUser(request).id,
+      idSchema.parse(request.params.assistantId),
+      baseRevision,
+    );
     response.status(204).end();
   });
 
@@ -294,6 +317,7 @@ export function createAssistantRouter() {
         currentUser(request).id,
         idSchema.parse(request.params.assistantId),
         idSchema.parse(request.params.threadId),
+        destructiveThreadSchema.parse(request.body).baseRevision,
       );
       response.status(204).end();
     },
@@ -349,6 +373,7 @@ export function createAssistantRouter() {
       currentUser(request).id,
       assistantId,
       await defaultAiAssistantThreadId(currentUser(request).id, assistantId),
+      destructiveThreadSchema.parse(request.body).baseRevision,
     );
     response.status(204).end();
   });

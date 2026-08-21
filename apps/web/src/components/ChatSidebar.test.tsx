@@ -41,6 +41,7 @@ const peer: User = {
 
 const assistant: AiAssistant = {
   id: "assistant-analysis",
+  revision: 1,
   name: "分析搭档",
   description: "帮我理清复杂信息",
   category: "ANALYSIS",

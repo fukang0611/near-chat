@@ -12,12 +12,15 @@ import { createAssistantInvocationRouter } from "./routes/assistant-invocation-r
 import { createAvatarRouter } from "./routes/avatar-routes.js";
 import { createAuthRouter } from "./routes/auth-routes.js";
 import { createChatRouter } from "./routes/chat-routes.js";
+import { createConnectorRouter } from "./routes/connector-routes.js";
 import { createFileRouter } from "./routes/file-routes.js";
 import { createMessageAssetsRouter } from "./routes/message-assets-routes.js";
 import { createMessageAiRouter } from "./routes/message-ai-routes.js";
 import { createKnowledgeRouter } from "./routes/knowledge-routes.js";
 import { createMemoryRouter } from "./routes/memory-routes.js";
+import { createPersonalRouter } from "./routes/personal-routes.js";
 import { createTeamRadarRouter } from "./routes/team-radar-routes.js";
+import { createSyncRouter } from "./routes/sync-routes.js";
 
 /**
  * 组装 NearChat HTTP 应用。
@@ -57,6 +60,9 @@ export function createApp(realtime: RealtimeHub) {
   app.use("/api", createMessageAssetsRouter());
   app.use("/api", createMessageAiRouter());
   app.use("/api", createMemoryRouter());
+  app.use("/api", createPersonalRouter());
+  app.use("/api", createSyncRouter());
+  app.use("/api", createConnectorRouter());
   app.use("/api", createKnowledgeRouter());
   app.use("/api", createAssistantRouter());
   app.use("/api", createFileRouter());

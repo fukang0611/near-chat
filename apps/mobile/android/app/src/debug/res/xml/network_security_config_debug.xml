@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 仅 debug 构建允许局域网 HTTP；release 的 Bearer/API Key 永不静默走明文。 -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

@@ -12,6 +12,7 @@ import { AssistantSchedulePanel } from "./AssistantSchedulePanel";
 
 const assistant: AiAssistant = {
   id: "11111111-1111-4111-8111-111111111111",
+  revision: 1,
   name: "日程管家",
   description: "整理计划与提醒",
   category: "PLANNING",
@@ -30,6 +31,7 @@ const assistant: AiAssistant = {
 const thread: AiAssistantThread = {
   id: "22222222-2222-4222-8222-222222222222",
   assistantId: assistant.id,
+  revision: 1,
   title: "项目推进",
   archived: false,
   isDefault: true,

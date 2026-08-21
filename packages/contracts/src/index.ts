@@ -189,28 +189,21 @@ export interface AgentRuntimeResponse {
   sourceIds: string[];
 }
 
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  callId: string;
+  name: string;
+  output: unknown;
+  error?: string;
+}
+
 export interface AgentRuntime {
   generate(request: AgentRuntimeRequest): Promise<AgentRuntimeResponse>;
   embed?(texts: string[]): Promise<number[][]>;
-}
-
-export const SYNC_ENTITY_TYPES = [
-  "MEMORY",
-  "PERSONAL_TASK",
-  "PERSONAL_REMINDER",
-  "PERSONAL_RECORD",
-  "ASSISTANT",
-  "ASSISTANT_THREAD",
-  "ASSISTANT_MESSAGE",
-] as const;
-export type SyncEntityType = (typeof SYNC_ENTITY_TYPES)[number];
-
-export interface SyncOperation<TPayload = unknown> {
-  operationId: string;
-  entityType: SyncEntityType;
-  entityId: string;
-  operation: "UPSERT" | "DELETE";
-  baseRevision: number | null;
-  payload: TPayload;
-  deviceCreatedAt: string;
+  executeTool(call: ToolCall): Promise<ToolResult>;
 }

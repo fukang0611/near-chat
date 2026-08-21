@@ -31,6 +31,17 @@ import type {
   ChatFileCategory,
   ChatFilePage,
   Conversation,
+  ConnectorBinding,
+  ConnectorConfig,
+  ConnectorDeliveryKind,
+  ConnectorIdentity,
+  ConnectorJobStatus,
+  ConnectorOperationEvent,
+  ConnectorOperationJob,
+  ConnectorOperationsHealth,
+  ConnectorOperationsCursor,
+  ConnectorProvider,
+  ConnectorEventStatus,
   FileQuota,
   Message,
   MessageAiAction,
@@ -74,6 +85,43 @@ export interface CreateUserInput {
 export interface UpdateUserInput {
   enabled?: boolean;
   displayName?: string;
+}
+
+export interface ConnectorConfigInput {
+  clientId?: string | null;
+  clientSecret?: string | null;
+  webhookUrl?: string | null;
+  callbackToken?: string | null;
+  encodingAesKey?: string | null;
+  corpId?: string | null;
+  agentId?: string | null;
+}
+
+export interface CreateConnectorInput {
+  provider: ConnectorProvider;
+  name: string;
+  enabled: boolean;
+  config: ConnectorConfigInput;
+}
+
+export interface UpdateConnectorInput {
+  name?: string;
+  enabled?: boolean;
+  revision: number;
+  config?: ConnectorConfigInput;
+}
+
+export interface SaveConnectorBindingInput {
+  id?: string;
+  ownerId: string;
+  externalConversationId: string;
+  nearChatConversationId?: string | null;
+  assistantId?: string | null;
+  deliveryKinds: ConnectorDeliveryKind[];
+  deliveryTarget?: string | null;
+  deliveryTargetExpiresAt?: string | null;
+  enabled: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateAiSettingsInput {
@@ -339,13 +387,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
-  updateAiAssistant: (assistantId: string, input: Partial<SaveAiAssistantInput>) =>
+  updateAiAssistant: (
+    assistantId: string,
+    input: Partial<SaveAiAssistantInput> & { baseRevision: number },
+  ) =>
     request<{ assistant: AiAssistant }>(`/api/ai/assistants/${assistantId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
-  deleteAiAssistant: (assistantId: string) =>
-    request<void>(`/api/ai/assistants/${assistantId}`, { method: "DELETE" }),
+  deleteAiAssistant: (assistantId: string, baseRevision: number) =>
+    request<void>(`/api/ai/assistants/${assistantId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ baseRevision }),
+    }),
   aiAssistantThreads: (assistantId: string, includeArchived = false) =>
     request<{ threads: AiAssistantThread[] }>(
       `/api/ai/assistants/${assistantId}/threads?includeArchived=${includeArchived}`,
@@ -358,7 +412,7 @@ export const api = {
   updateAiAssistantThread: (
     assistantId: string,
     threadId: string,
-    input: { title?: string; archived?: boolean },
+    input: { title?: string; archived?: boolean; baseRevision: number },
   ) =>
     request<{ thread: AiAssistantThread }>(
       `/api/ai/assistants/${assistantId}/threads/${threadId}`,
@@ -368,9 +422,10 @@ export const api = {
     request<{ messages: AiAssistantMessage[] }>(
       `/api/ai/assistants/${assistantId}/threads/${threadId}/messages`,
     ),
-  clearAiAssistantMessages: (assistantId: string, threadId: string) =>
+  clearAiAssistantMessages: (assistantId: string, threadId: string, baseRevision: number) =>
     request<void>(`/api/ai/assistants/${assistantId}/threads/${threadId}/messages`, {
       method: "DELETE",
+      body: JSON.stringify({ baseRevision }),
     }),
   sendAiAssistantMessage: (
     assistantId: string,
@@ -610,8 +665,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
-  forgetMemory: (memoryId: string) =>
-    request<void>(`/api/memories/${memoryId}`, { method: "DELETE" }),
+  forgetMemory: (memoryId: string, baseRevision: number) =>
+    request<void>(`/api/memories/${memoryId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ baseRevision }),
+    }),
   memoryCandidates: () => request<MemoryCandidatePage>("/api/memory-candidates"),
   rememberMessage: (messageId: string) =>
     request<{ candidate: MemoryCandidate; created: boolean }>(
@@ -644,6 +702,113 @@ export const api = {
   },
   adminUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
   auditLogs: () => request<{ logs: AuditLog[] }>("/api/admin/audit-logs?limit=100"),
+  adminConnectors: () => request<{ connectors: ConnectorConfig[] }>("/api/admin/connectors"),
+  createAdminConnector: (input: CreateConnectorInput) =>
+    request<{
+      connector: ConnectorConfig;
+      runtime: { running: boolean; error: string | null };
+    }>("/api/admin/connectors", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateAdminConnector: (connectorId: string, input: UpdateConnectorInput) =>
+    request<{
+      connector: ConnectorConfig;
+      runtime: { running: boolean; error: string | null };
+    }>(`/api/admin/connectors/${connectorId}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    }),
+  deleteAdminConnector: (connectorId: string) =>
+    request<void>(`/api/admin/connectors/${connectorId}`, { method: "DELETE" }),
+  connectorIdentities: (connectorId: string) =>
+    request<{ identities: ConnectorIdentity[] }>(`/api/admin/connectors/${connectorId}/identities`),
+  mapConnectorIdentity: (
+    connectorId: string,
+    externalUserId: string,
+    nearChatUserId: string | null,
+  ) =>
+    request<{ identity: ConnectorIdentity }>(`/api/admin/connectors/${connectorId}/identities`, {
+      method: "PUT",
+      body: JSON.stringify({ externalUserId, nearChatUserId }),
+    }),
+  connectorBindings: (connectorId: string) =>
+    request<{ bindings: ConnectorBinding[] }>(`/api/admin/connectors/${connectorId}/bindings`),
+  saveConnectorBinding: (connectorId: string, input: SaveConnectorBindingInput) =>
+    request<{ binding: ConnectorBinding }>(`/api/admin/connectors/${connectorId}/bindings`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteConnectorBinding: (connectorId: string, bindingId: string) =>
+    request<void>(`/api/admin/connectors/${connectorId}/bindings/${bindingId}`, {
+      method: "DELETE",
+    }),
+  connectorOperationsHealth: () =>
+    request<{ health: ConnectorOperationsHealth }>("/api/admin/connectors/operations/health"),
+  connectorOperationEvents: (
+    options: {
+      connectorId?: string;
+      status?: ConnectorEventStatus;
+      limit?: number;
+      cursor?: ConnectorOperationsCursor;
+    } = {},
+  ) => {
+    const query = new URLSearchParams({
+      status: options.status ?? "FAILED",
+      limit: String(options.limit ?? 50),
+    });
+    if (options.connectorId) query.set("connectorId", options.connectorId);
+    if (options.cursor) {
+      query.set("before", options.cursor.before);
+      query.set("beforeId", options.cursor.beforeId);
+    }
+    return request<{
+      events: ConnectorOperationEvent[];
+      nextCursor: ConnectorOperationsCursor | null;
+    }>(`/api/admin/connectors/operations/events?${query}`);
+  },
+  retryConnectorOperationEvent: (eventId: string) =>
+    request<{ event: { id: string; connectorId: string; status: ConnectorEventStatus } }>(
+      `/api/admin/connectors/operations/events/${eventId}/retry`,
+      { method: "POST" },
+    ),
+  cancelConnectorOperationEvent: (eventId: string) =>
+    request<{ event: { id: string; connectorId: string; status: ConnectorEventStatus } }>(
+      `/api/admin/connectors/operations/events/${eventId}/cancel`,
+      { method: "POST" },
+    ),
+  connectorOperationJobs: (
+    options: {
+      connectorId?: string;
+      status?: ConnectorJobStatus;
+      limit?: number;
+      cursor?: ConnectorOperationsCursor;
+    } = {},
+  ) => {
+    const query = new URLSearchParams({
+      status: options.status ?? "FAILED",
+      limit: String(options.limit ?? 50),
+    });
+    if (options.connectorId) query.set("connectorId", options.connectorId);
+    if (options.cursor) {
+      query.set("before", options.cursor.before);
+      query.set("beforeId", options.cursor.beforeId);
+    }
+    return request<{
+      jobs: ConnectorOperationJob[];
+      nextCursor: ConnectorOperationsCursor | null;
+    }>(`/api/admin/connectors/operations/jobs?${query}`);
+  },
+  retryConnectorOperationJob: (jobId: string) =>
+    request<{ job: { id: string; connectorId: string; status: ConnectorJobStatus } }>(
+      `/api/admin/connectors/operations/jobs/${jobId}/retry`,
+      { method: "POST" },
+    ),
+  cancelConnectorOperationJob: (jobId: string) =>
+    request<{ job: { id: string; connectorId: string; status: ConnectorJobStatus } }>(
+      `/api/admin/connectors/operations/jobs/${jobId}/cancel`,
+      { method: "POST" },
+    ),
   adminAiSettings: () =>
     request<{ settings: AdminAiSettings; capabilities: AiCapabilities }>("/api/admin/ai-settings"),
   updateAdminAiSettings: (input: UpdateAiSettingsInput) =>

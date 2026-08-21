@@ -181,6 +181,116 @@ export interface AdminUser extends User {
   createdAt?: string;
 }
 
+export type ConnectorProvider = "DINGTALK_STREAM" | "WECOM_WEBHOOK" | "WECOM_CALLBACK";
+
+export type ConnectorDeliveryKind = "TASK_RESULT" | "REMINDER" | "SUMMARY" | "TEXT";
+
+/** 连接器配置响应只返回“是否已配置”，不会把外部平台密钥或地址传回浏览器。 */
+export interface ConnectorConfig {
+  id: string;
+  provider: ConnectorProvider;
+  name: string;
+  enabled: boolean;
+  revision: number;
+  /** 仅由服务端 PUBLIC_BASE_URL 生成；未配置时为 null，客户端不得自行猜测。 */
+  callbackUrl: string | null;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasWebhookUrl: boolean;
+  hasCallbackToken: boolean;
+  hasEncodingAesKey: boolean;
+  hasCorpId: boolean;
+  hasAgentId: boolean;
+  runtime: {
+    running: boolean;
+    startedAt: string | null;
+    error: string | null;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConnectorIdentity {
+  id: string;
+  connectorId: string;
+  externalUserId: string;
+  nearChatUserId: string | null;
+  displayName: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface ConnectorBinding {
+  id: string;
+  connectorId: string;
+  ownerId: string;
+  externalConversationId: string;
+  nearChatConversationId: string | null;
+  assistantId: string | null;
+  deliveryKinds: ConnectorDeliveryKind[];
+  hasDeliveryTarget: boolean;
+  hasDingTalkOpenApiRoute: boolean;
+  deliveryTargetExpiresAt: string | null;
+  enabled: boolean;
+  metadata: Record<string, unknown>;
+}
+
+export type ConnectorEventStatus = "RECEIVED" | "PROCESSING" | "PROCESSED" | "FAILED" | "CANCELLED";
+
+export type ConnectorJobStatus = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+
+export interface ConnectorQueueSummary {
+  counts: Partial<Record<ConnectorEventStatus | ConnectorJobStatus, number>>;
+  total: number;
+  oldestAt: string | null;
+}
+
+export interface ConnectorOperationsHealth {
+  events: ConnectorQueueSummary;
+  jobs: ConnectorQueueSummary;
+  checkedAt: string;
+}
+
+export interface ConnectorOperationsCursor {
+  before: string;
+  beforeId: string;
+}
+
+/** 运维列表是服务端裁剪后的安全视图，不包含事件 payload、模型 result 或投递正文。 */
+export interface ConnectorOperationEvent {
+  id: string;
+  connectorId: string;
+  provider: ConnectorProvider;
+  connectorName: string;
+  externalEventId: string;
+  externalConversationId: string | null;
+  externalUserId: string | null;
+  kind: string;
+  status: ConnectorEventStatus;
+  attempts: number;
+  nextAttemptAt: string;
+  leaseExpiresAt: string | null;
+  error: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+  prepared: boolean;
+}
+
+export interface ConnectorOperationJob {
+  id: string;
+  connectorId: string;
+  provider: ConnectorProvider;
+  connectorName: string;
+  kind: string;
+  status: ConnectorJobStatus;
+  attempts: number;
+  idempotencyKey: string;
+  nextAttemptAt: string;
+  leaseExpiresAt: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FileQuota {
   usedBytes: number;
   quotaBytes: number;
@@ -353,6 +463,7 @@ export type AiAssistantCategory = "GENERAL" | "WRITING" | "ANALYSIS" | "PLANNING
 
 export interface AiAssistant {
   id: string;
+  revision: number;
   name: string;
   description: string;
   category: AiAssistantCategory;
@@ -388,6 +499,7 @@ export interface AiAssistantMessage {
 export interface AiAssistantThread {
   id: string;
   assistantId: string;
+  revision: number;
   title: string;
   archived: boolean;
   isDefault: boolean;

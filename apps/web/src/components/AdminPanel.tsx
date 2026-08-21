@@ -7,6 +7,7 @@ import {
   KeyRound,
   LoaderCircle,
   LogOut,
+  PlugZap,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -21,6 +22,7 @@ import { formatSidebarTime } from "../utils/format";
 import { errorMessage } from "../utils/errors";
 import { Avatar } from "./Avatar";
 import { AiSettingsPanel } from "./AiSettingsPanel";
+import { ConnectorSettingsPanel } from "./ConnectorSettingsPanel";
 
 type NoticeTone = "success" | "error" | "info";
 
@@ -37,7 +39,7 @@ export function AdminPanel({
   onNotify,
   onAiCapabilitiesChanged,
 }: AdminPanelProps) {
-  const [view, setView] = useState<"users" | "ai" | "logs">("users");
+  const [view, setView] = useState<"users" | "ai" | "connectors" | "logs">("users");
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,7 +104,7 @@ export function AdminPanel({
       if (event.key !== "Tab" || !drawerRef.current) return;
       const focusable = [
         ...drawerRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ),
       ];
       if (focusable.length === 0) return;
@@ -228,13 +230,24 @@ export function AdminPanel({
     ADMIN_AI_MODEL_CREATE: "添加 AI 模型",
     ADMIN_AI_MODEL_UPDATE: "更新 AI 模型",
     ADMIN_AI_MODEL_DELETE: "删除 AI 模型",
+    CONNECTOR_CONFIG_CREATE: "创建连接器",
+    CONNECTOR_CONFIG_UPDATE: "更新连接器",
+    CONNECTOR_CONFIG_DELETE: "删除连接器",
+    CONNECTOR_DELIVERY_QUEUE: "创建外部投递",
+    CONNECTOR_IDENTITY_MAP: "映射外部身份",
+    CONNECTOR_BINDING_SAVE: "保存会话绑定",
+    CONNECTOR_BINDING_DELETE: "删除会话绑定",
+    CONNECTOR_EVENT_RETRY: "重试入站事件",
+    CONNECTOR_EVENT_CANCEL: "取消入站事件",
+    CONNECTOR_JOB_RETRY: "重试主动投递",
+    CONNECTOR_JOB_CANCEL: "取消主动投递",
   };
 
   return (
     <div className="drawer-layer" role="presentation" onMouseDown={onClose}>
       <aside
         ref={drawerRef}
-        className={`admin-drawer ${view === "ai" ? "is-ai-view" : ""}`}
+        className={`admin-drawer ${view === "ai" ? "is-ai-view" : ""} ${view === "connectors" ? "is-connector-view" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-drawer-title"
@@ -247,7 +260,7 @@ export function AdminPanel({
             </span>
             <div>
               <strong id="admin-drawer-title">管理中心</strong>
-              <small>管理局域网账号、AI 服务与操作记录</small>
+              <small>管理账号、AI 服务、外部连接器与操作记录</small>
             </div>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="关闭用户管理">
@@ -283,6 +296,15 @@ export function AdminPanel({
           )}
 
           <div className="admin-tabs" role="tablist" aria-label="管理中心导航">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "connectors"}
+              className={view === "connectors" ? "is-active" : ""}
+              onClick={() => setView("connectors")}
+            >
+              <PlugZap size={15} /> 连接器
+            </button>
             <button
               type="button"
               role="tab"
@@ -521,6 +543,8 @@ export function AdminPanel({
                 })
               )}
             </div>
+          ) : view === "connectors" ? (
+            <ConnectorSettingsPanel currentUser={currentUser} users={users} onNotify={onNotify} />
           ) : (
             <AiSettingsPanel onNotify={onNotify} onCapabilitiesChanged={onAiCapabilitiesChanged} />
           )}
